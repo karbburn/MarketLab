@@ -13,15 +13,19 @@ import {
   CloudArrowDown,
   List,
   X,
+  MagnifyingGlass,
 } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { Toaster } from './ui';
 import { datasetViews, hasSyntheticData } from '../state/selectors';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ImportDialog } from './data/ImportDialog';
 import { DownloadDialog } from './data/DownloadDialog';
 import { BulkDownloadDialog } from './data/BulkDownloadDialog';
+import { CommandPalette } from './command-palette/CommandPalette';
 import { BULK_DOWNLOAD_DATA_EVENT, DOWNLOAD_DATA_EVENT, IMPORT_DATA_EVENT } from '../lib/ui-events';
+import { APP_ROUTES, NAV_GROUP_PATHS, appRouteTitle } from '../lib/navigation';
+import { isPaletteShortcut, isMacPlatform, shortcutLabel } from '../lib/command-palette/platform';
 
 interface NavEntry {
   to: string;
@@ -30,40 +34,24 @@ interface NavEntry {
   end?: boolean;
 }
 
-const NAV_GROUPS: Array<{ label: string; entries: NavEntry[] }> = [
-  {
-    label: 'Terminal',
-    entries: [
-      { to: '/', label: 'Overview', icon: SquaresFour, end: true },
-      { to: '/chart', label: 'Chart workspace', icon: ChartLineUp },
-    ],
-  },
-  {
-    label: 'Research',
-    entries: [
-      { to: '/quant', label: 'Quant lab', icon: Flask },
-      { to: '/screener', label: 'Screener', icon: FunnelSimple },
-      { to: '/backtest', label: 'Backtest', icon: PlayCircle },
-    ],
-  },
-  {
-    label: 'Library',
-    entries: [
-      { to: '/data', label: 'Data', icon: Database },
-      { to: '/workspaces', label: 'Workspaces', icon: Stack },
-    ],
-  },
-];
-
-const TITLES: Record<string, string> = {
-  '/': 'Overview',
-  '/chart': 'Chart workspace',
-  '/quant': 'Quant lab',
-  '/screener': 'Historical screener',
-  '/backtest': 'Rule-based backtest',
-  '/data': 'Data library',
-  '/workspaces': 'Workspaces and settings',
+/** Sidebar icons, keyed by route path so the route list stays in one place. */
+const NAV_ICONS: Record<string, typeof ChartLineUp> = {
+  '/': SquaresFour,
+  '/chart': ChartLineUp,
+  '/quant': Flask,
+  '/screener': FunnelSimple,
+  '/backtest': PlayCircle,
+  '/data': Database,
+  '/workspaces': Stack,
 };
+
+const NAV_GROUPS: Array<{ label: string; entries: NavEntry[] }> = NAV_GROUP_PATHS.map((group) => ({
+  label: group.label,
+  entries: group.paths
+    .map((path) => APP_ROUTES.find((route) => route.path === path))
+    .filter((route): route is (typeof APP_ROUTES)[number] => route !== undefined)
+    .map((route) => ({ to: route.path, label: route.label, icon: NAV_ICONS[route.path] ?? SquaresFour, end: route.end })),
+}));
 
 // Below this width the sidebar becomes an off-canvas drawer; above it the
 // sidebar is docked and the same control collapses it instead.
@@ -91,11 +79,14 @@ export function AppShell() {
   const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const narrow = useNarrowNav();
 
   const views = datasetViews(state);
   const synthetic = hasSyntheticData(state);
-  const title = TITLES[location.pathname] ?? 'MarketLab';
+  const title = appRouteTitle(location.pathname);
+  const isMac = useMemo(() => isMacPlatform(typeof navigator === 'undefined' ? '' : navigator.platform), []);
+  const paletteHint = shortcutLabel(isMac);
 
   // One control, two layouts: on narrow viewports it opens the drawer, on wide
   // viewports it collapses the docked sidebar.
@@ -135,6 +126,22 @@ export function AppShell() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navOpen]);
+
+  // The global palette shortcut. It deliberately ignores whether the user is
+  // typing somewhere: Ctrl/Cmd+K is the one binding that must always reach the
+  // palette. It is skipped while one of the shell's own dialogs is open, so the
+  // palette never stacks on top of a modal.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isPaletteShortcut(event)) return;
+      if (document.querySelector('.dialog')) return;
+      event.preventDefault();
+      setNavOpen(false);
+      setPaletteOpen(true);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <div className={shellClassName}>
@@ -214,6 +221,20 @@ export function AppShell() {
             </span>
           )}
           {state.adapterKind === 'memory' && <span className="tag warn">Storage unavailable: changes will not persist</span>}
+          <button
+            type="button"
+            className="button ghost sm palette-trigger"
+            aria-label={`Open the command palette (${paletteHint})`}
+            title={`Search views, actions and datasets (${paletteHint})`}
+            onClick={() => {
+              setNavOpen(false);
+              setPaletteOpen(true);
+            }}
+          >
+            <MagnifyingGlass size={13} weight="bold" aria-hidden />
+            <span className="topbar-action-label">Search</span>
+            <kbd className="palette-kbd palette-trigger-kbd">{paletteHint}</kbd>
+          </button>
           <button type="button" className="button ghost sm" aria-label="Download data" onClick={() => setDownloadOpen(true)}>
             <CloudArrowDown size={13} weight="bold" aria-hidden />
             <span className="topbar-action-label">Download data</span>
@@ -239,6 +260,7 @@ export function AppShell() {
       </div>
 
       <Toaster />
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <DownloadDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
       <BulkDownloadDialog open={bulkDownloadOpen} onClose={() => setBulkDownloadOpen(false)} />

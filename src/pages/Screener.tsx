@@ -7,6 +7,7 @@ import { datasetViews } from '../state/selectors';
 import { evaluateScreener } from '../lib/screener/evaluate';
 import { createScreenerDefinition } from '../state/defaults';
 import { createId } from '../lib/id';
+import { planDatasetActivation } from '../lib/workspace/dataset-activation';
 import { downloadTextFile } from '../lib/export/download';
 import { screenerToCsv } from '../lib/export/csv';
 import { formatPercent, formatPrice } from '../lib/format';
@@ -111,15 +112,22 @@ export function ScreenerPage() {
    * Carry a screened instrument into the research workflow. The dataset is
    * already stored, so this only re-points the first chart of the active
    * workspace and switches to it: no new import, and no change to the screen
-   * definition or its cutoff.
+   * definition or its cutoff. A dataset that is already on screen has its
+   * workspace activated instead, so the panel is not re-pointed at itself and
+   * no duplicate is created. The command palette uses the same rule.
    */
   const openInChart = (datasetId: string, instrumentId: string) => {
-    const workspace =
-      state.workspaces.find((entry) => entry.id === state.activeWorkspaceId) ?? state.workspaces[0];
-    const chart = workspace?.charts[0];
-    if (!workspace || !chart) return;
-    void actions.setActiveWorkspace(workspace.id);
-    void actions.updateChart(workspace.id, chart.id, (config) => ({ ...config, datasetId, instrumentId }));
+    const plan = planDatasetActivation({
+      workspaces: state.workspaces,
+      activeWorkspaceId: state.activeWorkspaceId,
+      datasetId,
+      knownDatasetIds: new Set(state.datasets.map((entry) => entry.id)),
+    });
+    if (plan.kind === 'unavailable') return;
+    void actions.setActiveWorkspace(plan.workspaceId);
+    if (plan.kind === 'repoint-chart') {
+      void actions.updateChart(plan.workspaceId, plan.chartId, (config) => ({ ...config, datasetId, instrumentId }));
+    }
     navigate('/chart');
   };
 
