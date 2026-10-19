@@ -33,6 +33,12 @@ export function parseCsv(text: string): ParsedCsv {
     row: typeof error.row === 'number' ? error.row + 1 : 0,
     message: error.message,
   }));
+  if (truncated) {
+    errors.push({
+      row: MAX_ROWS + 1,
+      message: `The file has ${rows.length} row(s); only the first ${MAX_ROWS} were read. Rows beyond the limit were not imported.`,
+    });
+  }
 
   return {
     headers: (result.meta?.fields ?? []).filter((field) => field && field.length > 0),

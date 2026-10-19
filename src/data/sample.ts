@@ -199,6 +199,7 @@ export function buildSampleBundles(): SampleBundle[] {
     const bars = generateSampleBars(spec);
     const first = bars[0] as Bar;
     const last = bars[bars.length - 1] as Bar;
+    const missingVolumeRows = bars.filter((bar) => bar.volume === null).length;
     const instrument: Instrument = {
       id: spec.id,
       symbol: spec.symbol,
@@ -226,7 +227,7 @@ export function buildSampleBundles(): SampleBundle[] {
         acceptedRows: bars.length,
         rejectedRows: 0,
         duplicateRows: 0,
-        missingVolumeRows: 0,
+        missingVolumeRows,
         gapCount: 0,
         sortCorrections: 0,
         rejected: [],

@@ -48,9 +48,17 @@ export function normaliseDate(input: string): DateString | null {
     return null;
   }
 
-  const parsed = Date.parse(trimmed);
-  if (Number.isNaN(parsed)) return null;
-  return toDateString(new Date(parsed));
+  // ISO timestamps are reduced to their date prefix and validated as a session
+  // date. The time and offset are discarded, never converted between zones.
+  const isoTimestamp = /^(\d{4}-\d{2}-\d{2})(?:[T ].*)?$/.exec(trimmed);
+  if (isoTimestamp) {
+    const date = isoTimestamp[1] as string;
+    return isDateString(date) ? date : null;
+  }
+
+  // Anything else (bare numbers, slash dates, month names) is rejected rather
+  // than handed to Date.parse, which is timezone- and implementation-dependent.
+  return null;
 }
 
 export function addDays(value: DateString, days: number): DateString {
@@ -74,9 +82,9 @@ export function weekKey(value: DateString): string {
   const monday = addDays(value, -(isoWeekday(value) - 1));
   const thursday = addDays(monday, 3);
   const year = parseDate(thursday).getUTCFullYear();
-  const firstThursday = parseDate(`${year}-01-01`);
-  const dayOfWeek = firstThursday.getUTCDay() === 0 ? 7 : firstThursday.getUTCDay();
-  const firstThursdayDate = addDays(`${year}-01-01`, 4 - dayOfWeek);
+  // ISO week 1 is the week containing January 4 of the ISO week-year.
+  const jan4 = `${year}-01-04`;
+  const firstThursdayDate = addDays(jan4, 4 - isoWeekday(jan4));
   const week = 1 + Math.round((parseDate(thursday).getTime() - parseDate(firstThursdayDate).getTime()) / (7 * 86_400_000));
   return `${year}-W${String(week).padStart(2, '0')}`;
 }

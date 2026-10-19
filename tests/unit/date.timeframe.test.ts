@@ -6,6 +6,7 @@ import {
   barsForTimeframe,
   resolveTimeframe,
   timeframeFrequency,
+  timeframeLabel,
 } from '../../src/lib/timeframe';
 import { normaliseDate, weekKey } from '../../src/lib/date';
 
@@ -60,6 +61,25 @@ describe('normaliseDate', () => {
     expect(normaliseDate('   ')).toBeNull();
     expect(normaliseDate('not-a-date')).toBeNull();
   });
+
+  it('accepts an ISO timestamp by its date prefix without converting zones', () => {
+    expect(normaliseDate('2024-03-05T23:30:00-05:00')).toBe('2024-03-05');
+    expect(normaliseDate('2024-03-05T00:00:00+10:00')).toBe('2024-03-05');
+    expect(normaliseDate('2024-03-05 08:00:00')).toBe('2024-03-05');
+  });
+
+  it('rejects bare numbers and free-form dates instead of guessing', () => {
+    expect(normaliseDate('5')).toBeNull();
+    expect(normaliseDate('2024')).toBeNull();
+    expect(normaliseDate('2024/03/05')).toBeNull();
+    expect(normaliseDate('2024-2-3')).toBeNull();
+    expect(normaliseDate('Mar 5, 2024')).toBeNull();
+  });
+
+  it('rejects impossible calendar dates', () => {
+    expect(normaliseDate('2026-02-31')).toBeNull();
+    expect(normaliseDate('2026-13-01')).toBeNull();
+  });
 });
 
 describe('weekKey', () => {
@@ -79,6 +99,13 @@ describe('weekKey', () => {
 
   it('places a known Thursday in the expected week', () => {
     expect(weekKey('2024-02-29')).toBe('2024-W09');
+  });
+
+  it('anchors ISO week 1 to the week containing January 4', () => {
+    // These years start on Friday/Saturday, where anchoring to 1 January would
+    // label every week one too high.
+    expect(weekKey('2021-01-04')).toBe('2021-W01');
+    expect(weekKey('2000-01-03')).toBe('2000-W01');
   });
 });
 
@@ -118,17 +145,25 @@ describe('aggregateBars weekly OHLCV invariants', () => {
     expect(result[0]).toEqual(daily[0]);
     expect(result[0]).not.toBe(daily[0]);
   });
+
+  it('sorts unordered input before bucketing', () => {
+    const shuffled = [daily[4] as Bar, daily[0] as Bar, daily[2] as Bar, daily[1] as Bar, daily[3] as Bar, daily[8] as Bar, daily[5] as Bar, daily[6] as Bar, daily[7] as Bar];
+    const weekly = aggregateBars(shuffled, '1W');
+    expect(weekly.map((entry) => entry.date)).toEqual(['2024-01-05', '2024-01-09', '2024-01-16']);
+    expect(weekly[0]).toEqual({ date: '2024-01-05', open: 10, high: 16, low: 9, close: 15, volume: 1500 });
+  });
 });
 
 describe('timeframe availability', () => {
-  it('never offers a higher-frequency timeframe than the dataset provides', () => {
+  it('never offers a timeframe that cannot actually be produced', () => {
     expect(availableTimeframes('daily')).toEqual(['1D', '1W', '1M']);
-    expect(availableTimeframes('weekly')).toEqual(['1W', '1M']);
+    expect(availableTimeframes('weekly')).toEqual(['1W']);
     expect(availableTimeframes('monthly')).toEqual(['1M']);
   });
 
   it('resolves a disallowed request down to the source frequency, never up', () => {
     expect(resolveTimeframe(dataset('weekly'), '1D')).toBe('1W');
+    expect(resolveTimeframe(dataset('weekly'), '1M')).toBe('1W');
     expect(resolveTimeframe(dataset('monthly'), '1D')).toBe('1M');
     expect(resolveTimeframe(dataset('monthly'), '1W')).toBe('1M');
     expect(resolveTimeframe(dataset('daily'), '1M')).toBe('1M');
@@ -141,5 +176,13 @@ describe('timeframe availability', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual(weeklyBars[0]);
     expect(timeframeFrequency('1W')).toBe('weekly');
+  });
+
+  it('never returns weekly bars labelled as another timeframe', () => {
+    const weeklyBars = [bar('2024-01-05', 10, 16, 9, 15, 1500)];
+    const result = barsForTimeframe(weeklyBars, dataset('weekly'), '1M');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(weeklyBars[0]);
+    expect(timeframeLabel('1M', 'weekly')).toBe('Weekly');
   });
 });

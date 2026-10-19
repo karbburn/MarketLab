@@ -28,6 +28,69 @@ function roleFor(mapping: ColumnMapping, role: string): string | null {
   return null;
 }
 
+function groupedInteger(value: string, separator: string): string | null {
+  const parts = value.split(separator);
+  if (parts.length < 2) return null;
+  const first = parts[0];
+  if (!first || first.length > 3 || !/^\d+$/.test(first)) return null;
+  for (let i = 1; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part || part.length !== 3 || !/^\d+$/.test(part)) return null;
+  }
+  return parts.join('');
+}
+
+/**
+ * Normalises the decimal/thousands separators in a numeric cell and returns a
+ * plain `Number`-compatible string, or `null` when the format is ambiguous.
+ *
+ * With both separators the last one is the decimal separator. With one
+ * separator it is a thousands separator only when the groups after the first
+ * are exactly three digits (and the first is one to three digits); otherwise it
+ * is treated as the decimal separator.
+ */
+function interpretNumericSeparators(value: string): string | null {
+  if (!/\d/.test(value)) return null;
+  const dots = (value.match(/\./g) ?? []).length;
+  const commas = (value.match(/,/g) ?? []).length;
+
+  if (dots > 0 && commas > 0) {
+    const decimal = value.lastIndexOf('.') > value.lastIndexOf(',') ? '.' : ',';
+    const grouping = decimal === '.' ? ',' : '.';
+    const parts = value.split(decimal);
+    if (parts.length !== 2) return null;
+    const integerPart = parts[0] as string;
+    const fractionPart = parts[1] as string;
+    if (!/^\d+$/.test(fractionPart)) return null;
+    const integerDigits = integerPart.includes(grouping)
+      ? groupedInteger(integerPart, grouping)
+      : /^\d+$/.test(integerPart)
+        ? integerPart
+        : null;
+    if (integerDigits === null) return null;
+    return `${integerDigits}.${fractionPart}`;
+  }
+
+  const separator = dots > 0 ? '.' : commas > 0 ? ',' : null;
+  if (separator === null) return /^\d+$/.test(value) ? value : null;
+
+  const parts = value.split(separator);
+  if (parts.length === 2) {
+    const left = parts[0] as string;
+    const right = parts[1] as string;
+    // Thousands grouping: first group 1-3 digits, every following group 3.
+    if (/^\d{1,3}$/.test(left) && /^\d{3}$/.test(right)) return `${left}${right}`;
+    // Otherwise the single separator is a decimal point; allow `.5` and `5.`.
+    const integer = left === '' ? '0' : left;
+    const fraction = right === '' ? '0' : right;
+    if (!/^\d+$/.test(integer) || !/^\d+$/.test(fraction)) return null;
+    return `${integer}.${fraction}`;
+  }
+
+  // Multiple separators of one kind are only accepted as a valid thousands grouping.
+  return groupedInteger(value, separator);
+}
+
 export function parseNumericCell(input: string | undefined): number | null {
   if (input === undefined || input === null) return null;
   let value = String(input).trim();
@@ -37,9 +100,18 @@ export function parseNumericCell(input: string | undefined): number | null {
     negative = true;
     value = value.slice(1, -1);
   }
-  value = value.replace(/[,\s$€£₹%]/g, '');
+  value = value.replace(/[\s$€£₹%]/g, '');
   if (value === '') return null;
-  const parsed = Number(value);
+  if (value.startsWith('-')) {
+    negative = !negative;
+    value = value.slice(1);
+  } else if (value.startsWith('+')) {
+    value = value.slice(1);
+  }
+  if (!value) return null;
+  const normalised = interpretNumericSeparators(value);
+  if (normalised === null) return null;
+  const parsed = Number(normalised);
   if (!Number.isFinite(parsed)) return null;
   return negative ? -parsed : parsed;
 }
@@ -77,6 +149,18 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
   ] as const) {
     if (!column) fatalErrors.push(`A column must be mapped to ${role}.`);
   }
+  // Duplicate role mappings are fatal: which column wins would otherwise depend
+  // on header order rather than on the user's intent.
+  const roleCounts = new Map<string, number>();
+  for (const role of Object.values(mapping)) {
+    if (role === 'ignore') continue;
+    roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
+  }
+  for (const [role, count] of roleCounts) {
+    if (count > 1) {
+      fatalErrors.push(`More than one column is mapped to "${role}". Map each role to exactly one column.`);
+    }
+  }
   if (fatalErrors.length > 0) {
     return {
       bars: [],
@@ -93,8 +177,8 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
   let duplicateRows = 0;
   let missingVolumeRows = 0;
 
-  const recordRejection = (rowNumber: number, reason: string, raw?: string) => {
-    rejectedRows += 1;
+  const recordRejection = (rowNumber: number, reason: string, raw?: string, count = 1) => {
+    rejectedRows += count;
     if (rejected.length < MAX_REJECTED_SAMPLES) rejected.push({ rowNumber, reason, raw });
   };
 
@@ -184,13 +268,28 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     duplicateRows += indices.length;
     if (duplicatePolicy === 'keep-first') {
       for (const index of indices.slice(1)) excluded.add(index);
-      recordRejection(parsedRows[indices[1] as number]?.rowNumber ?? 0, `Duplicate session ${date}; kept the first occurrence.`);
+      recordRejection(
+        parsedRows[indices[1] as number]?.rowNumber ?? 0,
+        `Duplicate session ${date}; kept the first occurrence.`,
+        undefined,
+        indices.length - 1,
+      );
     } else if (duplicatePolicy === 'keep-last') {
       for (const index of indices.slice(0, -1)) excluded.add(index);
-      recordRejection(parsedRows[indices[0] as number]?.rowNumber ?? 0, `Duplicate session ${date}; kept the last occurrence.`);
+      recordRejection(
+        parsedRows[indices[0] as number]?.rowNumber ?? 0,
+        `Duplicate session ${date}; kept the last occurrence.`,
+        undefined,
+        indices.length - 1,
+      );
     } else {
       for (const index of indices) excluded.add(index);
-      recordRejection(parsedRows[indices[0] as number]?.rowNumber ?? 0, `Duplicate session ${date}; all ${indices.length} rows rejected.`);
+      recordRejection(
+        parsedRows[indices[0] as number]?.rowNumber ?? 0,
+        `Duplicate session ${date}; all ${indices.length} rows rejected.`,
+        undefined,
+        indices.length,
+      );
     }
   }
 

@@ -32,6 +32,21 @@ describe('parseNumericCell', () => {
     expect(parseNumericCell('12%')).toBe(12);
   });
 
+  it('disambiguates decimal commas and dot thousands separators', () => {
+    expect(parseNumericCell('12,5')).toBe(12.5);
+    expect(parseNumericCell('1.234,56')).toBe(1234.56);
+    expect(parseNumericCell('1.234')).toBe(1234);
+    expect(parseNumericCell('1,234')).toBe(1234);
+    expect(parseNumericCell('1,234,567')).toBe(1234567);
+    expect(parseNumericCell('1.234.567,89')).toBe(1234567.89);
+  });
+
+  it('rejects ambiguous or malformed grouping', () => {
+    expect(parseNumericCell('12,34,567')).toBeNull();
+    expect(parseNumericCell('1.234.56')).toBeNull();
+    expect(parseNumericCell('1,2,3')).toBeNull();
+  });
+
   it('treats blanks and sentinel values as missing', () => {
     expect(parseNumericCell('')).toBeNull();
     expect(parseNumericCell('-')).toBeNull();
@@ -137,6 +152,17 @@ describe('validateCsvRows row invariants', () => {
     expect(result.fatalErrors).toHaveLength(3);
   });
 
+  it('treats duplicate role mappings as fatal', () => {
+    const duplicateMapping: ColumnMapping = { ...mapping, close2: 'close' };
+    const result = validateCsvRows({
+      rows: [{ ...row('2024-01-01', '10', '12', '9', '11'), close2: '11' }],
+      mapping: duplicateMapping,
+      duplicatePolicy: 'reject',
+    });
+    expect(result.bars).toEqual([]);
+    expect(result.fatalErrors.some((error) => /more than one column/i.test(error))).toBe(true);
+  });
+
   it('counts rows that are missing volume instead of inventing zero', () => {
     const rows = [row('2024-01-01', '10', '12', '9', '11', ''), row('2024-01-02', '11', '13', '10', '12', '')];
     const result = validateCsvRows({ rows, mapping, duplicatePolicy: 'reject' });
@@ -177,9 +203,25 @@ describe('validateCsvRows duplicates', () => {
   it('rejects every row sharing a duplicate date under the reject policy', () => {
     const result = run('reject');
     expect(result.summary.duplicateRows).toBe(2);
-    expect(result.summary.rejectedRows).toBe(1);
+    expect(result.summary.rejectedRows).toBe(2);
     expect(result.summary.acceptedRows).toBe(1);
     expect(result.bars[0]?.date).toBe('2024-01-02');
+  });
+
+  it('counts every excluded row in a larger duplicate group', () => {
+    const triple = [
+      row('2024-01-01', '10', '12', '9', '11', '100'),
+      row('2024-01-01', '20', '22', '19', '21', '200'),
+      row('2024-01-01', '30', '32', '29', '31', '300'),
+      row('2024-01-02', '40', '42', '39', '41', '400'),
+    ];
+    const keepFirst = validateCsvRows({ rows: triple, mapping, duplicatePolicy: 'keep-first' });
+    expect(keepFirst.summary.rejectedRows).toBe(2);
+    expect(keepFirst.summary.acceptedRows).toBe(2);
+
+    const rejectAll = validateCsvRows({ rows: triple, mapping, duplicatePolicy: 'reject' });
+    expect(rejectAll.summary.rejectedRows).toBe(3);
+    expect(rejectAll.summary.acceptedRows).toBe(1);
   });
 });
 

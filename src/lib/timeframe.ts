@@ -1,5 +1,5 @@
 import type { Bar, Dataset, Frequency, Timeframe } from '../domain/types';
-import { monthKey, weekKey } from './date';
+import { compareDates, monthKey, weekKey } from './date';
 
 export const TIMEFRAMES: Timeframe[] = ['1D', '1W', '1M'];
 
@@ -31,7 +31,10 @@ export function aggregateBars(bars: readonly Bar[], timeframe: Timeframe): Bar[]
   if (timeframe === '1D') return bars.map((bar) => ({ ...bar }));
 
   const buckets = new Map<string, Bar[]>();
-  for (const bar of bars) {
+  // Sort defensively: bucket open/close and the emitted order must not depend on
+  // the caller's input order.
+  const ordered = [...bars].sort((a, b) => compareDates(a.date, b.date));
+  for (const bar of ordered) {
     const key = timeframe === '1W' ? weekKey(bar.date) : monthKey(bar.date);
     const bucket = buckets.get(key);
     if (bucket) bucket.push(bar);
@@ -71,7 +74,7 @@ export function availableTimeframes(frequency: Frequency): Timeframe[] {
     case 'daily':
       return ['1D', '1W', '1M'];
     case 'weekly':
-      return ['1W', '1M'];
+      return ['1W'];
     case 'monthly':
       return ['1M'];
   }
@@ -93,8 +96,12 @@ export function barsForTimeframe(bars: readonly Bar[], dataset: Dataset, request
 }
 
 export function timeframeLabel(timeframe: Timeframe, source: Frequency): string {
-  const aggregated = source === 'daily' && timeframe !== '1D';
-  switch (timeframe) {
+  const available = availableTimeframes(source);
+  // Label what the bars actually are: a request that cannot be produced is
+  // resolved to the source frequency before it reaches this function.
+  const effective = available.includes(timeframe) ? timeframe : (available[0] as Timeframe);
+  const aggregated = source === 'daily' && effective !== '1D';
+  switch (effective) {
     case '1D':
       return 'Daily';
     case '1W':

@@ -33,9 +33,22 @@ export function formatSignedPercent(value: number, digits = 2): string {
 export function formatCompact(value: number): string {
   if (!Number.isFinite(value)) return '-';
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  const units: ReadonlyArray<{ size: number; suffix: string }> = [
+    { size: 1_000_000_000, suffix: 'B' },
+    { size: 1_000_000, suffix: 'M' },
+    { size: 1_000, suffix: 'K' },
+  ];
+  for (let i = 0; i < units.length; i += 1) {
+    const unit = units[i] as { size: number; suffix: string };
+    if (abs < unit.size) continue;
+    // Normalise before choosing the unit: a value that rounds to 1000.00 in
+    // this unit belongs to the next larger one.
+    if (i > 0 && Number((abs / unit.size).toFixed(2)) >= 1000) {
+      const larger = units[i - 1] as { size: number; suffix: string };
+      return `${(value / larger.size).toFixed(2)}${larger.suffix}`;
+    }
+    return `${(value / unit.size).toFixed(2)}${unit.suffix}`;
+  }
   return value.toFixed(0);
 }
 
