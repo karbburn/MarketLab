@@ -1,0 +1,18 @@
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:marketlab.sourabhpradhan.in:llms",
+      "displayName": "MarketLab llms.txt",
+      "type": "text/markdown",
+      "url": "https://marketlab.sourabhpradhan.in/llms.txt",
+      "representativeQueries": [
+        "What is MarketLab and what can it do?",
+        "How do I import my own OHLCV data into MarketLab?",
+        "Is the bundled sample data real market data?",
+        "How do I download real historical market data in MarketLab?",
+        "Which indicators and backtest rules does MarketLab support?"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+# MarketLab — agent access policy (2026-10-19)
+#
+# robots.txt is a preference signal, not access control. All agents may crawl;
+# the Content-Signal line states a preference that crawled content is used for
+# search indexing and as AI input, not for model training. Repeat the line in
+# every group: per RFC 9309 a crawler obeys only the group that names it.
+
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: OAI-AdsBot
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: Google-Extended
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+Agentmap: https://marketlab.sourabhpradhan.in/ai-catalog.json
+Sitemap: https://marketlab.sourabhpradhan.in/sitemap.xml
