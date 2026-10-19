@@ -9,16 +9,20 @@ import {
   LineSeries,
   LineStyle,
   createChart,
+  createSeriesMarkers,
   type BusinessDay,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type LogicalRange,
   type MouseEventParams,
+  type SeriesMarker,
   type SeriesType,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Bar, ChartType, PriceScaleMode } from '../../domain/types';
+import type { CorporateActionMarkerSpec } from '../../lib/corporate-actions';
 import type { ComparisonLineSpec, ComparisonLineStyle } from '../../lib/chart/compare-overlays';
 
 export interface IndicatorOutputSpec {
@@ -45,6 +49,8 @@ export interface ChartRenderInput {
   indicators: readonly IndicatorRenderSpec[];
   /** Rebased comparison overlays, on their own secondary index scale. */
   comparisons: readonly ComparisonLineSpec[];
+  /** Provider-reported split/dividend markers for the primary series. */
+  corporateActions: readonly CorporateActionMarkerSpec[];
 }
 
 export interface CrosshairReading {
@@ -87,6 +93,7 @@ export class ChartController {
   private priceSeries: ISeriesApi<SeriesType> | null = null;
   private volumeSeries: ISeriesApi<'Histogram'> | null = null;
   private readonly compareSeries: ISeriesApi<'Line'>[] = [];
+  private corporateActionMarkers: ISeriesMarkersPluginApi<Time> | null = null;
   private readonly indicatorSeries = new Map<string, ISeriesApi<SeriesType>[]>();
   private bars: readonly Bar[] = [];
   private readonly crosshairHandlers = new Set<(reading: CrosshairReading) => void>();
@@ -152,6 +159,8 @@ export class ChartController {
   }
 
   private clearIndicators(): void {
+    this.corporateActionMarkers?.detach();
+    this.corporateActionMarkers = null;
     for (const seriesList of this.indicatorSeries.values()) {
       for (const series of seriesList) {
         try {
@@ -266,6 +275,7 @@ export class ChartController {
     }
 
     this.applyPriceScaleMode(input.priceScaleMode);
+    this.renderCorporateActions(input.corporateActions);
 
     let nextPaneIndex = 1;
     if (input.showVolume) {
@@ -361,6 +371,34 @@ export class ChartController {
       line.setData(spec.points.map((point) => ({ time: point.date as Time, value: point.value })));
       this.compareSeries.push(line);
     }
+  }
+
+  /**
+   * Places provider-reported actions on the primary price series.
+   *
+   * Splits sit above the bar as squares; cash dividends sit below it as
+   * circles. Markers are attached to the price series but do not alter its
+   * axis. The dates were already restricted to displayed sessions by
+   * `planCorporateActionMarkers`, so nothing is snapped to a neighbouring bar.
+   */
+  private renderCorporateActions(specs: readonly CorporateActionMarkerSpec[]): void {
+    if (!this.priceSeries || specs.length === 0) return;
+    const splitColor = cssVar('--corporate-split', '#d8a13f');
+    const dividendColor = cssVar('--corporate-dividend', '#5b9bd5');
+    const markers: SeriesMarker<Time>[] = specs.map((spec, index) => ({
+      id: `${spec.date}-${spec.type}-${index}`,
+      time: spec.date as Time,
+      position: spec.type === 'split' ? 'aboveBar' : 'belowBar',
+      shape: spec.type === 'split' ? 'square' : 'circle',
+      color: spec.type === 'split' ? splitColor : dividendColor,
+      text: spec.label,
+      size: 1,
+    }));
+    this.corporateActionMarkers = createSeriesMarkers(this.priceSeries, markers, {
+      // Markers are annotation only: never let their text grow the price range.
+      autoScale: false,
+      zOrder: 'aboveSeries',
+    });
   }
 
   applyPriceScaleMode(mode: PriceScaleMode): void {

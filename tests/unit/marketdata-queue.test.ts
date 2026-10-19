@@ -37,6 +37,7 @@ function history(symbol: string, sessions = 3): ProviderHistory {
       rangeActual: { start: bars[0]!.date, end: bars[bars.length - 1]!.date },
       retrievedAt: '2026-10-19T12:00:00+00:00',
       sourceNotes: [],
+      corporateActions: [],
     },
     bars,
   };

@@ -16,6 +16,20 @@ deliberately unsupported. OHLC is as-traded (splits applied by Yahoo, dividends
 not reinvested); the separate `adjClose` column is captured but not yet used by
  computations. The adjustment policy is recorded in every download's metadata.
 
+History responses also carry `provider.corporateActions`, an array of
+provider-reported events in the requested range:
+
+```json
+{ "date": "2024-01-03", "type": "split", "value": 4.0 }
+{ "date": "2024-02-15", "type": "dividend", "value": 0.24 }
+```
+
+`value` is new shares per old share for a split and cash per share for a
+dividend. These events are never inferred from price moves and may be
+incomplete. A split marker identifies the provider event date; because the OHLC
+series is split-adjusted, it does not imply a price gap. Dividend markers are
+not reinvested.
+
 ## Setup
 
 ```bash
@@ -48,7 +62,7 @@ through the deployment host.
 |---|---|
 | `GET /api/health` | availability + provider/library versions |
 | `GET /api/search?q=<2-64 chars>&limit<=20` | symbol lookup (fuzzy), returns symbol/name/exchange/type |
-| `GET /api/history?symbol=AAPL&start=2020-01-01&end=2025-01-01` | daily bars + provenance metadata |
+| `GET /api/history?symbol=AAPL&start=2020-01-01&end=2025-01-01` | daily bars + provenance metadata + provider corporate actions |
 
 Errors are always JSON `{"detail": "..."}`: `400` invalid input, `404` no data
 for the symbol/range, `429` provider throttled, `502` malformed provider

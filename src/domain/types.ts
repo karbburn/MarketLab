@@ -56,6 +56,22 @@ export type SourceKind = 'bundled-sample' | 'user-csv' | 'provider-download';
 /** Open set of downloadable sources; the first is Yahoo Finance via yfinance. */
 export type ProviderId = 'yahoo-finance';
 
+export type CorporateActionType = 'split' | 'dividend';
+
+/**
+ * A provider-reported corporate action on an exchange session.
+ *
+ * `value` is the split ratio (new shares per old share) for a split, or the
+ * cash amount per share for a dividend in the instrument's currency. These
+ * events are stored exactly as the provider reported them; MarketLab never
+ * derives or imputes one.
+ */
+export interface CorporateAction {
+  date: DateString;
+  type: CorporateActionType;
+  value: number;
+}
+
 /**
  * Provenance for a downloaded dataset. Optional so older locally stored data
  * and existing backups stay valid without a migration.
@@ -78,6 +94,12 @@ export interface DatasetProvider {
   timezone: string | null;
   /** Provider-stated limitations of this download, verbatim. */
   sourceNotes: readonly string[];
+  /**
+   * Provider-reported split/dividend events in the requested range. Absent on
+   * datasets downloaded before corporate actions were captured; treat it as an
+   * empty list rather than inferring events from price moves.
+   */
+  corporateActions?: readonly CorporateAction[];
 }
 
 export interface RejectedRow {

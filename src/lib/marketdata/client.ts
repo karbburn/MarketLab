@@ -7,6 +7,8 @@
  * `services/market-data/README.md`.
  */
 
+import type { CorporateAction } from '../../domain/types';
+import { isDateString } from '../date';
 import type { ProviderHistory, ProviderSearchResult } from './normalize';
 
 export const DEFAULT_SERVICE_URL = 'http://127.0.0.1:8787';
@@ -207,7 +209,43 @@ function normaliseProviderMetadata(raw: Record<string, unknown>): ProviderHistor
     },
     retrievedAt: typeof raw.retrievedAt === 'string' && raw.retrievedAt.length > 0 ? raw.retrievedAt : new Date().toISOString(),
     sourceNotes: Array.isArray(notes) ? notes.filter((note): note is string => typeof note === 'string') : [],
+    corporateActions: normaliseCorporateActions(raw.corporateActions),
   };
+}
+
+/**
+ * Validates provider action rows. A malformed row fails the download as a whole
+ * instead of being dropped: silently losing an event would let the chart imply
+ * the provider reported no action on that session.
+ */
+function normaliseCorporateActions(raw: unknown): CorporateAction[] {
+  if (raw === undefined || raw === null) return [];
+  assertShape(Array.isArray(raw), 'Provider corporate actions must be an array.');
+  const seen = new Set<string>();
+  const actions: CorporateAction[] = [];
+  raw.forEach((entry, index) => {
+    assertShape(entry !== null && typeof entry === 'object', `Corporate-action entry ${index + 1} is not an object.`);
+    const record = entry as Record<string, unknown>;
+    assertShape(isDateString(record.date), `Corporate-action entry ${index + 1} has an invalid session date.`);
+    assertShape(
+      record.type === 'split' || record.type === 'dividend',
+      `Corporate-action entry ${index + 1} has an unsupported type.`,
+    );
+    assertShape(
+      typeof record.value === 'number' && Number.isFinite(record.value) && record.value > 0,
+      `Corporate-action entry ${index + 1} needs a finite value greater than zero.`,
+    );
+    const action: CorporateAction = {
+      date: record.date,
+      type: record.type,
+      value: record.value,
+    };
+    const key = `${action.date}|${action.type}|${action.value}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    actions.push(action);
+  });
+  return actions.sort((a, b) => (a.date === b.date ? a.type.localeCompare(b.type) : a.date.localeCompare(b.date)));
 }
 
 function shapeRangeSide(range: unknown, side: 'start' | 'end'): string {

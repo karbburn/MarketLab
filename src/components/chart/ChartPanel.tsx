@@ -27,6 +27,7 @@ import { datasetViews, type DatasetView } from '../../state/selectors';
 import { Segmented, Select, Tag } from '../ui';
 import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
 import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation, type ComparisonTarget } from '../../lib/chart/compare-overlays';
+import { planCorporateActionMarkers } from '../../lib/corporate-actions';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
@@ -123,6 +124,21 @@ export function ChartPanel({
 
   const comparisonLines = useMemo<ComparisonLineSpec[]>(() => comparison?.lines ?? [], [comparison]);
 
+  // Corporate-action markers belong to the primary series only. They are
+  // planned against the bars actually on screen, so a 1W/1M aggregation cannot
+  // put a marker on a date the time scale does not contain.
+  const corporateActionPlan = useMemo(
+    () =>
+      planCorporateActionMarkers({
+        actions: dataset?.provider?.corporateActions ?? [],
+        bars: rendered,
+        currency: instrument?.currency,
+      }),
+    [dataset, instrument?.currency, rendered],
+  );
+  const corporateActionSource =
+    dataset?.provider?.provider === 'yahoo-finance' ? 'Yahoo Finance' : 'the provider';
+
   // A comparison set is relative to the primary dataset. When the panel is
   // re-pointed at a different dataset, drop the old overlays rather than
   // leaving a context that was never chosen against the new primary.
@@ -175,8 +191,16 @@ export function ChartPanel({
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
-    controller.render({ bars: rendered, chartType: chart.chartType, showVolume: chart.showVolume, priceScaleMode: chart.priceScaleMode, indicators: indicatorSpecs, comparisons: comparisonLines });
-  }, [rendered, chart.chartType, chart.showVolume, chart.priceScaleMode, indicatorSpecs, comparisonLines]);
+    controller.render({
+      bars: rendered,
+      chartType: chart.chartType,
+      showVolume: chart.showVolume,
+      priceScaleMode: chart.priceScaleMode,
+      indicators: indicatorSpecs,
+      comparisons: comparisonLines,
+      corporateActions: corporateActionPlan.markers,
+    });
+  }, [rendered, chart.chartType, chart.showVolume, chart.priceScaleMode, indicatorSpecs, comparisonLines, corporateActionPlan.markers]);
 
   // The controller reads its colours from the CSS variables, so a theme switch
   // has to be pushed into it explicitly.
@@ -746,6 +770,33 @@ export function ChartPanel({
               </span>
             ))}
             <span className="field-hint">{comparison.methodNote}</span>
+          </div>
+        </div>
+      )}
+
+      {corporateActionPlan.note && (
+        <div className="panel-foot action-foot">
+          <div className="stack" style={{ gap: 4 }}>
+            {corporateActionPlan.markers.length > 0 && (
+              <span className="field-hint action-summary">
+                {corporateActionPlan.splits > 0 && (
+                  <>
+                    <span className="action-swatch split" aria-hidden />
+                    Split marker
+                  </>
+                )}
+                {corporateActionPlan.dividends > 0 && (
+                  <>
+                    <span className="action-swatch dividend" aria-hidden />
+                    Dividend marker
+                  </>
+                )}
+                <span className="faint">
+                  &middot; primary series &middot; {corporateActionSource}
+                </span>
+              </span>
+            )}
+            <span className="field-hint">{corporateActionPlan.note}</span>
           </div>
         </div>
       )}
