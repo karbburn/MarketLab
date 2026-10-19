@@ -1,4 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { seedLibrary } from './fixtures/library';
+
+// The application bundles no data, so the research screens are tested against
+// a seeded library of imported series.
+test.beforeEach(async ({ page }) => {
+  await seedLibrary(page);
+});
 
 test.describe('quant lab', () => {
   test('reports risk metrics computed from the stored sessions', async ({ page }) => {
@@ -53,16 +60,16 @@ test.describe('historical screener', () => {
     await page.getByRole('button', { name: 'Start a new screen' }).click();
 
     const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
-    const row = results.locator('tbody tr').filter({ hasText: 'NRG' });
-    await row.getByRole('button', { name: 'NRG', exact: true }).click();
+    const row = results.locator('tbody tr').filter({ hasText: 'MSFT' });
+    await row.getByRole('button', { name: 'MSFT', exact: true }).click();
 
     // The screened dataset is re-pointed at the first chart, not re-imported.
     await expect(page.locator('.topbar-title')).toHaveText('Chart workspace');
-    await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('MSFT');
 
     // The switch is persisted like any other chart edit.
     await page.reload();
-    await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('MSFT');
   });
 
   test('edits and deletes a saved screen', async ({ page }) => {

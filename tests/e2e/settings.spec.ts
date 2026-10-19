@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { seedLibrary } from './fixtures/library';
 
 test.describe('workspaces and settings', () => {
   test('creates and deletes a workspace', async ({ page }) => {
+    await seedLibrary(page);
     await page.goto('/#/workspaces');
 
     const rows = page.locator('table.data tbody tr');
@@ -27,7 +29,8 @@ test.describe('workspaces and settings', () => {
     await expect(page.getByLabel('Default timeframe')).toHaveValue('1W');
   });
 
-  test('exports a backup, resets local data and restores it without duplicating series', async ({ page }) => {
+  test('exports a backup, deletes local data and restores it without duplicating series', async ({ page }) => {
+    await seedLibrary(page);
     await page.goto('/#/workspaces');
     await page.getByRole('button', { name: 'New single-panel workspace' }).click();
     await expect(page.locator('table.data tbody tr')).toHaveCount(2);
@@ -41,10 +44,10 @@ test.describe('workspaces and settings', () => {
     await download.saveAs(backupFile);
 
     // Destroy local data, then restore from the file.
-    await page.getByRole('button', { name: 'Reset local data to the bundled samples' }).click();
-    await page.getByRole('button', { name: 'Yes, reset to the bundled sample set' }).click();
-    await expect(page.getByText('Local data reset to the bundled sample set.')).toBeVisible();
-    await expect(page.locator('table.data tbody tr')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Delete all local data', exact: true }).click();
+    await page.getByRole('button', { name: 'Yes, delete all local data' }).click();
+    await expect(page.getByText('All local data was deleted.')).toBeVisible();
+    await expect(page.locator('table.data tbody tr')).toHaveCount(0);
 
     await page.locator('input[type="file"]').setInputFiles(backupFile);
     await expect(page.getByText('Confirm restore')).toBeVisible();
@@ -54,7 +57,7 @@ test.describe('workspaces and settings', () => {
     // Identical series are recognised by content hash and not duplicated.
     await expect(page.locator('.toast-body').last()).toContainText('Backup merged');
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
-    await expect(page.locator('table.data tbody tr')).toHaveCount(3);
+    await expect(page.locator('table.data tbody tr')).toHaveCount(2);
     await expect(page.locator('table.data tbody tr').filter({ hasText: 'Workspace 2' })).toHaveCount(1);
   });
 

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { seedLibrary } from './fixtures/library';
 
 /**
  * Waits until the chart is actually rendered. The overlay canvas is only sized
@@ -27,11 +28,17 @@ async function waitForPanels(page: Page, count: number): Promise<void> {
 }
 
 test.describe('chart workspace', () => {
+  // The application stores no bundled data, so every chart test starts from a
+  // seeded library that looks like a real import.
+  test.beforeEach(async ({ page }) => {
+    await seedLibrary(page);
+  });
+
   test('renders an interactive chart with a legend and honest timeframe labels', async ({ page }) => {
     await page.goto('/#/chart');
 
     await expect(page.locator('.topbar-title')).toHaveText('Chart workspace');
-    await expect(page.locator('.chart-symbol').first()).toHaveText('ATX');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(1);
     await waitForChart(page);
 
@@ -176,13 +183,13 @@ test.describe('chart workspace', () => {
   test('loads a watchlist instrument into the focused panel', async ({ page }) => {
     await page.goto('/#/chart');
 
-    await expect(page.locator('.chart-symbol').first()).toHaveText('ATX');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
     await page
       .locator('.page-split table.data tbody tr')
-      .filter({ hasText: 'NRG' })
-      .getByRole('button', { name: 'NRG', exact: true })
+      .filter({ hasText: 'MSFT' })
+      .getByRole('button', { name: 'MSFT', exact: true })
       .click();
-    await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('MSFT');
   });
 
   test('switches to the OHLC Bars chart type and keeps it after a reload', async ({ page }) => {

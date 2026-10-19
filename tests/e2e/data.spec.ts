@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { seedLibrary } from './fixtures/library';
 
 const GOOD_CSV = [
   'date,open,high,low,close,volume',
@@ -25,6 +26,12 @@ async function openImportDialog(page: import('@playwright/test').Page) {
 }
 
 test.describe('data library', () => {
+  // The library starts empty in the application; the data tests work against a
+  // seeded set of imported series.
+  test.beforeEach(async ({ page }) => {
+    await seedLibrary(page);
+  });
+
   test('imports a CSV file and shows the imported series', async ({ page }) => {
     await page.goto('/#/data');
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');

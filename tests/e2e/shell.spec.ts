@@ -1,19 +1,25 @@
 import { expect, test } from '@playwright/test';
+import { seedLibrary } from './fixtures/library';
 
 test.describe('shell, navigation and theme', () => {
-  test('opens on the overview with the bundled sample data labelled as synthetic', async ({ page }) => {
+  test('starts with an empty library and explains how to get real data', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.locator('.topbar-title')).toHaveText('Overview');
-    await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
-    await expect(page.getByText('Synthetic sample')).toBeVisible();
+    await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
 
-    // One row per bundled instrument in the summary table.
-    await expect(page.locator('table.data tbody tr')).toHaveCount(6);
-    await expect(page.locator('table.data tbody')).toContainText('MLAB-IDX');
+    // A fresh library is empty on purpose and says so, with the three real
+    // ways to fill it.
+    const panel = page.locator('.panel').filter({ hasText: 'Welcome to MarketLab' }).first();
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Download real market data' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Import a CSV file' })).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'Open the chart workspace' })).toBeVisible();
 
-    // The synthetic disclaimer must be explicit, not implied.
-    await expect(page.getByText('not real market data', { exact: false })).toBeVisible();
+    // No demo series, and no invented prices behind the empty state.
+    await expect(page.getByText('ATX')).toHaveCount(0);
+    await expect(page.getByText('MLAB-IDX')).toHaveCount(0);
+    await expect(page.locator('table.data tbody tr')).toHaveCount(0);
   });
 
   test('reaches every section from the sidebar', async ({ page }) => {
@@ -50,8 +56,9 @@ test.describe('shell, navigation and theme', () => {
   });
 
   test('keeps a workspace edit after a reload', async ({ page }) => {
+    await seedLibrary(page);
     await page.goto('/#/chart');
-    await expect(page.locator('.chart-symbol').first()).toHaveText('ATX');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
 
     // Duplicate the focused panel, then show two panels.
     await page.getByRole('button', { name: 'Duplicate panel' }).click();
