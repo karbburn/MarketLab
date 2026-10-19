@@ -73,6 +73,9 @@ const chartConfigSchema = z.object({
   visibleRange: visibleRangeSchema,
   indicators: z.array(indicatorInstanceSchema),
   drawings: z.array(drawingSchema),
+  // Absent in workspaces saved before comparison overlays existed; default to
+  // none rather than rejecting the whole workspace.
+  compareDatasetIds: z.array(z.string()).default([]),
 });
 
 const linkGroupSchema = z.object({

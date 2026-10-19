@@ -57,6 +57,7 @@ function workspace(id: string, datasetId: string, instrumentId: string): Workspa
         visibleRange: null,
         indicators: [],
         drawings: [],
+        compareDatasetIds: [],
       },
     ],
     linkGroups: [],
@@ -189,6 +190,41 @@ describe('mergeBackup', () => {
     const distinct = result.workspaces.find((entry) => entry.id === 'ws-other');
     expect(distinct?.charts[0]?.datasetId).toBe('d-other');
     expect(result.instruments.map((entry) => entry.id).sort()).toEqual(['i-new', 'i-old']);
+  });
+
+  it('remaps comparison overlays through the same duplicate-series resolution', () => {
+    const base = {
+      ...emptyBase,
+      instruments: [instrument('i-new', 'AAA')],
+      datasets: [dataset('d-new', 'i-new', 'hash-1')],
+      barsByDataset: { 'd-new': bars },
+    };
+    const source = workspace('ws-old', 'd-old', 'i-old');
+    // The first comparison is the same series as the panel (which dedupes onto
+    // the stored copy and must not survive as a self-reference); the second is a
+    // genuinely new series.
+    (source.charts[0] as Workspace['charts'][number]).compareDatasetIds = ['d-old', 'd-old-other'];
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i-old', 'AAA')],
+      datasets: [dataset('d-old', 'i-old', 'hash-1'), dataset('d-old-other', 'i-old', 'hash-2')],
+      bars: [
+        { id: 'd-old', bars },
+        { id: 'd-old-other', bars },
+      ],
+      workspaces: [source],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(base, bundle);
+    const merged = result.workspaces.find((entry) => entry.id === 'ws-old');
+    expect(merged?.charts[0]?.datasetId).toBe('d-new');
+    expect(merged?.charts[0]?.compareDatasetIds).toEqual(['d-old-other']);
   });
 
   it('remaps watchlist entries onto the stored instrument when the series already exists', () => {

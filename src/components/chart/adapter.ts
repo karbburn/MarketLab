@@ -19,6 +19,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Bar, ChartType, PriceScaleMode } from '../../domain/types';
+import type { ComparisonLineSpec, ComparisonLineStyle } from '../../lib/chart/compare-overlays';
 
 export interface IndicatorOutputSpec {
   key: string;
@@ -42,6 +43,8 @@ export interface ChartRenderInput {
   showVolume: boolean;
   priceScaleMode: PriceScaleMode;
   indicators: readonly IndicatorRenderSpec[];
+  /** Rebased comparison overlays, on their own secondary index scale. */
+  comparisons: readonly ComparisonLineSpec[];
 }
 
 export interface CrosshairReading {
@@ -83,6 +86,7 @@ export class ChartController {
   private readonly chart: IChartApi;
   private priceSeries: ISeriesApi<SeriesType> | null = null;
   private volumeSeries: ISeriesApi<'Histogram'> | null = null;
+  private readonly compareSeries: ISeriesApi<'Line'>[] = [];
   private readonly indicatorSeries = new Map<string, ISeriesApi<SeriesType>[]>();
   private bars: readonly Bar[] = [];
   private readonly crosshairHandlers = new Set<(reading: CrosshairReading) => void>();
@@ -158,6 +162,16 @@ export class ChartController {
       }
     }
     this.indicatorSeries.clear();
+    for (const series of this.compareSeries) {
+      try {
+        this.chart.removeSeries(series);
+      } catch {
+        // ignore
+      }
+    }
+    this.compareSeries.length = 0;
+    // The secondary index axis only exists while comparison overlays are drawn.
+    this.chart.applyOptions({ leftPriceScale: { visible: false } });
     if (this.volumeSeries) {
       try {
         this.chart.removeSeries(this.volumeSeries);
@@ -310,7 +324,43 @@ export class ChartController {
       }
     }
 
+    // Comparison overlays go last so they sit above the price series and
+    // indicator overlays without altering any of them.
+    this.renderComparisons(input.comparisons);
+
     this.emitViewport();
+  }
+
+  /**
+   * Adds rebased comparison overlays on the secondary (left) index scale.
+   *
+   * The lines never touch the primary price scale, so mixing a $40 stock and a
+   * $400 fund on one chart cannot make the price axis lie about either. The
+   * left scale is shown only while at least one overlay is drawn.
+   */
+  private renderComparisons(specs: readonly ComparisonLineSpec[]): void {
+    if (specs.length === 0) return;
+    this.chart.applyOptions({
+      leftPriceScale: {
+        visible: true,
+        borderColor: cssVar('--border-subtle', '#1f2733'),
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+    });
+    this.chart.priceScale('left').applyOptions({ autoScale: true, mode: 0 });
+    for (const spec of specs) {
+      const line = this.chart.addSeries(LineSeries, {
+        color: spec.color,
+        lineWidth: 2,
+        lineStyle: lineStyleFor(spec.lineStyle),
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceScaleId: 'left',
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      });
+      line.setData(spec.points.map((point) => ({ time: point.date as Time, value: point.value })));
+      this.compareSeries.push(line);
+    }
   }
 
   applyPriceScaleMode(mode: PriceScaleMode): void {
@@ -434,6 +484,19 @@ export class ChartController {
     this.crosshairHandlers.clear();
     this.viewportHandlers.clear();
     this.chart.remove();
+  }
+}
+
+function lineStyleFor(style: ComparisonLineStyle): LineStyle {
+  switch (style) {
+    case 'dashed':
+      return LineStyle.Dashed;
+    case 'dotted':
+      return LineStyle.Dotted;
+    case 'large-dashed':
+      return LineStyle.LargeDashed;
+    case 'solid':
+      return LineStyle.Solid;
   }
 }
 

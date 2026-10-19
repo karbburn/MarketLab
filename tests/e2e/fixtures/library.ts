@@ -202,6 +202,41 @@ export function buildFixtureLibrary(): FixtureRecords {
 }
 
 /**
+ * A library where one stored series shares a single session with the primary.
+ * Used to prove that the comparison reports insufficient shared history
+ * instead of drawing a one-point line or forward-filling.
+ */
+export function buildSparseOverlapLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const bars = records.bars.find((entry) => entry.id === 'ds_msft');
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_msft');
+  if (bars && dataset) {
+    const series = bars.bars as FixtureBar[];
+    const last = series[series.length - 1] as FixtureBar;
+    bars.bars = [last];
+    dataset.firstDate = last.date;
+    dataset.lastDate = last.date;
+    dataset.rowCount = 1;
+  }
+  return records;
+}
+
+/** A library holding only the primary series, for the no-comparison state. */
+export function buildSingleSeriesLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  return {
+    ...records,
+    instruments: records.instruments.filter((entry) => entry.id === 'inst_aapl'),
+    datasets: records.datasets.filter((entry) => entry.id === 'ds_aapl'),
+    bars: records.bars.filter((entry) => entry.id === 'ds_aapl'),
+    watchlists: records.watchlists.map((entry) => ({
+      ...entry,
+      instrumentIds: ['inst_aapl'],
+    })),
+  };
+}
+
+/**
  * A library in the shape an earlier build left behind: one bundled demo
  * series, one imported series, a workspace pointing at the demo series and a
  * watchlist that holds the demo instrument.

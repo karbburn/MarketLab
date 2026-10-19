@@ -1024,6 +1024,7 @@ table.data tr.dim td {
   position: absolute;
   top: 6px;
   left: 8px;
+  z-index: 2;
   display: grid;
   gap: 2px;
   padding: 6px 8px;
@@ -1061,6 +1062,49 @@ table.data tr.dim td {
   align-items: center;
   gap: 6px;
   pointer-events: auto;
+}
+
+.compare-legend-title {
+  align-items: center;
+  margin-top: 2px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border-subtle);
+  pointer-events: auto;
+}
+
+.compare-legend-title .legend-action {
+  margin-left: auto;
+}
+
+.compare-legend-item {
+  align-items: center;
+  pointer-events: auto;
+}
+
+.legend-line {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 0;
+  border-top-width: 2px;
+  border-top-style: solid;
+  display: inline-block;
+}
+
+.legend-line.dashed {
+  border-top-style: dashed;
+}
+
+.legend-line.dotted {
+  border-top-style: dotted;
+}
+
+.legend-line.large-dashed {
+  border-top-width: 3px;
+  border-top-style: dashed;
+}
+
+.compare-foot {
+  align-items: flex-start;
 }
 
 .legend-action {
@@ -1125,6 +1169,10 @@ table.data tr.dim td {
   .drawing-rail {
     flex-direction: row;
     overflow-x: auto;
+  }
+  /* With the compare control the header has more actions than fit one row. */
+  .chart-panel-head {
+    flex-wrap: wrap;
   }
 }
 

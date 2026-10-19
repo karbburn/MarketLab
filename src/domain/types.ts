@@ -133,6 +133,12 @@ export interface ChartConfig {
   visibleRange: { from: DateString; to: DateString } | null;
   indicators: IndicatorInstance[];
   drawings: Drawing[];
+  /**
+   * Datasets overlaid for relative comparison, in draw order. Rebased to 100 at
+   * the first shared session; empty unless the user adds a comparison. Stored
+   * dataset ids are validated on load and pruned when their dataset is deleted.
+   */
+  compareDatasetIds: string[];
 }
 
 export type IndicatorPlacement = 'overlay' | 'pane';

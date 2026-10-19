@@ -282,12 +282,25 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     ...workspace,
     charts: workspace.charts.map((chart) => {
       const replacement = datasetRemap.get(chart.datasetId);
-      if (!replacement) return chart;
-      remappedPanels += 1;
+      const datasetId = replacement ?? chart.datasetId;
+      const storedComparisons = chart.compareDatasetIds ?? [];
+      // Comparison overlays are dataset references too: remap them through the
+      // same duplicate-series resolution and drop a self-reference or a repeat.
+      const compareDatasetIds = storedComparisons
+        .map((id) => datasetRemap.get(id) ?? id)
+        .filter((id, index, list) => id !== datasetId && list.indexOf(id) === index);
+      const comparisonsChanged =
+        compareDatasetIds.length !== storedComparisons.length ||
+        compareDatasetIds.some((id, index) => id !== storedComparisons[index]);
+      if (replacement) remappedPanels += 1;
+      if (!replacement && !comparisonsChanged) return chart;
       return {
         ...chart,
-        datasetId: replacement,
-        instrumentId: resolved.get(replacement)?.instrumentId ?? chart.instrumentId,
+        datasetId,
+        instrumentId: replacement
+          ? resolved.get(datasetId)?.instrumentId ?? chart.instrumentId
+          : chart.instrumentId,
+        compareDatasetIds,
       };
     }),
   }));

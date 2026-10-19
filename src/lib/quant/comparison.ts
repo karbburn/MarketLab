@@ -36,6 +36,104 @@ export function normalisedPerformance(dates: readonly string[], closes: readonly
   return { dates: [...dates], values: closes.map((value) => (value / base - 1) * 100) };
 }
 
+/** The fewest shared sessions a rebased comparison needs to mean anything. */
+export const MIN_COMPARISON_SESSIONS = 2;
+
+export interface ComparisonInputSeries {
+  /** Stable identity, normally the dataset id. */
+  key: string;
+  /** Human label, normally the instrument symbol. */
+  label: string;
+  bars: readonly Bar[];
+}
+
+export interface ComparisonSeries {
+  key: string;
+  label: string;
+  /**
+   * Index values aligned to `dates`, rebased so the first shared session is
+   * exactly 100. A +10% move from the baseline is 110.
+   */
+  values: number[];
+}
+
+export type ComparisonStatus =
+  | 'ok'
+  | 'no-series'
+  | 'no-overlap'
+  | 'insufficient-history'
+  | 'invalid-baseline';
+
+export interface ComparisonResult {
+  status: ComparisonStatus;
+  /** Shared sessions used as the x-axis, ascending. */
+  dates: string[];
+  /** One entry per input series, in input order; empty `values` unless `ok`. */
+  series: ComparisonSeries[];
+  /** First shared session, the 100 baseline, or null when there is no overlap. */
+  baselineDate: string | null;
+  minSessions: number;
+}
+
+/**
+ * Rebases several bar series to a common index of 100 for relative comparison.
+ *
+ * The series are aligned with {@link alignOnCommonDates}, so a session is only
+ * kept when every series provides a bar for it and nothing is ever
+ * forward-filled or interpolated. The baseline is the first shared session
+ * *within the window*, so observations before the comparison period can never
+ * influence it (no look-ahead). Every failure mode is explicit rather than
+ * approximated: no series, no shared session, too few shared sessions, or a
+ * non-positive baseline close.
+ */
+export function rebasedComparison(
+  inputs: readonly ComparisonInputSeries[],
+  options: { from?: string; to?: string; minSessions?: number } = {},
+): ComparisonResult {
+  const minSessions = options.minSessions ?? MIN_COMPARISON_SESSIONS;
+  if (inputs.length === 0) {
+    return { status: 'no-series', dates: [], series: [], baselineDate: null, minSessions };
+  }
+  const windowed = inputs.map((input) => input.bars.filter((bar) => inWindow(bar.date, options.from, options.to)));
+  const aligned = alignOnCommonDates(windowed);
+  const emptySeries = inputs.map((input) => ({ key: input.key, label: input.label, values: [] as number[] }));
+
+  if (aligned.dates.length === 0) {
+    return { status: 'no-overlap', dates: [], series: emptySeries, baselineDate: null, minSessions };
+  }
+  if (aligned.dates.length < minSessions) {
+    // The shared sessions are real and reported, but there are too few to rebase
+    // honestly; `baselineDate` stays null because no baseline was used.
+    return { status: 'insufficient-history', dates: aligned.dates, series: emptySeries, baselineDate: null, minSessions };
+  }
+
+  const series: ComparisonSeries[] = [];
+  for (let index = 0; index < inputs.length; index += 1) {
+    const closes = aligned.closes[index] ?? [];
+    const base = closes[0];
+    const input = inputs[index] as ComparisonInputSeries;
+    if (base === undefined || !Number.isFinite(base) || base <= 0) {
+      return { status: 'invalid-baseline', dates: [], series: emptySeries, baselineDate: null, minSessions };
+    }
+    series.push({ key: input.key, label: input.label, values: closes.map((close) => (close / base) * 100) });
+  }
+
+  return {
+    status: 'ok',
+    dates: aligned.dates,
+    series,
+    baselineDate: aligned.dates[0] ?? null,
+    minSessions,
+  };
+}
+
+/** Inclusive ISO-date window test; an absent bound is open on that side. */
+function inWindow(date: string, from: string | undefined, to: string | undefined): boolean {
+  if (from !== undefined && date < from) return false;
+  if (to !== undefined && date > to) return false;
+  return true;
+}
+
 export interface CorrelationMatrix {
   labels: string[];
   /** Symmetric matrix of Pearson correlations; diagonal is 1 when computable. */

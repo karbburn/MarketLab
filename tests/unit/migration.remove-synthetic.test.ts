@@ -65,6 +65,7 @@ function workspace(id: string, datasetIds: string[]): Workspace {
       visibleRange: null,
       indicators: [],
       drawings: [],
+      compareDatasetIds: [],
     })),
     linkGroups: [],
     createdAt: '2026-01-01T00:00:00.000Z',

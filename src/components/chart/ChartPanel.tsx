@@ -3,6 +3,7 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowsVertical,
+  ChartLineUp,
   Cursor,
   FrameCorners,
   Minus,
@@ -13,6 +14,7 @@ import {
   TrendUp,
   Trash,
   WaveSine,
+  X,
 } from '@phosphor-icons/react';
 import type { Bar, ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, PriceScaleMode, Timeframe } from '../../domain/types';
 import { formatPrice, formatSignedPercent } from '../../lib/format';
@@ -21,11 +23,13 @@ import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators
 import { isDrawingComplete, priceRangeInfo } from '../../lib/drawings/geometry';
 import { createId } from '../../lib/id';
 import { useStore } from '../../state/store';
-import type { DatasetView } from '../../state/selectors';
+import { datasetViews, type DatasetView } from '../../state/selectors';
 import { Segmented, Select, Tag } from '../ui';
 import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
+import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation, type ComparisonTarget } from '../../lib/chart/compare-overlays';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
+import { CompareDialog } from './CompareDialog';
 
 const TOOLS: Array<{ id: DrawingType | 'cursor'; label: string; icon: typeof Cursor }> = [
   { id: 'cursor', label: 'Pointer and selection', icon: Cursor },
@@ -72,6 +76,7 @@ export function ChartPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   // While a drawing is being dragged or just created the local copy leads; the
   // stored workspace state remains the source of truth at rest.
   const [dragDrawings, setDragDrawings] = useState<Drawing[] | null>(null);
@@ -88,6 +93,46 @@ export function ChartPanel({
     if (!dataset) return bars;
     return barsForTimeframe(bars, dataset, chart.timeframe);
   }, [bars, dataset, chart.timeframe]);
+
+  const allViews = useMemo(() => datasetViews(state), [state]);
+
+  // Comparison ids are stored as dataset references. Any id that no longer
+  // resolves (or points at the panel's own dataset) is ignored here; the store
+  // normally prunes those on load and on dataset deletion.
+  const compareTargets = useMemo<ComparisonTarget[]>(() => {
+    if (!dataset || !instrument) return [];
+    return (chart.compareDatasetIds ?? [])
+      .map((id) => allViews.find((entry) => entry.dataset.id === id))
+      .filter((entry): entry is DatasetView => entry !== undefined && entry.dataset.id !== chart.datasetId)
+      .map((entry) => ({
+        datasetId: entry.dataset.id,
+        label: entry.instrument?.symbol ?? entry.dataset.name,
+        dataset: entry.dataset,
+        bars: entry.bars,
+      }));
+  }, [allViews, chart.compareDatasetIds, chart.datasetId, dataset, instrument]);
+
+  const comparison = useMemo<ComparisonPreparation | null>(() => {
+    if (!dataset || !instrument || compareTargets.length === 0) return null;
+    return prepareComparison({
+      primary: { datasetId: dataset.id, label: instrument.symbol, dataset, bars },
+      candidates: compareTargets,
+      timeframe: chart.timeframe,
+    });
+  }, [bars, chart.timeframe, compareTargets, dataset, instrument]);
+
+  const comparisonLines = useMemo<ComparisonLineSpec[]>(() => comparison?.lines ?? [], [comparison]);
+
+  // A comparison set is relative to the primary dataset. When the panel is
+  // re-pointed at a different dataset, drop the old overlays rather than
+  // leaving a context that was never chosen against the new primary.
+  const previousDatasetId = useRef(chart.datasetId);
+  useEffect(() => {
+    if (previousDatasetId.current === chart.datasetId) return;
+    previousDatasetId.current = chart.datasetId;
+    if ((chart.compareDatasetIds ?? []).length === 0) return;
+    void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, compareDatasetIds: [] }));
+  }, [actions, chart.compareDatasetIds, chart.datasetId, chart.id, workspaceId]);
 
   const indicatorSpecs = useMemo<IndicatorRenderSpec[]>(() => {
     const specs: IndicatorRenderSpec[] = [];
@@ -130,8 +175,8 @@ export function ChartPanel({
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
-    controller.render({ bars: rendered, chartType: chart.chartType, showVolume: chart.showVolume, priceScaleMode: chart.priceScaleMode, indicators: indicatorSpecs });
-  }, [rendered, chart.chartType, chart.showVolume, chart.priceScaleMode, indicatorSpecs]);
+    controller.render({ bars: rendered, chartType: chart.chartType, showVolume: chart.showVolume, priceScaleMode: chart.priceScaleMode, indicators: indicatorSpecs, comparisons: comparisonLines });
+  }, [rendered, chart.chartType, chart.showVolume, chart.priceScaleMode, indicatorSpecs, comparisonLines]);
 
   // The controller reads its colours from the CSS variables, so a theme switch
   // has to be pushed into it explicitly.
@@ -466,6 +511,20 @@ export function ChartPanel({
     setSelectedId(null);
   }, [commitDrawings, localDrawings, selectedDrawingId]);
 
+  const removeComparison = useCallback(
+    (datasetId: string) => {
+      void actions.updateChart(workspaceId, chart.id, (config) => ({
+        ...config,
+        compareDatasetIds: (config.compareDatasetIds ?? []).filter((id) => id !== datasetId),
+      }));
+    },
+    [actions, chart.id, workspaceId],
+  );
+
+  const clearComparisons = useCallback(() => {
+    void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, compareDatasetIds: [] }));
+  }, [actions, chart.id, workspaceId]);
+
   const selectTool = (next: DrawingType | 'cursor') => {
     setPendingAnchors([]);
     setTool(next);
@@ -530,6 +589,16 @@ export function ChartPanel({
           ]}
         />
         <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          className="tool-button"
+          title="Compare symbol"
+          aria-label="Compare symbol"
+          aria-pressed={compareTargets.length > 0}
+          onClick={() => setCompareDialogOpen(true)}
+        >
+          <ChartLineUp size={14} weight={compareTargets.length > 0 ? 'bold' : 'regular'} />
+        </button>
         <button type="button" className="tool-button" title="Add indicator" aria-label="Add indicator" onClick={() => setIndicatorDialogOpen(true)}>
           <Plus size={14} weight="bold" />
         </button>
@@ -620,10 +689,66 @@ export function ChartPanel({
                   </div>
                 );
               })}
+              {comparison && (
+                <div className="legend-row compare-legend-title">
+                  <span className="muted">
+                    Compare ·{' '}
+                    {comparison.baselineDate ? `index 100 = ${comparison.baselineDate}` : 'no shared baseline'}
+                  </span>
+                  <button type="button" className="legend-action" onClick={clearComparisons}>
+                    Clear all
+                  </button>
+                </div>
+              )}
+              {comparison?.lines.map((line) => {
+                const value = comparisonValueAt(line, readout.date);
+                const relative = value === null ? null : value - 100;
+                return (
+                  <div className="legend-row compare-legend-item" key={line.datasetId}>
+                    <span className={`legend-line ${line.lineStyle}`} style={{ borderTopColor: line.color }} aria-hidden />
+                    <span className="muted">
+                      {line.label}
+                      {line.primary ? ' (primary)' : ''}
+                    </span>
+                    <span className="legend-values mono">
+                      <span>{value === null ? '–' : value.toFixed(2)}</span>
+                      {relative !== null && <span className={relative >= 0 ? 'up' : 'down'}>{formatSignedPercent(relative)}</span>}
+                    </span>
+                    {!line.primary && (
+                      <button
+                        type="button"
+                        className="legend-action"
+                        aria-label={`Remove ${line.label} comparison`}
+                        onClick={() => removeComparison(line.datasetId)}
+                      >
+                        <X size={11} weight="bold" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {comparison && comparison.status !== 'ok' && (
+                <div className="legend-row">
+                  <span className="muted">{comparison.message}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {comparison && (
+        <div className="panel-foot compare-foot">
+          <div className="stack" style={{ gap: 4 }}>
+            {comparison.excluded.map((entry) => (
+              <span key={entry.datasetId} className="field-hint">
+                {entry.label}: {entry.reason}
+              </span>
+            ))}
+            <span className="field-hint">{comparison.methodNote}</span>
+          </div>
+        </div>
+      )}
 
       {chart.indicators.length > 0 && (
         <div className="panel-foot" style={{ borderTop: '1px solid var(--border-subtle)' }}>
@@ -668,8 +793,29 @@ export function ChartPanel({
         chart={chart}
         workspaceId={workspaceId}
       />
+
+      <CompareDialog
+        open={compareDialogOpen}
+        onClose={() => setCompareDialogOpen(false)}
+        chart={chart}
+        workspaceId={workspaceId}
+        primaryDatasetId={chart.datasetId}
+        views={allViews}
+        preparation={comparison}
+      />
     </div>
   );
+}
+
+/**
+ * The rebased value at the crosshair session, or the latest value when the
+ * pointer is away from the chart. A session the comparison does not share is
+ * reported as missing (`null`) rather than carried forward.
+ */
+function comparisonValueAt(line: ComparisonLineSpec, date: string | null): number | null {
+  if (line.points.length === 0) return null;
+  if (date === null) return line.points[line.points.length - 1]?.value ?? null;
+  return line.points.find((point) => point.date === date)?.value ?? null;
 }
 
 function renderDrawingShape(
