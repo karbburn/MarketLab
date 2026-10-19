@@ -455,6 +455,7 @@ export function ChartWorkspacePage() {
             <ul className="list-reset stack field-hint">
               <li>Drag on empty chart space to pan, scroll to zoom.</li>
               <li>Pick a drawing tool, then click once for a level or twice for a two-point shape.</li>
+              <li>The text tool opens a field where you click; double-click a label to change it.</li>
               <li>Escape cancels a half-drawn shape and returns to the pointer tool.</li>
               <li>Delete removes the selected drawing, Ctrl+Z undoes and Ctrl+Shift+Z redoes.</li>
             </ul>

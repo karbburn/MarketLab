@@ -285,7 +285,7 @@ The suites are run for real and the numbers below are the current ones.
 | Suite | Size | What it covers |
 | --- | --- | --- |
 | Unit (Vitest) | 21 files, 234 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, screener evaluation, the backtest fill model, the download batch queue, backup parsing, the legacy-series removal and export formatting. |
-| End-to-end (Playwright) | 44 tests | The shell and navigation, the chart workspace, drawing and keyboard behaviour, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
+| End-to-end (Playwright) | 48 tests | The shell and navigation, the chart workspace, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
 | Service (pytest) | 22 tests | Success, invalid parameters, empty results, unknown symbols, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
@@ -305,7 +305,7 @@ deployed origin, so a user's own local service can serve the hosted application.
 ## Project status
 
 **Shipped and verified.** The features above, the full local test gate and a live deployment. The
-latest state: `npm run verify` green, 234 unit tests, 44 end-to-end tests, 22 service tests.
+latest state: `npm run verify` green, 234 unit tests, 48 end-to-end tests, 22 service tests.
 
 **Planned, not started** — the account-free items selected from an internal review of what a
 charting terminal offers, in the order they are intended:
