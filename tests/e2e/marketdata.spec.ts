@@ -73,10 +73,29 @@ async function stubService(page: Page, body: unknown, status = 200): Promise<voi
   });
 }
 
-/**
- * Serves a provider response for whichever symbol the batch asks for, with
- * slightly different prices per symbol so the stored series stay distinct.
- */
+/** A provider response for one symbol, with prices distinct per symbol. */
+function symbolPayload(symbol: string): unknown {
+  const offset = symbol.charCodeAt(0) % 7;
+  const bars = HISTORY_BARS.map((bar) => ({
+    ...bar,
+    open: bar.open + offset,
+    high: bar.high + offset,
+    low: bar.low + offset,
+    close: bar.close + offset,
+    adjClose: bar.adjClose + offset,
+  }));
+  return {
+    provider: {
+      ...PROVIDER_PAYLOAD.provider,
+      providerSymbol: symbol,
+      displaySymbol: symbol,
+      displayName: `${symbol} Inc.`,
+    },
+    bars,
+  };
+}
+
+/** Serves a provider response for whichever symbol the batch asks for. */
 async function stubPerSymbol(page: Page): Promise<void> {
   await page.route('**/api/history*', async (route) => {
     if (route.request().method() === 'OPTIONS') {
@@ -84,28 +103,11 @@ async function stubPerSymbol(page: Page): Promise<void> {
       return;
     }
     const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? 'AAPL';
-    const offset = symbol.charCodeAt(0) % 7;
-    const bars = HISTORY_BARS.map((bar) => ({
-      ...bar,
-      open: bar.open + offset,
-      high: bar.high + offset,
-      low: bar.low + offset,
-      close: bar.close + offset,
-      adjClose: bar.adjClose + offset,
-    }));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({
-        provider: {
-          ...PROVIDER_PAYLOAD.provider,
-          providerSymbol: symbol,
-          displaySymbol: symbol,
-          displayName: `${symbol} Inc.`,
-        },
-        bars,
-      }),
+      body: JSON.stringify(symbolPayload(symbol)),
     });
   });
 }
@@ -251,5 +253,51 @@ test.describe('bulk market data download', () => {
     await expect(dialog.getByText(/market-data service is not reachable/i).first()).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Retry failed (2)' })).toBeVisible();
     await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
+  });
+
+  test('retries only the failed symbols and stores them when the provider recovers', async ({ page }) => {
+    const attempts = new Map<string, number>();
+    await page.route('**/api/history*', async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: CORS_HEADERS });
+        return;
+      }
+      const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? 'AAPL';
+      const attempt = (attempts.get(symbol) ?? 0) + 1;
+      attempts.set(symbol, attempt);
+      if (attempt === 1) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ detail: 'The provider is temporarily unavailable.' }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify(symbolPayload(symbol)),
+      });
+    });
+
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');
+    await dialog.getByRole('button', { name: 'Download 2 symbols' }).click();
+
+    await expect(dialog.getByText(/0 saved, 2 failed\./)).toBeVisible();
+    await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
+
+    // Retry requests only the two failed symbols, and both now succeed.
+    await dialog.getByRole('button', { name: 'Retry failed (2)' }).click();
+    await expect(dialog.getByText(/2 saved, 0 failed\./)).toBeVisible();
+    await expect(page.locator('.shell-nav')).toContainText('2 datasets loaded');
+    expect([...attempts.entries()]).toEqual([
+      ['AAPL', 2],
+      ['MSFT', 2],
+    ]);
   });
 });
