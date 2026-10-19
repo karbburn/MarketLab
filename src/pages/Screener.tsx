@@ -37,7 +37,9 @@ export function ScreenerPage() {
   const [draft, setDraft] = useState<ScreenerDefinition | null>(null);
   const [selectedSavedId, setSelectedSavedId] = useState<string>('');
 
-  const definition = draft ?? state.screeners.find((entry) => entry.id === selectedSavedId) ?? null;
+  const selectedSaved = state.screeners.find((entry) => entry.id === selectedSavedId) ?? null;
+  const definition = draft ?? selectedSaved;
+  const definitionIsSaved = definition !== null && state.screeners.some((entry) => entry.id === definition.id);
 
   const result = useMemo(() => {
     if (!definition) return null;
@@ -67,6 +69,31 @@ export function ScreenerPage() {
     updateDraft((current) => ({ ...current, filters: current.filters.map((filter) => (filter.id === filterId ? updater(filter) : filter)) }));
   };
 
+  // Clone a saved definition into the editable draft. Arrays are copied so the
+  // editor never mutates the stored record in place.
+  const editSaved = () => {
+    if (!selectedSaved) return;
+    setDraft({
+      ...selectedSaved,
+      universeDatasetIds: [...selectedSaved.universeDatasetIds],
+      filters: selectedSaved.filters.map((filter) => ({ ...filter })),
+      combinators: [...selectedSaved.combinators],
+    });
+  };
+
+  const removeFilter = (filterId: string) => {
+    updateDraft((current) => {
+      const index = current.filters.findIndex((filter) => filter.id === filterId);
+      if (index === -1) return current;
+      // combinators[i] joins filters[i] and filters[i + 1]. Removing a filter
+      // must remove the operator that used to precede it so the remaining rows
+      // stay aligned.
+      const combinators = [...current.combinators];
+      if (combinators.length > 0) combinators.splice(index === 0 ? 0 : index - 1, 1);
+      return { ...current, filters: current.filters.filter((filter) => filter.id !== filterId), combinators };
+    });
+  };
+
   return (
     <div className="page">
       <Panel
@@ -86,8 +113,20 @@ export function ScreenerPage() {
               <Plus size={13} aria-hidden />
               New screen
             </button>
+            {selectedSaved && !draft && (
+              <button type="button" className="button sm" onClick={editSaved}>
+                Edit
+              </button>
+            )}
             {definition && draft && (
-              <button type="button" className="button sm primary" onClick={() => void actions.saveScreener(draft)}>
+              <button
+                type="button"
+                className="button sm primary"
+                onClick={() => {
+                  void actions.saveScreener(draft);
+                  setSelectedSavedId(draft.id);
+                }}
+              >
                 <FloppyDisk size={13} aria-hidden />
                 Save
               </button>
@@ -111,22 +150,23 @@ export function ScreenerPage() {
                 Export
               </button>
             )}
+            {definitionIsSaved && definition && (
+              <button
+                type="button"
+                className="button sm danger"
+                onClick={() => {
+                  void actions.deleteScreener(definition.id);
+                  setDraft(null);
+                  setSelectedSavedId('');
+                }}
+              >
+                Delete
+              </button>
+            )}
             {draft && (
-              <>
-                <button
-                  type="button"
-                  className="button sm danger"
-                  onClick={() => {
-                    void actions.deleteScreener(draft.id);
-                    setDraft(null);
-                  }}
-                >
-                  Delete
-                </button>
-                <button type="button" className="button sm ghost" onClick={() => setDraft(null)}>
-                  Discard changes
-                </button>
-              </>
+              <button type="button" className="button sm ghost" onClick={() => setDraft(null)}>
+                Discard changes
+              </button>
             )}
           </div>
         }
@@ -273,7 +313,7 @@ export function ScreenerPage() {
                       className="button ghost sm"
                       disabled={!draft || definition.filters.length <= 1}
                       aria-label="Remove filter"
-                      onClick={() => updateDraft((current) => ({ ...current, filters: current.filters.filter((entry) => entry.id !== filter.id) }))}
+                      onClick={() => removeFilter(filter.id)}
                     >
                       <Trash size={13} aria-hidden />
                     </button>

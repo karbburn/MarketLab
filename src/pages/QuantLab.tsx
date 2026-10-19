@@ -50,6 +50,9 @@ export function QuantLabPage() {
     const sources = benchmark ? [primary.bars, benchmark.bars] : [primary.bars];
     const aligned = alignOnCommonDates(sources);
     if (aligned.dates.length === 0) {
+      // A selected benchmark with no shared sessions is reported explicitly;
+      // plotting the primary series alone would silently drop the benchmark.
+      if (benchmark) return [] as ChartSeries[];
       const normalised = normalisedPerformance(
         primary.bars.map((bar) => bar.date),
         primary.bars.map((bar) => bar.close),
@@ -193,28 +196,48 @@ export function QuantLabPage() {
               <Metric
                 label={benchmark ? `Beta vs ${benchmark.instrument?.symbol ?? ''}` : 'Beta'}
                 value={metrics.beta?.beta == null ? '--' : metrics.beta.beta.toFixed(2)}
-                note={metrics.beta?.rSquared == null ? 'Select a benchmark to compute' : `R squared ${metrics.beta.rSquared.toFixed(2)}`}
+                note={
+                  metrics.beta?.rSquared == null
+                    ? benchmark
+                      ? 'Not enough overlapping sessions'
+                      : 'Select a benchmark to compute'
+                    : `R squared ${metrics.beta.rSquared.toFixed(2)}`
+                }
               />
             </div>
           </Panel>
 
           <div className="grid-2">
-            <Panel title="Normalised performance" subtitle="Percent change from the first common session">
-              <LineChart
-                series={performance}
-                height={220}
-                baseline={0}
-                yFormat={(value) => `${value.toFixed(0)}%`}
-                ariaLabel={`Normalised performance of ${symbols}`}
-                xLabels={
-                  primary.bars.length > 1
-                    ? [
-                        { x: 0, label: (primary.bars[0] as { date: string }).date },
-                        { x: 1, label: (primary.bars[primary.bars.length - 1] as { date: string }).date },
-                      ]
-                    : []
-                }
-              />
+            <Panel
+              title="Normalised performance"
+              subtitle={
+                benchmark && performance.length === 0
+                  ? `No overlapping sessions with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
+                  : 'Percent change from the first common session'
+              }
+            >
+              {benchmark && performance.length === 0 ? (
+                <EmptyState
+                  title="No overlapping sessions"
+                  body={`${symbols} and ${benchmark.instrument?.symbol ?? benchmark.dataset.name} share no sessions, so there is nothing to compare.`}
+                />
+              ) : (
+                <LineChart
+                  series={performance}
+                  height={220}
+                  baseline={0}
+                  yFormat={(value) => `${value.toFixed(0)}%`}
+                  ariaLabel={`Normalised performance of ${symbols}`}
+                  xLabels={
+                    primary.bars.length > 1
+                      ? [
+                          { x: 0, label: (primary.bars[0] as { date: string }).date },
+                          { x: 1, label: (primary.bars[primary.bars.length - 1] as { date: string }).date },
+                        ]
+                      : []
+                  }
+                />
+              )}
             </Panel>
             <Panel title="Rolling volatility" subtitle={`Annualised, ${window}-session window`}>
               {rollingVol[0]?.points.length ? (

@@ -12,8 +12,14 @@ const LINK_PROPERTIES: Array<{ id: LinkProperty; label: string; note: string }> 
   { id: 'symbol', label: 'Symbol', note: 'Panel symbol and dataset follow the focused panel' },
   { id: 'timeframe', label: 'Timeframe', note: 'Timeframe follows the focused panel' },
   { id: 'visible-range', label: 'Visible range', note: 'Mirror the focused panel zoom across panels' },
-  { id: 'crosshair', label: 'Crosshair', note: 'Crosshair position is read from the focused panel' },
 ];
+
+/** Smallest layout that can render every stored panel. */
+function layoutForPanelCount(count: number): WorkspaceLayout {
+  if (count <= 1) return 'single';
+  if (count === 2) return 'two-vertical';
+  return 'four';
+}
 
 export function ChartWorkspacePage() {
   const { state, actions } = useStore();
@@ -21,7 +27,7 @@ export function ChartWorkspacePage() {
   const views = useMemo(() => datasetViews(state), [state]);
   const [focusedChartId, setFocusedChartId] = useState<string | null>(null);
   const [sharedRange, setSharedRange] = useState<{ from: number; to: number } | null>(null);
-  const [watchlistId, setWatchlistId] = useState<string | null>(null);
+  const [watchlistByWorkspace, setWatchlistByWorkspace] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
 
@@ -31,7 +37,21 @@ export function ChartWorkspacePage() {
   );
   const focusedChart = visibleCharts.find((chart) => chart.id === focusedChartId) ?? visibleCharts[0] ?? null;
   // The focused panel is derived: a stale id simply falls back to the first panel.
-  const effectiveWatchlistId = watchlistId ?? state.watchlists[0]?.id ?? null;
+  // The workspace remembers the watchlist chosen with "Use on charts"; the local
+  // state only wins while it still points at an existing watchlist.
+  const workspaceWatchlistId = workspace ? watchlistByWorkspace[workspace.id] : undefined;
+  const persistedWatchlistId = workspace?.activeWatchlistId;
+  const effectiveWatchlistId =
+    (workspaceWatchlistId && state.watchlists.some((entry) => entry.id === workspaceWatchlistId) ? workspaceWatchlistId : null) ??
+    (persistedWatchlistId && state.watchlists.some((entry) => entry.id === persistedWatchlistId) ? persistedWatchlistId : null) ??
+    state.watchlists[0]?.id ??
+    null;
+
+  const chooseWatchlist = (value: string) => {
+    if (!workspace) return;
+    setWatchlistByWorkspace((previous) => ({ ...previous, [workspace.id]: value }));
+    void actions.updateWorkspace(workspace.id, (current) => ({ ...current, activeWatchlistId: value }));
+  };
 
   const linkGroup = workspace?.linkGroups[0] ?? null;
   const linkProperties = linkGroup?.properties ?? [];
@@ -46,7 +66,9 @@ export function ChartWorkspacePage() {
           id: current.linkGroups[0]?.id ?? `link_${current.id}`,
           name: current.linkGroups[0]?.name ?? 'Linked panels',
           chartIds: current.charts.map((chart) => chart.id),
-          properties,
+          // `crosshair` is not implemented; drop any stored value rather than
+          // persisting a property that nothing reads.
+          properties: properties.filter((property) => property !== 'crosshair'),
         },
       ],
     }));
@@ -114,7 +136,7 @@ export function ChartWorkspacePage() {
           <div className="row tight">
             {renaming ? (
               <>
-                <TextInput value={nameDraft} onChange={setNameDraft} />
+                <TextInput ariaLabel="Workspace name" value={nameDraft} onChange={setNameDraft} />
                 <button
                   type="button"
                   className="button sm primary"
@@ -132,6 +154,7 @@ export function ChartWorkspacePage() {
             ) : (
               <>
                 <Select
+                  ariaLabel="Active workspace"
                   value={workspace.id}
                   onChange={(value) => void actions.setActiveWorkspace(value)}
                   options={state.workspaces.map((entry) => ({ value: entry.id, label: entry.name }))}
@@ -200,6 +223,7 @@ export function ChartWorkspacePage() {
             {focusedChart ? (
               <>
                 <Select
+                  ariaLabel="Focused panel dataset"
                   value={focusedChart.datasetId}
                   onChange={(value) => {
                     const view = views.find((entry) => entry.dataset.id === value);
@@ -218,17 +242,23 @@ export function ChartWorkspacePage() {
                 <button
                   type="button"
                   className="button sm"
+                  disabled={workspace.charts.length >= 4}
+                  title={workspace.charts.length >= 4 ? 'Four panels is the maximum layout' : undefined}
                   onClick={() =>
                     void actions.updateWorkspace(workspace.id, (current) => {
                       const source = current.charts.find((chart) => chart.id === focusedChart.id);
                       if (!source) return current;
-                      return { ...current, charts: [...current.charts, duplicateChartConfig(source)] };
+                      const charts = [...current.charts, duplicateChartConfig(source)];
+                      // Grow the layout so the new panel is visible immediately.
+                      const layout = charts.length > chartCountForLayout(current.layout) ? layoutForPanelCount(charts.length) : current.layout;
+                      return { ...current, charts, layout };
                     })
                   }
                 >
                   <Copy size={13} aria-hidden />
                   Duplicate panel
                 </button>
+                {workspace.charts.length >= 4 && <span className="field-hint">Four panels is the maximum layout.</span>}
                 <button
                   type="button"
                   className="button sm danger"
@@ -276,8 +306,9 @@ export function ChartWorkspacePage() {
             actions={
               <div className="row tight">
                 <Select
+                  ariaLabel="Chart watchlist"
                   value={activeWatchlist?.id ?? ''}
-                  onChange={(value) => setWatchlistId(value)}
+                  onChange={chooseWatchlist}
                   options={state.watchlists.map((entry) => ({ value: entry.id, label: entry.name }))}
                 />
                 <button
@@ -285,7 +316,7 @@ export function ChartWorkspacePage() {
                   className="button sm ghost"
                   onClick={async () => {
                     const id = await actions.createWatchlistNamed(`Watchlist ${state.watchlists.length + 1}`, []);
-                    setWatchlistId(id);
+                    chooseWatchlist(id);
                   }}
                 >
                   <Plus size={13} aria-hidden />

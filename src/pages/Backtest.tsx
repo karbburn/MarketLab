@@ -72,7 +72,8 @@ export function BacktestPage() {
 
   const equitySeries = useMemo<ChartSeries[]>(() => {
     if (!result || result.equityCurve.length === 0) return [];
-    const base = draft?.initialCapital ?? 1;
+    // Rebase against the capital the run actually used, not the live draft.
+    const base = runRequest?.config.initialCapital ?? 1;
     return [
       {
         id: 'equity',
@@ -87,7 +88,7 @@ export function BacktestPage() {
         points: result.equityCurve.map((point, index) => ({ x: index, y: (point.benchmark / base - 1) * 100 })),
       },
     ];
-  }, [result, draft]);
+  }, [result, runRequest]);
 
   const drawdownSeries = useMemo<ChartSeries[]>(() => {
     if (!result) return [];

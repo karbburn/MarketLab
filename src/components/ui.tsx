@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useEffect, useId, useRef, type ChangeEvent, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from 'react';
 import { X } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 
@@ -60,8 +60,29 @@ export function Field({
   const generated = useId();
   const childId = isValidElement(children) ? (children.props as { id?: string }).id : undefined;
   const controlId = htmlFor ?? childId ?? generated;
-  // Associate the visible label with the control so it is announced and can be
-  // targeted by its label. Controls that expose an `id` receive one here.
+  // Only elements that accept an `id` and are labelable receive `htmlFor`.
+  // Groups (Segmented, plain layout divs) are labelled with the field label
+  // through `aria-labelledby` so the association is still announced.
+  const childType = isValidElement(children) ? children.type : undefined;
+  const labelable =
+    typeof childType === 'string'
+      ? ['input', 'select', 'textarea', 'button'].includes(childType)
+      : childType === TextInput || childType === NumberInput || childType === Select || childType === Switch;
+
+  if (!labelable) {
+    const labelId = `${generated}-label`;
+    return (
+      <div className="field" role="group" aria-labelledby={labelId}>
+        <span className="field-label" id={labelId}>
+          {label}
+        </span>
+        {children}
+        {hint !== undefined && error === undefined && <span className="field-hint">{hint}</span>}
+        {error !== undefined && <span className="field-error">{error}</span>}
+      </div>
+    );
+  }
+
   const control =
     isValidElement(children) && childId === undefined && htmlFor === undefined
       ? cloneElement(children as ReactElement<{ id?: string }>, { id: controlId })
@@ -88,6 +109,7 @@ export function TextInput({
   max,
   step,
   disabled,
+  ariaLabel,
   onKeyDown,
 }: {
   value: string;
@@ -99,11 +121,13 @@ export function TextInput({
   max?: number | string;
   step?: number | string;
   disabled?: boolean;
+  ariaLabel?: string;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   return (
     <input
       id={id}
+      aria-label={ariaLabel}
       className="input"
       type={type}
       value={value}
@@ -137,25 +161,29 @@ export function NumberInput({
   disabled?: boolean;
   placeholder?: string;
 }) {
+  // The rendered text is a local draft so an empty field stays empty while the
+  // operator types. Only parseable values are committed to the caller.
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (Number.isFinite(value) ? String(value) : '');
   return (
     <input
       id={id}
       className="input"
       type="number"
-      value={Number.isFinite(value) ? String(value) : ''}
+      value={shown}
       min={min}
       max={max}
       step={step}
       disabled={disabled}
       placeholder={placeholder}
       onChange={(event) => {
-        const parsed = Number(event.target.value);
-        if (event.target.value === '') {
-          onChange(Number.NaN);
-          return;
-        }
+        const text = event.target.value;
+        setDraft(text);
+        if (text === '') return;
+        const parsed = Number(text);
         if (Number.isFinite(parsed)) onChange(parsed);
       }}
+      onBlur={() => setDraft(null)}
     />
   );
 }
@@ -166,15 +194,24 @@ export function Select<T extends string>({
   options,
   id,
   disabled,
+  ariaLabel,
 }: {
   value: T;
   onChange: (value: T) => void;
   options: Array<{ value: T; label: string }>;
   id?: string;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   return (
-    <select id={id} className="select" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value as T)}>
+    <select
+      id={id}
+      aria-label={ariaLabel}
+      className="select"
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as T)}
+    >
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -278,17 +315,48 @@ export function Modal({
   wide?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  // Inline arrows are common, so the listener reads the latest callback instead
+  // of re-running the effect (and re-focusing) on every parent render.
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
+    restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const firstField = dialog?.querySelector<HTMLElement>('.dialog-body input, .dialog-body select, .dialog-body textarea, .dialog-body button');
+    const fallback = dialog?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]');
+    (firstField ?? fallback ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = dialog.querySelectorAll<HTMLElement>('input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      const first = focusable[0] as HTMLElement;
+      const last = focusable[focusable.length - 1] as HTMLElement;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
-    const focusable = dialogRef.current?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]');
-    focusable?.focus();
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      restoreRef.current?.focus();
+      restoreRef.current = null;
+    };
+  }, [open]);
 
   if (!open) return null;
   return (
@@ -298,7 +366,7 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={wide ? 'dialog wide' : 'dialog'} role="dialog" aria-modal="true" aria-label={title} ref={dialogRef}>
+      <div className={wide ? 'dialog wide' : 'dialog'} role="dialog" aria-modal="true" aria-label={title} ref={dialogRef} tabIndex={-1}>
         <header className="dialog-head">
           <span className="dialog-title">{title}</span>
           <button type="button" className="button ghost icon" onClick={onClose} aria-label="Close dialog">
