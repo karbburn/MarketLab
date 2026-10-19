@@ -61,4 +61,31 @@ test.describe('shell, navigation and theme', () => {
     await page.reload();
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(2);
   });
+
+  test('collapses navigation into a drawer on a narrow viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+
+    // The sidebar is off-canvas, so the page itself must not overflow.
+    const toggle = page.getByRole('button', { name: 'Open navigation' });
+    await expect(toggle).toBeVisible();
+    await expect(page.locator('.shell-nav')).not.toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+
+    await toggle.click();
+    await expect(page.locator('.shell-nav')).toBeVisible();
+    await expect(page.locator('.shell-nav-toggle')).toHaveAttribute('aria-expanded', 'true');
+
+    // Following a link navigates and dismisses the drawer.
+    await page.locator('.shell-nav').getByRole('link', { name: 'Screener', exact: true }).click();
+    await expect(page.locator('.topbar-title')).toHaveText('Historical screener');
+    await expect(page.locator('.shell-nav')).not.toBeVisible();
+
+    // Escape also dismisses it.
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await expect(page.locator('.shell-nav')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.shell-nav')).not.toBeVisible();
+  });
 });

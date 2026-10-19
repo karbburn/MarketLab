@@ -10,11 +10,13 @@ import {
   Sun,
   Moon,
   UploadSimple,
+  List,
+  X,
 } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { Toaster } from './ui';
 import { datasetViews, hasSyntheticData } from '../state/selectors';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ImportDialog } from './data/ImportDialog';
 
 interface NavEntry {
@@ -63,14 +65,32 @@ export function AppShell() {
   const { state, actions } = useStore();
   const location = useLocation();
   const [importOpen, setImportOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   const views = datasetViews(state);
   const synthetic = hasSyntheticData(state);
   const title = TITLES[location.pathname] ?? 'MarketLab';
 
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navOpen]);
+
   return (
-    <div className="shell">
-      <nav className="shell-nav" aria-label="Primary">
+    <div className={navOpen ? 'shell nav-open' : 'shell'}>
+      {navOpen && (
+        <button
+          type="button"
+          className="shell-scrim"
+          aria-label="Close navigation"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+      <nav id="primary-nav" className={navOpen ? 'shell-nav open' : 'shell-nav'} aria-label="Primary">
         <div className="shell-brand">
           <span className="shell-brand-mark" aria-hidden>
             ML
@@ -90,6 +110,7 @@ export function AppShell() {
                 to={entry.to}
                 end={entry.end}
                 className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
+                onClick={() => setNavOpen(false)}
               >
                 <entry.icon size={15} weight="regular" aria-hidden />
                 <span className="nav-item-label">{entry.label}</span>
@@ -115,6 +136,17 @@ export function AppShell() {
 
       <div className="shell-main">
         <header className="topbar">
+          <button
+            type="button"
+            className="button ghost icon shell-nav-toggle"
+            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={navOpen}
+            aria-controls="primary-nav"
+            title={navOpen ? 'Close navigation' : 'Open navigation'}
+            onClick={() => setNavOpen((open) => !open)}
+          >
+            {navOpen ? <X size={17} /> : <List size={17} />}
+          </button>
           <span className="topbar-title">{title}</span>
           <span className="topbar-spacer" />
           {state.loadError && (
@@ -123,9 +155,9 @@ export function AppShell() {
             </span>
           )}
           {state.adapterKind === 'memory' && <span className="tag warn">Storage unavailable: changes will not persist</span>}
-          <button type="button" className="button sm" onClick={() => setImportOpen(true)}>
+          <button type="button" className="button sm" aria-label="Import data" onClick={() => setImportOpen(true)}>
             <UploadSimple size={13} weight="bold" aria-hidden />
-            Import data
+            <span className="topbar-action-label">Import data</span>
           </button>
           <button
             type="button"

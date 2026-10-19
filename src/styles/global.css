@@ -279,10 +279,75 @@ button {
 .topbar-title {
   font-size: 13px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-spacer {
   flex: 1;
+}
+
+/* The navigation drawer is a narrow-viewport affordance only. */
+.shell-nav-toggle,
+.shell-scrim {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell-nav {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(var(--shell-nav), 82vw);
+    height: 100dvh;
+    box-shadow: var(--shadow-panel);
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform var(--duration) ease, visibility var(--duration) ease;
+  }
+
+  .shell-nav.open {
+    visibility: visible;
+    transform: translateX(0);
+  }
+
+  .shell-nav-toggle {
+    display: inline-flex;
+  }
+
+  .shell-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    border: 0;
+    padding: 0;
+    background: rgba(4, 8, 12, 0.55);
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    gap: 7px;
+    padding: 0 8px;
+  }
+
+  .topbar-action-label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-nav {
+    transition: none;
+  }
 }
 
 .page {
