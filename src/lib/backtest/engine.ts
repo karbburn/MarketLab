@@ -61,6 +61,15 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig): Backt
 
   const context = new StrategyContext(windowBars);
   const warmup = Math.max(requiredWarmup([...config.entry, ...config.exit]), 1);
+  // Fail closed: with no bar after the warm-up no rule can be evaluated and no
+  // equity point can be produced. Returning an empty result is honest here.
+  if (warmup >= windowBars.length) {
+    return {
+      trades,
+      equityCurve: [],
+      metrics: emptyMetrics(),
+    };
+  }
   const commissionRate = config.commissionBps / 10_000;
   const slippageRate = config.slippageBps / 10_000;
   const positionFraction = Math.max(0.01, Math.min(1, config.positionSizePct / 100));
@@ -191,7 +200,10 @@ function closePosition(
   // Gross PnL ignores all costs; net PnL is proceeds minus the entry notional and
   // the entry commission that was already deducted from cash.
   const grossPnl = position.quantity * (rawPrice - position.entryPrice);
-  const costs = position.entryCosts + exitCommission;
+  // Costs include the exit slippage as well as both commissions, so the display
+  // invariant `netPnl === grossPnl - costs` holds exactly.
+  const exitSlippage = position.quantity * rawPrice * slippageRate;
+  const costs = position.entryCosts + exitCommission + exitSlippage;
   const netPnl = proceeds - entryNotional - position.entryCosts;
   trades.push({
     entryDate: position.entryDate,

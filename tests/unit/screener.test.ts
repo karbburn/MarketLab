@@ -177,4 +177,22 @@ describe('evaluateScreener sorting', () => {
     expect(result.rows[1]?.symbol).toBe('BBB');
     expect(result.rows[1]?.values.rsi).toBeNull();
   });
+
+  it('computes the sort field even when it is not one of the filters', () => {
+    const sortedInputs: ScreenerInput[] = [
+      { dataset: dataset('ds-b', 'inst-b'), instrument: instrument('inst-b', 'BBB'), bars: barsFromCloses([10, 10, 10, 10, 10, 10]) },
+      { dataset: dataset('ds-a', 'inst-a'), instrument: instrument('inst-a', 'AAA'), bars: barsFromCloses([10, 11, 12, 13, 14, 15]) },
+    ];
+    const result = evaluateScreener(
+      definition({
+        filters: [filter({ id: 'p', field: 'price-vs-sma', operator: 'gt', value: -100, window: 3 })],
+        sortBy: 'return',
+        sortDirection: 'desc',
+      }),
+      sortedInputs,
+    );
+    expect(result.rows[0]?.symbol).toBe('AAA');
+    expect(result.rows[0]?.values.return).not.toBeUndefined();
+    expect(result.rows[1]?.values.return).not.toBeUndefined();
+  });
 });

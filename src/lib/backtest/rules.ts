@@ -16,7 +16,7 @@ export class StrategyContext {
   private readonly rsiCache = new Map<number, Series>();
   private readonly highestCache = new Map<number, Array<number | null>>();
   private readonly lowestCache = new Map<number, Array<number | null>>();
-  private macdCache: { macd: Series; signal: Series; histogram: Series } | null = null;
+  private readonly macdCache = new Map<string, { macd: Series; signal: Series; histogram: Series }>();
 
   constructor(private readonly bars: readonly Bar[]) {
     this.closes = closes(bars);
@@ -72,11 +72,13 @@ export class StrategyContext {
   }
 
   macd(fast: number, slow: number, signal: number): { macd: Series; signal: Series } {
-    if (!this.macdCache) {
-      const outputs = this.macdAll(fast, slow, signal);
-      this.macdCache = outputs;
+    const key = `${fast}:${slow}:${signal}`;
+    let cached = this.macdCache.get(key);
+    if (!cached) {
+      cached = this.macdAll(fast, slow, signal);
+      this.macdCache.set(key, cached);
     }
-    return { macd: this.macdCache.macd, signal: this.macdCache.signal };
+    return { macd: cached.macd, signal: cached.signal };
   }
 
   private macdAll(fast: number, slow: number, signal: number) {

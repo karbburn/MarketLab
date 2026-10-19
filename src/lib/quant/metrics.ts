@@ -90,12 +90,18 @@ export function sharpeRatio(returns: readonly number[]): number | null {
   return annualReturn / annualVol;
 }
 
+/**
+ * Downside deviation: the root-mean-square of shortfalls below the zero target,
+ * taken over all observations and annualised like the rest of this module.
+ */
 export function downsideDeviation(returns: readonly number[]): number | null {
-  const negatives = returns.filter((value) => value < 0);
-  if (negatives.length === 0) return null;
-  const sd = sampleStdDev(negatives);
-  if (sd === null) return null;
-  return sd * Math.sqrt(TRADING_DAYS_PER_YEAR);
+  if (returns.length === 0) return null;
+  let acc = 0;
+  for (const value of returns) {
+    const shortfall = Math.min(value, 0);
+    acc += shortfall * shortfall;
+  }
+  return Math.sqrt(acc / returns.length) * Math.sqrt(TRADING_DAYS_PER_YEAR);
 }
 
 /** Sortino ratio with an assumed target return of zero. */

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Bar } from '../../src/domain/types';
 import {
   cagrPct,
+  downsideDeviation,
   historicalCvarPct,
   historicalVarPct,
   maxDrawdownPct,
@@ -86,6 +87,18 @@ describe('sharpeRatio', () => {
   it('is positive for a steadily positive return stream', () => {
     const returns = [0.01, 0.012, 0.008, 0.015, 0.011];
     expect(sharpeRatio(returns) as number).toBeGreaterThan(0);
+  });
+});
+
+describe('downsideDeviation', () => {
+  it('is the annualised root-mean-square of shortfalls over all observations', () => {
+    // shortfalls: -0.10, -0.02, 0, 0 -> sqrt((0.01 + 0.0004) / 4) * sqrt(252)
+    expect(downsideDeviation([-0.1, -0.02, 0.05, 0.03]) as number).toBeCloseTo(0.8094, 4);
+  });
+
+  it('returns null for an empty series and zero when no observation is negative', () => {
+    expect(downsideDeviation([])).toBeNull();
+    expect(downsideDeviation([0.01, 0.02])).toBe(0);
   });
 });
 

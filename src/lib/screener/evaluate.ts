@@ -55,6 +55,16 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
       filterResults.push(compare(filter.operator, reading.current, reading.previous, filter.value));
     }
 
+    // The Sort-by control offers fields independently of the filter list, so the
+    // sort field must be computed even when no filter uses it.
+    if (definition.sortBy !== 'symbol') {
+      const field = definition.sortBy as ScreenerField;
+      if (!(field in values)) {
+        const window = definition.filters.find((filter) => filter.field === field)?.window ?? definition.filters[0]?.window ?? 20;
+        values[field] = computeField(field, window, bars).current;
+      }
+    }
+
     rows.push({
       datasetId: input.dataset.id,
       instrumentId: input.instrument.id,

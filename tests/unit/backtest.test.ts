@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { BacktestConfig, Bar, StrategyRule } from '../../src/domain/types';
 import { compare } from '../../src/lib/backtest/compare';
 import { runBacktest } from '../../src/lib/backtest/engine';
+import { StrategyContext } from '../../src/lib/backtest/rules';
 import { addDays } from '../../src/lib/date';
 
 function series(opens: readonly number[], closes: readonly number[]): Bar[] {
@@ -155,5 +156,45 @@ describe('runBacktest execution', () => {
     expect(result.trades).toEqual([]);
     expect(result.equityCurve).toEqual([]);
     expect(result.metrics.tradeCount).toBe(0);
+  });
+
+  it('fails closed when the warm-up is not shorter than the window', () => {
+    // RSI(2) requires three warm-up bars, so a three-bar window has no bar left
+    // on which a rule can evaluate. The engine must not dereference past the end.
+    const bars = series([10, 11, 12], [10, 11, 12]);
+    const result = runBacktest(bars, config([entry], [exit]));
+    expect(result.trades).toEqual([]);
+    expect(result.equityCurve).toEqual([]);
+    expect(result.metrics.tradeCount).toBe(0);
+    expect(result.metrics.totalReturnPct).toBe(0);
+  });
+
+  it('includes exit slippage in costs so net PnL reconciles with gross PnL', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12.5, 11, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { commissionBps: 10, slippageBps: 10 }));
+    const trade = result.trades[0] as (typeof result.trades)[number];
+    expect(trade.costs).toBeGreaterThan(0);
+    expect(trade.netPnl).toBeCloseTo(trade.grossPnl - trade.costs, 10);
+  });
+});
+
+describe('StrategyContext indicator caches', () => {
+  it('keys the MACD cache by (fast, slow, signal)', () => {
+    const closes = Array.from({ length: 40 }, (_, index) => 10 + index);
+    const bars: Bar[] = closes.map((close, index) => ({
+      date: addDays('2024-01-01', index),
+      open: close,
+      high: close + 1,
+      low: close - 1,
+      close,
+      volume: null,
+    }));
+    const context = new StrategyContext(bars);
+    const first = context.macd(12, 26, 9);
+    const second = context.macd(5, 10, 3);
+    expect(second.macd).not.toBe(first.macd);
+    expect(second.macd.some((value, index) => value !== first.macd[index])).toBe(true);
   });
 });
