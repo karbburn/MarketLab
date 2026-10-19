@@ -101,7 +101,12 @@ test.describe('data library', () => {
     await page.goto('/#/data');
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
 
-    await page.locator('table.data tbody tr').first().getByRole('button', { name: 'Delete' }).click();
+    const row = page.locator('table.data tbody tr').first();
+    await row.getByRole('button', { name: 'Delete', exact: true }).click();
+
+    // Deletion is destructive for panels and drawings, so it asks first.
+    await expect(row.getByText(/Removes \d+ panel\(s\)/)).toBeVisible();
+    await row.getByRole('button', { name: 'Delete dataset' }).click();
 
     await expect(page.getByText('Dataset removed.')).toBeVisible();
     await expect(page.locator('table.data tbody tr')).toHaveCount(5);

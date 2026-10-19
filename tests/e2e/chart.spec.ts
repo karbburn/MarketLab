@@ -13,6 +13,19 @@ async function waitForChart(page: Page): Promise<void> {
     .toBeGreaterThan(100);
 }
 
+/** Waits until every visible panel has a rendered, sized drawing overlay. */
+async function waitForPanels(page: Page, count: number): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        page.locator('canvas.chart-overlay').evaluateAll(
+          (nodes) => nodes.filter((node) => Number(node.getAttribute('width')) > 100).length,
+        ),
+      { message: `all ${count} panels should be rendered` },
+    )
+    .toBe(count);
+}
+
 test.describe('chart workspace', () => {
   test('renders an interactive chart with a legend and honest timeframe labels', async ({ page }) => {
     await page.goto('/#/chart');
@@ -45,6 +58,7 @@ test.describe('chart workspace', () => {
 
     await page.getByRole('button', { name: 'Four panels' }).click();
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(4);
+    await waitForPanels(page, 4);
 
     // Link the symbol so every panel follows the focused one.
     await page.getByRole('checkbox', { name: 'Symbol' }).check();
@@ -114,6 +128,49 @@ test.describe('chart workspace', () => {
     await expect(deleteSelected).toBeEnabled();
     await deleteSelected.click();
     await expect(deleteSelected).toBeDisabled();
+  });
+
+  test('does not run drawing shortcuts for keys typed in the indicator dialog', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+
+    await waitForChart(page);
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await stage.click({ position: { x: 300, y: 150 } });
+    await expect(deleteSelected).toBeEnabled();
+
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'Indicators' });
+    await expect(dialog).toBeVisible();
+
+    // Backspace edits the parameter field; it must not delete the drawing.
+    const period = dialog.getByRole('spinbutton').first();
+    await period.click();
+    await period.press('Backspace');
+    await expect(deleteSelected).toBeEnabled();
+
+    // Escape closes the dialog; the half-drawn tool state is untouched.
+    await period.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(deleteSelected).toBeEnabled();
+  });
+
+  test('grows the layout so a duplicated panel is reachable', async ({ page }) => {
+    await page.goto('/#/chart');
+    await expect(page.locator('canvas.chart-overlay')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Duplicate panel' }).click();
+    // The single layout grows to show the new panel instead of hiding it.
+    await expect(page.locator('canvas.chart-overlay')).toHaveCount(2);
+    await expect(page.getByText(/2 panel\(s\) stored, 2 rendered/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Duplicate panel' }).click();
+    await expect(page.locator('canvas.chart-overlay')).toHaveCount(3);
+    await page.getByRole('button', { name: 'Duplicate panel' }).click();
+    await expect(page.locator('canvas.chart-overlay')).toHaveCount(4);
+    await expect(page.getByRole('button', { name: 'Duplicate panel' })).toBeDisabled();
+    await expect(page.getByText('Four panels is the maximum layout.')).toBeVisible();
   });
 
   test('loads a watchlist instrument into the focused panel', async ({ page }) => {

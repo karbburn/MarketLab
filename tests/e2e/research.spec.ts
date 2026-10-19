@@ -39,10 +39,33 @@ test.describe('historical screener', () => {
     // Every filter has a visible column, and unmatched rows are marked as such.
     await expect(results).toContainText('Price vs SMA');
 
+    // An unsaved draft cannot be deleted: there is nothing stored to remove.
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+
     // Saving persists the screen into the saved list.
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.locator('.toast-body')).toContainText('Saved screen "Untitled screen"');
     await expect(page.locator('option', { hasText: 'Untitled screen' })).toBeAttached();
+  });
+
+  test('edits and deletes a saved screen', async ({ page }) => {
+    await page.goto('/#/screener');
+    await page.getByRole('button', { name: 'Start a new screen' }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('option', { hasText: 'Untitled screen' })).toBeAttached();
+
+    // Selecting a saved screen exposes an Edit action that clones it into the editor.
+    await page.locator('.panel-head select').first().selectOption({ label: 'Untitled screen' });
+    await expect(page.getByLabel('Screen name')).toBeDisabled();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByLabel('Screen name')).toBeEnabled();
+
+    await page.getByLabel('Screen name').fill('Momentum');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('option', { hasText: 'Momentum' })).toBeAttached();
+
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.locator('option', { hasText: 'Momentum' })).toHaveCount(0);
   });
 });
 
