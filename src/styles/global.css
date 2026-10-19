@@ -1062,13 +1062,11 @@ table.data tr.dim td {
   gap: 8px;
   padding: 6px 8px;
   border-radius: var(--radius);
-  border-left: 2px solid transparent;
   cursor: pointer;
 }
 
 .palette-option[aria-selected='true'] {
   background: var(--accent-soft);
-  border-left-color: var(--accent);
 }
 
 .palette-option-label {
