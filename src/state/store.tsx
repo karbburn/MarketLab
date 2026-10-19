@@ -1,0 +1,533 @@
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import type {
+  BacktestConfig,
+  Bar,
+  Dataset,
+  Instrument,
+  ScreenerDefinition,
+  UserPreferences,
+  Watchlist,
+  Workspace,
+} from '../domain/types';
+import { buildSampleBundles } from '../data/sample';
+import { createPersistence, type PersistenceAdapter, type StoreName } from '../lib/persistence/db';
+import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
+import { createId } from '../lib/id';
+import { mergeBackup, type BackupBundle } from '../lib/export/backup';
+
+export type ToastKind = 'info' | 'success' | 'warning' | 'error';
+
+export interface Toast {
+  id: string;
+  kind: ToastKind;
+  message: string;
+}
+
+export interface DatasetBundle {
+  instrument: Instrument;
+  dataset: Dataset;
+  bars: Bar[];
+}
+
+export interface AppState {
+  status: 'loading' | 'ready';
+  adapterKind: 'indexeddb' | 'memory';
+  instruments: Instrument[];
+  datasets: Dataset[];
+  barsByDataset: Record<string, Bar[]>;
+  workspaces: Workspace[];
+  activeWorkspaceId: string | null;
+  watchlists: Watchlist[];
+  preferences: UserPreferences;
+  screeners: ScreenerDefinition[];
+  backtests: BacktestConfig[];
+  toasts: Toast[];
+}
+
+export interface StoreActions {
+  importDataset(bundle: DatasetBundle): Promise<void>;
+  deleteDataset(datasetId: string): Promise<void>;
+  createWorkspaceFromBase(input: { name: string; datasetId: string; instrumentId: string; layout?: Workspace['layout'] }): Promise<string | null>;
+  saveWorkspace(workspace: Workspace): Promise<void>;
+  updateWorkspace(workspaceId: string, updater: (workspace: Workspace) => Workspace): Promise<void>;
+  updateChart(workspaceId: string, chartId: string, updater: (chart: import('../domain/types').ChartConfig) => import('../domain/types').ChartConfig): Promise<void>;
+  deleteWorkspace(workspaceId: string): Promise<void>;
+  setActiveWorkspace(workspaceId: string): Promise<void>;
+  saveWatchlist(watchlist: Watchlist): Promise<void>;
+  createWatchlistNamed(name: string, instrumentIds?: string[]): Promise<string>;
+  deleteWatchlist(watchlistId: string): Promise<void>;
+  saveScreener(definition: ScreenerDefinition): Promise<void>;
+  deleteScreener(screenerId: string): Promise<void>;
+  saveBacktest(config: BacktestConfig): Promise<void>;
+  deleteBacktest(backtestId: string): Promise<void>;
+  setPreferences(partial: Partial<UserPreferences>): Promise<void>;
+  restoreBackup(bundle: BackupBundle, mode: 'merge' | 'replace'): Promise<void>;
+  resetAll(): Promise<void>;
+  notify(kind: ToastKind, message: string): void;
+  dismissToast(id: string): void;
+}
+
+interface StoreValue {
+  state: AppState;
+  actions: StoreActions;
+}
+
+const StoreContext = createContext<StoreValue | null>(null);
+
+type PreferencesRecord = UserPreferences & { id: string };
+type BarsRecord = { id: string; bars: Bar[] };
+type SettingsRecord = { id: string; schemaVersion: number; seededAt: string };
+
+const EMPTY_STATE: AppState = {
+  status: 'loading',
+  adapterKind: 'memory',
+  instruments: [],
+  datasets: [],
+  barsByDataset: {},
+  workspaces: [],
+  activeWorkspaceId: null,
+  watchlists: [],
+  preferences: DEFAULT_PREFERENCES,
+  screeners: [],
+  backtests: [],
+  toasts: [],
+};
+
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AppState>(EMPTY_STATE);
+  const adapter = useAdapter();
+
+  // Load everything once, then seed bundled samples on first run.
+  useEffect(() => {
+    if (!adapter) return;
+    let cancelled = false;
+    (async () => {
+      const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings] = await Promise.all([
+        adapter.list<Instrument>('instruments'),
+        adapter.list<Dataset>('datasets'),
+        adapter.list<BarsRecord>('bars'),
+        adapter.list<Workspace>('workspaces'),
+        adapter.list<Watchlist>('watchlists'),
+        adapter.list<ScreenerDefinition>('screeners'),
+        adapter.list<BacktestConfig>('backtests'),
+        adapter.list<PreferencesRecord>('preferences'),
+        adapter.list<SettingsRecord>('settings'),
+      ]);
+      if (cancelled) return;
+
+      const barsByDataset: Record<string, Bar[]> = {};
+      for (const record of barRecords) barsByDataset[record.id] = record.bars;
+
+      const preferences = preferencesRecords[0]
+        ? stripPreferenceId(preferencesRecords[0])
+        : DEFAULT_PREFERENCES;
+
+      const seeded = settings.some((record) => record.id === 'app');
+      if (instruments.length === 0 && !seeded) {
+        const seededData = await seedSamples(adapter);
+        await adapter.put<SettingsRecord>('settings', {
+          id: 'app',
+          schemaVersion: APP_SCHEMA_VERSION,
+          seededAt: new Date().toISOString(),
+        });
+        if (cancelled) return;
+        setState((previous) => ({
+          ...previous,
+          status: 'ready',
+          adapterKind: adapter.kind,
+          instruments: seededData.instruments,
+          datasets: seededData.datasets,
+          barsByDataset: seededData.barsByDataset,
+          workspaces: seededData.workspaces,
+          activeWorkspaceId: seededData.workspaces[0]?.id ?? null,
+          watchlists: seededData.watchlists,
+          preferences,
+          screeners,
+          backtests,
+        }));
+        return;
+      }
+
+      setState((previous) => ({
+        ...previous,
+        status: 'ready',
+        adapterKind: adapter.kind,
+        instruments,
+        datasets,
+        barsByDataset,
+        workspaces,
+        activeWorkspaceId: workspaces[0]?.id ?? null,
+        watchlists,
+        preferences,
+        screeners,
+        backtests,
+      }));
+    })().catch(() => {
+      if (!cancelled) setState((previous) => ({ ...previous, status: 'ready' }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter]);
+
+  // Apply the theme to the document element.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = state.preferences.theme;
+  }, [state.preferences.theme]);
+
+  const notify = (kind: ToastKind, message: string) => {
+    const toast: Toast = { id: createId('toast'), kind, message };
+    setState((previous) => ({ ...previous, toasts: [...previous.toasts, toast] }));
+    setTimeout(() => {
+      setState((previous) => ({ ...previous, toasts: previous.toasts.filter((entry) => entry.id !== toast.id) }));
+    }, kind === 'error' ? 9000 : 5000);
+  };
+
+  const actions: StoreActions = {
+    async importDataset(bundle) {
+      if (!adapter) return;
+      await adapter.put('instruments', bundle.instrument);
+      await adapter.put('datasets', bundle.dataset);
+      await adapter.put<BarsRecord>('bars', { id: bundle.dataset.id, bars: bundle.bars });
+      setState((previous) => {
+        const instruments = upsertById(previous.instruments, bundle.instrument);
+        const datasets = upsertById(previous.datasets, bundle.dataset);
+        return {
+          ...previous,
+          instruments,
+          datasets,
+          barsByDataset: { ...previous.barsByDataset, [bundle.dataset.id]: bundle.bars },
+        };
+      });
+      notify('success', `Imported ${bundle.dataset.name} (${bundle.bars.length} sessions).`);
+    },
+
+    async deleteDataset(datasetId) {
+      if (!adapter) return;
+      const dataset = state.datasets.find((entry) => entry.id === datasetId);
+      await adapter.remove('datasets', datasetId);
+      await adapter.remove('bars', datasetId);
+      let instrumentRemoved = false;
+      if (dataset) {
+        const stillUsed = state.datasets.some((entry) => entry.id !== datasetId && entry.instrumentId === dataset.instrumentId);
+        if (!stillUsed) {
+          await adapter.remove('instruments', dataset.instrumentId);
+          instrumentRemoved = true;
+        }
+      }
+      setState((previous) => {
+        const barsByDataset = { ...previous.barsByDataset };
+        delete barsByDataset[datasetId];
+        const workspaces = previous.workspaces
+          .map((workspace) => ({
+            ...workspace,
+            charts: workspace.charts.filter((chart) => chart.datasetId !== datasetId),
+          }))
+          .filter((workspace) => workspace.charts.length > 0);
+        return {
+          ...previous,
+          datasets: previous.datasets.filter((entry) => entry.id !== datasetId),
+          instruments: instrumentRemoved && dataset
+            ? previous.instruments.filter((entry) => entry.id !== dataset.instrumentId)
+            : previous.instruments,
+          barsByDataset,
+          workspaces,
+          activeWorkspaceId: workspaces.some((workspace) => workspace.id === previous.activeWorkspaceId)
+            ? previous.activeWorkspaceId
+            : workspaces[0]?.id ?? null,
+          screeners: previous.screeners.map((screener) => ({
+            ...screener,
+            universeDatasetIds: screener.universeDatasetIds.filter((id) => id !== datasetId),
+          })),
+        };
+      });
+      notify('info', 'Dataset removed.');
+    },
+
+    async createWorkspaceFromBase({ name, datasetId, instrumentId, layout }) {
+      if (!adapter) return null;
+      const workspace = createWorkspace({
+        name,
+        layout,
+        base: {
+          instrumentId,
+          datasetId,
+          showVolume: state.preferences.showVolumeByDefault,
+          chartType: state.preferences.defaultChartType,
+          timeframe: state.preferences.defaultTimeframe,
+        },
+      });
+      await adapter.put('workspaces', workspace);
+      setState((previous) => ({ ...previous, workspaces: [...previous.workspaces, workspace], activeWorkspaceId: workspace.id }));
+      notify('success', `Created workspace "${workspace.name}".`);
+      return workspace.id;
+    },
+
+    async saveWorkspace(workspace) {
+      if (!adapter) return;
+      const updated = { ...workspace, updatedAt: new Date().toISOString() };
+      await adapter.put('workspaces', updated);
+      setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
+    },
+
+    async updateWorkspace(workspaceId, updater) {
+      if (!adapter) return;
+      const existing = state.workspaces.find((workspace) => workspace.id === workspaceId);
+      if (!existing) return;
+      const updated = { ...updater(existing), updatedAt: new Date().toISOString() };
+      await adapter.put('workspaces', updated);
+      setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
+    },
+
+    async updateChart(workspaceId, chartId, updater) {
+      await actions.updateWorkspace(workspaceId, (workspace) => ({
+        ...workspace,
+        charts: workspace.charts.map((chart) => (chart.id === chartId ? updater(chart) : chart)),
+      }));
+    },
+
+    async deleteWorkspace(workspaceId) {
+      if (!adapter) return;
+      await adapter.remove('workspaces', workspaceId);
+      setState((previous) => {
+        const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
+        return {
+          ...previous,
+          workspaces,
+          activeWorkspaceId:
+            previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
+        };
+      });
+      notify('info', 'Workspace deleted.');
+    },
+
+    async setActiveWorkspace(workspaceId) {
+      setState((previous) => ({ ...previous, activeWorkspaceId: workspaceId }));
+    },
+
+    async saveWatchlist(watchlist) {
+      if (!adapter) return;
+      const updated = { ...watchlist, updatedAt: new Date().toISOString() };
+      await adapter.put('watchlists', updated);
+      setState((previous) => ({ ...previous, watchlists: upsertById(previous.watchlists, updated) }));
+    },
+
+    async createWatchlistNamed(name, instrumentIds = []) {
+      if (!adapter) return '';
+      const watchlist = createWatchlist(name, instrumentIds);
+      await adapter.put('watchlists', watchlist);
+      setState((previous) => ({ ...previous, watchlists: [...previous.watchlists, watchlist] }));
+      return watchlist.id;
+    },
+
+    async deleteWatchlist(watchlistId) {
+      if (!adapter) return;
+      await adapter.remove('watchlists', watchlistId);
+      setState((previous) => ({ ...previous, watchlists: previous.watchlists.filter((entry) => entry.id !== watchlistId) }));
+    },
+
+    async saveScreener(definition) {
+      if (!adapter) return;
+      const updated = { ...definition, updatedAt: new Date().toISOString() };
+      await adapter.put('screeners', updated);
+      setState((previous) => ({ ...previous, screeners: upsertById(previous.screeners, updated) }));
+      notify('success', `Saved screen "${updated.name}".`);
+    },
+
+    async deleteScreener(screenerId) {
+      if (!adapter) return;
+      await adapter.remove('screeners', screenerId);
+      setState((previous) => ({ ...previous, screeners: previous.screeners.filter((entry) => entry.id !== screenerId) }));
+    },
+
+    async saveBacktest(config) {
+      if (!adapter) return;
+      const updated = { ...config, updatedAt: new Date().toISOString() };
+      await adapter.put('backtests', updated);
+      setState((previous) => ({ ...previous, backtests: upsertById(previous.backtests, updated) }));
+      notify('success', `Saved strategy "${updated.name}".`);
+    },
+
+    async deleteBacktest(backtestId) {
+      if (!adapter) return;
+      await adapter.remove('backtests', backtestId);
+      setState((previous) => ({ ...previous, backtests: previous.backtests.filter((entry) => entry.id !== backtestId) }));
+    },
+
+    async setPreferences(partial) {
+      if (!adapter) return;
+      const preferences = { ...state.preferences, ...partial };
+      await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
+      setState((previous) => ({ ...previous, preferences }));
+    },
+
+    async restoreBackup(bundle, mode) {
+      if (!adapter) return;
+      const base = mode === 'replace' ? EMPTY_STATE : state;
+      const merged = mergeBackup(
+        {
+          instruments: base.instruments,
+          datasets: base.datasets,
+          barsByDataset: base.barsByDataset,
+          workspaces: base.workspaces,
+          watchlists: base.watchlists,
+          screeners: base.screeners,
+          backtests: base.backtests,
+        },
+        bundle,
+      );
+
+      if (mode === 'replace') {
+        for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests'] as StoreName[]) {
+          await adapter.clear(store);
+        }
+      }
+      // Persist exactly what was merged, so storage and memory cannot drift apart
+      // and a later reload cannot resurrect an entry that was skipped.
+      await adapter.putMany('instruments', merged.instruments);
+      await adapter.putMany('datasets', merged.datasets);
+      await adapter.putMany<BarsRecord>(
+        'bars',
+        Object.entries(merged.barsByDataset).map(([id, bars]) => ({ id, bars })),
+      );
+      await adapter.putMany('workspaces', merged.workspaces);
+      await adapter.putMany('watchlists', merged.watchlists);
+      await adapter.putMany('screeners', merged.screeners);
+      await adapter.putMany('backtests', merged.backtests);
+      if (bundle.preferences) await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
+
+      setState((previous) => ({
+        ...previous,
+        status: 'ready',
+        adapterKind: adapter.kind,
+        instruments: merged.instruments,
+        datasets: merged.datasets,
+        barsByDataset: merged.barsByDataset,
+        workspaces: merged.workspaces,
+        activeWorkspaceId:
+          previous.activeWorkspaceId && merged.workspaces.some((workspace) => workspace.id === previous.activeWorkspaceId)
+            ? previous.activeWorkspaceId
+            : merged.workspaces[0]?.id ?? null,
+        watchlists: merged.watchlists,
+        screeners: merged.screeners,
+        backtests: merged.backtests,
+        preferences: bundle.preferences ?? previous.preferences,
+      }));
+
+      notify(
+        'success',
+        mode === 'replace'
+          ? 'Backup restored (replaced local data).'
+          : merged.duplicateDatasets > 0
+            ? `Backup merged. ${merged.duplicateDatasets} already-stored series were not duplicated.`
+            : 'Backup merged into local data.',
+      );
+    },
+
+    async resetAll() {
+      if (!adapter) return;
+      for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'] as StoreName[]) {
+        await adapter.clear(store);
+      }
+      const seededData = await seedSamples(adapter);
+      await adapter.put<SettingsRecord>('settings', { id: 'app', schemaVersion: APP_SCHEMA_VERSION, seededAt: new Date().toISOString() });
+      setState((previous) => ({
+        ...EMPTY_STATE,
+        status: 'ready',
+        adapterKind: adapter.kind,
+        instruments: seededData.instruments,
+        datasets: seededData.datasets,
+        barsByDataset: seededData.barsByDataset,
+        workspaces: seededData.workspaces,
+        activeWorkspaceId: seededData.workspaces[0]?.id ?? null,
+        watchlists: seededData.watchlists,
+        preferences: previous.preferences,
+        toasts: previous.toasts,
+      }));
+      notify('success', 'Local data reset to the bundled sample set.');
+    },
+
+    notify,
+
+    dismissToast(id) {
+      setState((previous) => ({ ...previous, toasts: previous.toasts.filter((toast) => toast.id !== id) }));
+    },
+  };
+
+  const value: StoreValue = { state, actions };
+
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+}
+
+function useAdapter(): PersistenceAdapter | null {
+  const [adapter, setAdapter] = useState<PersistenceAdapter | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    createPersistence().then((created) => {
+      if (!cancelled) setAdapter(created);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return adapter;
+}
+
+function stripPreferenceId(record: PreferencesRecord): UserPreferences {
+  const { id: _id, ...preferences } = record;
+  void _id;
+  return preferences;
+}
+
+function upsertById<T extends { id: string }>(list: readonly T[], value: T): T[] {
+  const index = list.findIndex((entry) => entry.id === value.id);
+  if (index === -1) return [...list, value];
+  const next = [...list];
+  next[index] = value;
+  return next;
+}
+
+async function seedSamples(adapter: PersistenceAdapter): Promise<{
+  instruments: Instrument[];
+  datasets: Dataset[];
+  barsByDataset: Record<string, Bar[]>;
+  workspaces: Workspace[];
+  watchlists: Watchlist[];
+}> {
+  const bundles = buildSampleBundles();
+  const instruments = bundles.map((bundle) => bundle.instrument);
+  const datasets = bundles.map((bundle) => bundle.dataset);
+  const barsByDataset: Record<string, Bar[]> = {};
+  for (const bundle of bundles) barsByDataset[bundle.dataset.id] = bundle.bars;
+
+  await adapter.putMany('instruments', instruments);
+  await adapter.putMany('datasets', datasets);
+  await adapter.putMany<BarsRecord>(
+    'bars',
+    bundles.map((bundle) => ({ id: bundle.dataset.id, bars: bundle.bars })),
+  );
+
+  const first = bundles[0];
+  const workspaces: Workspace[] = [];
+  if (first) {
+    workspaces.push(
+      createWorkspace({
+        name: 'Primary',
+        layout: 'single',
+        base: { instrumentId: first.instrument.id, datasetId: first.dataset.id, showVolume: true },
+      }),
+    );
+  }
+  const watchlist = createWatchlist('Demo watchlist', instruments.map((instrument) => instrument.id));
+  await adapter.putMany('workspaces', workspaces);
+  await adapter.putMany('watchlists', [watchlist]);
+
+  return { instruments, datasets, barsByDataset, workspaces, watchlists: [watchlist] };
+}
+
+export function useStore(): StoreValue {
+  const context = useContext(StoreContext);
+  if (!context) throw new Error('useStore must be used inside StoreProvider.');
+  return context;
+}
