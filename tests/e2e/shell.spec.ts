@@ -69,6 +69,38 @@ test.describe('shell, navigation and theme', () => {
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(2);
   });
 
+  test('collapses the docked sidebar on a wide viewport and restores it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+
+    const nav = page.locator('.shell-nav');
+    await expect(nav).toBeVisible();
+
+    // The control is a drawer handle on narrow viewports and a collapse handle
+    // on wide ones; on a laptop it has to actually move the layout.
+    await page.getByRole('button', { name: 'Collapse navigation' }).click();
+    await expect(nav).not.toBeVisible();
+
+    const collapsed = await page.evaluate(() => {
+      const main = document.querySelector('.shell-main');
+      return {
+        main: main ? Math.round(main.getBoundingClientRect().width) : 0,
+        viewport: document.documentElement.clientWidth,
+      };
+    });
+    expect(collapsed.main).toBeGreaterThanOrEqual(collapsed.viewport - 1);
+
+    await page.getByRole('button', { name: 'Expand navigation' }).click();
+    await expect(nav).toBeVisible();
+    const navWidth = await nav.evaluate((element) => Math.round(element.getBoundingClientRect().width));
+    expect(navWidth).toBeGreaterThan(200);
+
+    // With the sidebar docked, following a link must not hide it again.
+    await page.locator('.shell-nav').getByRole('link', { name: 'Screener', exact: true }).click();
+    await expect(page.locator('.topbar-title')).toHaveText('Historical screener');
+    await expect(nav).toBeVisible();
+  });
+
   test('collapses navigation into a drawer on a narrow viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
