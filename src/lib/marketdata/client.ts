@@ -92,7 +92,15 @@ async function request(url: string, signal: AbortSignal | null): Promise<Respons
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener('abort', onExternalAbort);
   try {
-    return await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    // `X-MarketLab-Client` is deliberately a non-simple header: it forces a CORS
+    // preflight even for plain GETs, so the service can declare its
+    // `Access-Control-Allow-Private-Network` opt-in. Chrome otherwise blocks a
+    // public HTTPS page from reaching a user's localhost before any preflight
+    // could happen (Private Network Access / Local Network Access policies).
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'X-MarketLab-Client': '1' },
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new MarketDataError('timeout', 'The market-data service did not respond in time.');

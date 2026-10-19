@@ -114,6 +114,22 @@ def test_cors_allows_deployed_project_origin(client: TestClient) -> None:
     assert probe.get("/api/health").headers.get("access-control-allow-origin") == "https://marketlab.sourabhpradhan.in"
 
 
+def test_preflight_from_deployed_origin_optins_to_private_network_access(client: TestClient) -> None:
+    """Chrome requires `Access-Control-Allow-Private-Network: true` on the CORS
+    preflight before a public site may call a loopback address."""
+    response = client.options(
+        "/api/health",
+        headers={
+            "origin": "https://marketlab.sourabhpradhan.in",
+            "access-control-request-method": "GET",
+            "access-control-request-headers": "access-control-request-private-network",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://marketlab.sourabhpradhan.in"
+    assert response.headers.get("access-control-allow-private-network") == "true"
+
+
 # ---------------------------------------------------------------- search ----
 
 def test_search_normalises_quotes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

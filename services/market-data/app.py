@@ -32,6 +32,7 @@ import yfinance as yf
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.datastructures import MutableHeaders
 
 SERVICE_VERSION = "1.0.0"
 SYMBOL_PATTERN = r"^[A-Za-z0-9._^=:-]{1,16}$"
@@ -64,6 +65,30 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+class AllowPrivateNetworkMiddleware:
+    """Chrome's Private Network Access requires an explicit opt-in header on the
+    CORS preflight from a public origin (the deployed site) to a loopback
+    address (this service). Without it Chrome blocks the request even when the
+    origin is allowed. The origin/method rules of the first-party CORS policy
+    are unchanged; this only permits the already-allowed origins to reach the
+    user's own localhost."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        async def send_hook(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(raw=message["headers"])
+                headers["Access-Control-Allow-Private-Network"] = "true"
+            await send(message)
+
+        await self.app(scope, receive, send_hook)
+
+
+app.add_middleware(AllowPrivateNetworkMiddleware)  # added last => wraps (runs before) CORS
 
 ADJUSTMENT_POLICY = "splits-applied, dividends not reinvested (as-traded OHLC)"
 PROVIDER_NAME = "yahoo-finance"
