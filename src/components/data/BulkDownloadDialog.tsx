@@ -4,8 +4,10 @@ import { useStore } from '../../state/store';
 import { PROVIDER_LABEL } from '../../lib/marketdata/normalize';
 import { DEFAULT_SERVICE_URL, fetchProviderHistory } from '../../lib/marketdata/client';
 import { MAX_QUEUE_SYMBOLS, parseSymbolList, runDownloadQueue, type QueueItem } from '../../lib/marketdata/queue';
+import { replaceTokenWithSymbol, searchQueryForToken, tokenAtCaret } from '../../lib/marketdata/symbol-suggest';
+import { useProviderSymbolSearch } from '../../lib/marketdata/use-provider-search';
 import type { DuplicatePolicy } from '../../lib/validation/dataset';
-import { Field, Modal, Segmented, Tag, TextArea, TextInput } from '../ui';
+import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
 
 /**
  * Pause kept between requests so a batch does not hammer an unofficial provider.
@@ -58,12 +60,28 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
   const [cancelling, setCancelling] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  /**
+   * Caret position of the symbol field, so a suggestion can be applied to the
+   * token under the cursor and never to the other symbols in the list.
+   */
+  const [caret, setCaret] = useState(0);
+  const [highlight, setHighlight] = useState<{ query: string; index: number } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Both refs are also bumped on close so a still-running batch cannot write
   // state into an unmounted dialog.
   const runIdRef = useRef(0);
   const cancelRef = useRef(false);
 
   const parsed = useMemo(() => parseSymbolList(raw), [raw]);
+  const token = useMemo(() => tokenAtCaret(raw, caret), [raw, caret]);
+  const query = searchQueryForToken(token);
+  const { suggestions, searching, unavailable, dismiss } = useProviderSymbolSearch(query ?? '', open && !running);
+
+  const options = suggestions ?? [];
+  const highlighted =
+    highlight !== null && query !== null && highlight.query === query && highlight.index < options.length
+      ? highlight.index
+      : -1;
 
   const rangeError = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return 'Enter dates as YYYY-MM-DD.';
@@ -85,6 +103,62 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
     reset();
     onClose();
   }, [reset, onClose]);
+
+  /** Applies a provider symbol to the token the caret is in. */
+  const accept = (symbol: string) => {
+    if (!token) return;
+    const next = replaceTokenWithSymbol(raw, token, symbol);
+    setRaw(next.value);
+    setCaret(next.caret);
+    setHighlight(null);
+    dismiss(symbol);
+    // The textarea renders the new value on the next frame, so the caret is
+    // placed after it there rather than on the text it replaced.
+    requestAnimationFrame(() => {
+      const element = textareaRef.current;
+      if (!element) return;
+      element.focus();
+      element.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
+  const syncCaret = () => {
+    const element = textareaRef.current;
+    if (element) setCaret(element.selectionStart);
+  };
+
+  const moveHighlight = (delta: number) => {
+    if (options.length === 0) return;
+    const next =
+      highlighted < 0 ? (delta > 0 ? 0 : options.length - 1) : (highlighted + delta + options.length) % options.length;
+    setHighlight({ query: query ?? '', index: next });
+  };
+
+  const onSymbolKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') {
+      // Escape dismisses the list first; with nothing open it closes the dialog.
+      if (options.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss(query ?? '');
+      setHighlight(null);
+      return;
+    }
+    if (options.length === 0) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      // These keys move the caret in a textarea; while suggestions are open
+      // they select a suggestion instead, so Enter stays the way to accept one.
+      event.preventDefault();
+      moveHighlight(event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (event.key === 'Enter' && highlighted >= 0) {
+      const choice = options[highlighted];
+      if (!choice) return;
+      event.preventDefault();
+      accept(choice.symbol);
+    }
+  };
 
   const run = async (symbols: string[]) => {
     if (symbols.length === 0 || rangeError) {
@@ -182,15 +256,66 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
           that can be delayed or throttled, and it is not licensed for redistribution.
         </div>
 
-        <Field label="Symbols" hint="One per line, or separated by commas. Duplicates are removed automatically.">
-          <TextArea
+        <Field
+          label="Symbols"
+          hint="One per line, or separated by commas. Type a name such as google and pick its ticker from the suggestions. Duplicates are removed automatically."
+        >
+          <textarea
             id="bulk-symbols"
-            value={raw}
-            onChange={setRaw}
+            ref={textareaRef}
+            className="input"
             rows={6}
+            value={raw}
             disabled={running}
             placeholder={'AAPL\nMSFT\nNVDA, AMZN, GOOGL'}
+            aria-label="Symbols"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={options.length > 0}
+            aria-controls={options.length > 0 ? 'bulk-symbol-suggestions' : undefined}
+            aria-activedescendant={highlighted >= 0 ? `bulk-symbol-option-${highlighted}` : undefined}
+            onChange={(event) => {
+              setRaw(event.target.value);
+              setCaret(event.target.selectionStart);
+            }}
+            onKeyDown={onSymbolKeyDown}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
+            onSelect={syncCaret}
+            onFocus={syncCaret}
           />
+          {options.length > 0 && (
+            <ul className="suggestion-list" id="bulk-symbol-suggestions" role="listbox" aria-label="Symbol suggestions">
+              {options.map((option, index) => (
+                <li
+                  key={`${option.exchangeName ?? ''}-${option.symbol}`}
+                  id={`bulk-symbol-option-${index}`}
+                  role="option"
+                  aria-selected={index === highlighted}
+                  className="suggestion"
+                  // The tracked caret is state, so losing focus to this click does
+                  // not move the pick onto another line of the list.
+                  onClick={() => accept(option.symbol)}
+                >
+                  <span className="mono">{option.symbol}</span>
+                  <span className="suggestion-name">{option.name}</span>
+                  <span className="muted">
+                    {option.type ?? ''} {option.exchangeName ?? ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {searching && <div className="field-hint">Searching symbols…</div>}
+          {suggestions !== null && options.length === 0 && !searching && (
+            <div className="field-hint">No symbol matched. A ticker typed here is still requested as-is.</div>
+          )}
+          {unavailable && (
+            <div className="field-hint">
+              Symbol suggestions could not reach the local market-data service. Tickers typed here are still requested
+              as-is.
+            </div>
+          )}
         </Field>
 
         <div className="panel-sub" style={{ marginTop: 6 }}>

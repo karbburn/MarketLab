@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { CloudArrowDown, GlobeSimple, Warning } from '@phosphor-icons/react';
 import type { DatasetBundle } from '../../state/store';
 import { useStore } from '../../state/store';
@@ -9,17 +9,12 @@ import {
   describeValidationIssues,
   validateProviderBars,
 } from '../../lib/marketdata/normalize';
-import {
-  DEFAULT_SERVICE_URL,
-  describeMarketDataFailure,
-  fetchProviderHistory,
-  fetchProviderSearch,
-} from '../../lib/marketdata/client';
+import { DEFAULT_SERVICE_URL, describeMarketDataFailure, fetchProviderHistory } from '../../lib/marketdata/client';
+import { useProviderSymbolSearch } from '../../lib/marketdata/use-provider-search';
 import type { DuplicatePolicy } from '../../lib/validation/dataset';
 import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
 
 const SYMBOL_RE = /^[A-Za-z0-9._^=:-]{1,16}$/;
-const SEARCH_DEBOUNCE_MS = 400;
 
 /**
  * Sensible starting points for a first download. They are suggestions, not a
@@ -30,13 +25,6 @@ const SUGGESTED_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'SPY', 'QQQ'];
 
 type Phase = 'idle' | 'downloading' | 'review';
 type Notice = { kind: 'error' | 'info'; text: string } | null;
-
-interface Suggestion {
-  symbol: string;
-  name: string;
-  exchangeName: string | null;
-  type: string | null;
-}
 
 function defaultStart(): string {
   const date = new Date();
@@ -63,67 +51,21 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
   const [duplicatePolicy, setDuplicatePolicy] = useState<DuplicatePolicy>('keep-first');
   const [phase, setPhase] = useState<Phase>('idle');
   const [notice, setNotice] = useState<Notice>(null);
-  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
-  const [searching, setSearching] = useState(false);
   const [review, setReview] = useState<DatasetBundle | null>(null);
   const [busy, setBusy] = useState(false);
-  const searchAbort = useRef<AbortController | null>(null);
+  const { suggestions, searching, dismiss } = useProviderSymbolSearch(symbol, open);
 
   const reset = useCallback(() => {
     setPhase('idle');
     setNotice(null);
-    setSuggestions(null);
     setReview(null);
     setBusy(false);
-    setSearching(false);
-    searchAbort.current?.abort();
-    searchAbort.current = null;
   }, []);
 
   const handleClose = useCallback(() => {
     reset();
     onClose();
   }, [reset, onClose]);
-
-  // Symbol suggestions: debounced, abortable provider search for queries of
-  // two or more characters. State transitions live in event handlers and the
-  // fetch callbacks; the effect only owns the external async call lifecycle.
-  useEffect(() => {
-    if (!open) return;
-    const query = symbol.trim();
-    if (query.length < 2 || !SYMBOL_RE.test(query)) return;
-    const controller = new AbortController();
-    searchAbort.current?.abort();
-    searchAbort.current = controller;
-    const timer = window.setTimeout(() => {
-      setSearching(true);
-      fetchProviderSearch(query, 8, DEFAULT_SERVICE_URL, controller.signal)
-        .then((results) => {
-          if (!controller.signal.aborted) {
-            setSuggestions(
-              results.map((row) => ({ symbol: row.symbol, name: row.name, exchangeName: row.exchangeName, type: row.type })),
-            );
-          }
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) setSuggestions(null);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setSearching(false);
-        });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-      if (searchAbort.current === controller) searchAbort.current = null;
-    };
-  }, [symbol, open]);
-
-  const updateSymbol = useCallback((value: string) => {
-    setSymbol(value);
-    setSuggestions(null);
-    setSearching(false);
-  }, []);
 
   const rangeError = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return 'Enter dates as YYYY-MM-DD.';
@@ -221,7 +163,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
 
         <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Symbol" error={symbolError ?? undefined} hint="Symbols follow provider conventions (e.g. AAPL, MSFT, ^GSPC).">
-            <TextInput id="download-symbol" value={symbol} onChange={updateSymbol} placeholder="AAPL" />
+            <TextInput id="download-symbol" value={symbol} onChange={setSymbol} placeholder="AAPL" />
           </Field>
           <Field label="Duplicate sessions" hint="Applies if the source ever repeats a session date.">
             <Segmented
@@ -252,7 +194,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
               className="button ghost sm mono"
               onClick={() => {
                 setSymbol(suggestion);
-                setSuggestions(null);
+                dismiss(suggestion);
               }}
             >
               {suggestion}
@@ -278,7 +220,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
                   aria-selected={symbol === suggestion.symbol}
                   onClick={() => {
                     setSymbol(suggestion.symbol);
-                    setSuggestions(null);
+                    dismiss(suggestion.symbol);
                   }}
                 >
                   <span className="mono">{suggestion.symbol}</span>
