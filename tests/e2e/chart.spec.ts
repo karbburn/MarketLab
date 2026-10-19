@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { seedLibrary } from './fixtures/library';
+import { buildFixtureBars, seedLibrary } from './fixtures/library';
+import { formatCompact, formatPercent, formatPrice } from '../../src/lib/format';
 
 /**
  * Waits until the chart is actually rendered. The overlay canvas is only sized
@@ -190,6 +191,41 @@ test.describe('chart workspace', () => {
       .getByRole('button', { name: 'MSFT', exact: true })
       .click();
     await expect(page.locator('.chart-symbol').first()).toHaveText('MSFT');
+  });
+
+  test('shows 30-session volume and range context in the watchlist', async ({ page }) => {
+    await page.goto('/#/chart');
+
+    const table = page.locator('table.watchlist-table');
+    await expect(table.getByRole('columnheader', { name: 'Avg vol 30' })).toHaveAttribute(
+      'title',
+      'Average reported volume over the last 30 sessions',
+    );
+    await expect(table.getByRole('columnheader', { name: 'Range 30' })).toHaveAttribute(
+      'title',
+      'High-low spread as a percentage of the low over the last 30 sessions',
+    );
+
+    const recent = buildFixtureBars(1013, 100).slice(-30);
+    const volumes = recent.map((entry) => entry.volume).filter((value): value is number => value !== null);
+    const averageVolume = volumes.reduce((total, value) => total + value, 0) / volumes.length;
+    const low = Math.min(...recent.map((entry) => entry.low));
+    const high = Math.max(...recent.map((entry) => entry.high));
+
+    const row = table.locator('tbody tr').filter({ hasText: 'AAPL' });
+    const volume = row.locator('td').nth(3);
+    const range = row.locator('td').nth(4);
+    await expect(volume).toHaveText(formatCompact(averageVolume));
+    await expect(volume).toHaveAttribute('title', new RegExp('^Average volume of .* over the last 30 sessions'));
+    await expect(range).toHaveText(formatPercent(((high - low) / low) * 100, 1));
+    await expect(range).toHaveAttribute(
+      'title',
+      `High-low range over the last 30 sessions: ${formatPrice(low)} to ${formatPrice(high)} (${formatPercent(
+        ((high - low) / low) * 100,
+        1,
+      )} of the low).`,
+    );
+    await expect(page.getByText(/Avg vol and range use the last 30 sessions/)).toBeVisible();
   });
 
   test('switches to the OHLC Bars chart type and keeps it after a reload', async ({ page }) => {
