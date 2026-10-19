@@ -73,6 +73,43 @@ async function stubService(page: Page, body: unknown, status = 200): Promise<voi
   });
 }
 
+/**
+ * Serves a provider response for whichever symbol the batch asks for, with
+ * slightly different prices per symbol so the stored series stay distinct.
+ */
+async function stubPerSymbol(page: Page): Promise<void> {
+  await page.route('**/api/history*', async (route) => {
+    if (route.request().method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: CORS_HEADERS });
+      return;
+    }
+    const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? 'AAPL';
+    const offset = symbol.charCodeAt(0) % 7;
+    const bars = HISTORY_BARS.map((bar) => ({
+      ...bar,
+      open: bar.open + offset,
+      high: bar.high + offset,
+      low: bar.low + offset,
+      close: bar.close + offset,
+      adjClose: bar.adjClose + offset,
+    }));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({
+        provider: {
+          ...PROVIDER_PAYLOAD.provider,
+          providerSymbol: symbol,
+          displaySymbol: symbol,
+          displayName: `${symbol} Inc.`,
+        },
+        bars,
+      }),
+    });
+  });
+}
+
 test.describe('market data download', () => {
   test('explains the unreachable service instead of failing silently', async ({ page }) => {
     // The request is aborted on purpose so the assertion holds whether or not
@@ -153,6 +190,66 @@ test.describe('market data download', () => {
 
     await expect(dialog.getByText(/No data is available for this symbol and range/i)).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save dataset' })).toBeHidden();
+    await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
+  });
+});
+
+test.describe('bulk market data download', () => {
+  /** Both the empty-library panel and the library header offer this action. */
+  function openBulkDialog(page: Page) {
+    return page.getByRole('button', { name: 'Download many symbols', exact: true }).first();
+  }
+
+  test('plans a pasted batch, reporting duplicates and invalid tokens', async ({ page }) => {
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    await expect(dialog).toBeVisible();
+
+    await dialog.locator('#bulk-symbols').fill('aapl, MSFT\naapl\n??bad??');
+
+    // Two valid symbols, one folded repeat, one rejected token.
+    await expect(dialog.getByText(/2 symbols ready/)).toBeVisible();
+    await expect(dialog.getByText(/1 duplicate\(s\) removed/)).toBeVisible();
+    await expect(dialog.getByText(/Ignored: \?\?bad\?\?/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Download 2 symbols' })).toBeEnabled();
+  });
+
+  test('stores every symbol of a batch and reports each result', async ({ page }) => {
+    await stubPerSymbol(page);
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');
+    await dialog.getByRole('button', { name: 'Download 2 symbols' }).click();
+
+    await expect(dialog.getByText(/2 saved, 0 failed\./)).toBeVisible();
+    await expect(page.locator('.shell-nav')).toContainText('2 datasets loaded');
+
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    for (const symbol of ['AAPL', 'MSFT']) {
+      const row = page.locator('table.data tbody tr').filter({ hasText: symbol });
+      await expect(row).toContainText('Yahoo Finance');
+      await expect(row).toContainText('2026-09-17');
+    }
+  });
+
+  test('reports an unreachable service per symbol and stores nothing', async ({ page }) => {
+    // Aborted on purpose so the assertion holds whether or not the local
+    // service happens to be running on this machine.
+    await page.route('**/api/history*', (route) => route.abort());
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');
+    await dialog.getByRole('button', { name: 'Download 2 symbols' }).click();
+
+    // Every symbol is reported individually; the batch does not abort early
+    // and no series is substituted for a failure.
+    await expect(dialog.getByText(/0 saved, 2 failed\./)).toBeVisible();
+    await expect(dialog.getByText('Failed', { exact: true })).toHaveCount(2);
+    await expect(dialog.getByText(/market-data service is not reachable/i).first()).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Retry failed (2)' })).toBeVisible();
     await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
   });
 });
