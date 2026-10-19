@@ -310,6 +310,35 @@ export class ChartController {
     else scale.applyOptions({ mode: 0 });
   }
 
+  /** Re-reads the design tokens so the chrome follows a theme change. */
+  applyTheme(): void {
+    const textColor = cssVar('--text-secondary', '#9aa7b6');
+    const borderColor = cssVar('--border-subtle', '#1f2733');
+    const muted = cssVar('--text-muted', '#6b7887');
+    const raised = cssVar('--surface-raised', '#171d28');
+    this.chart.applyOptions({
+      layout: {
+        textColor,
+        fontFamily: cssVar('--font-sans', 'system-ui'),
+      },
+      grid: {
+        vertLines: { color: borderColor },
+        horzLines: { color: borderColor },
+      },
+      rightPriceScale: { borderColor },
+      timeScale: { borderColor },
+      crosshair: {
+        vertLine: { color: muted, labelBackgroundColor: raised },
+        horzLine: { color: muted, labelBackgroundColor: raised },
+      },
+    });
+  }
+
+  /** Enables or suspends the chart's own drag-to-pan gesture. */
+  setDragToPan(enabled: boolean): void {
+    this.chart.applyOptions({ handleScroll: { pressedMouseMove: enabled } });
+  }
+
   subscribeCrosshair(handler: (reading: CrosshairReading) => void): () => void {
     this.crosshairHandlers.add(handler);
     return () => this.crosshairHandlers.delete(handler);

@@ -55,12 +55,16 @@ export function ChartPanel({
   onRangeChange?: (range: { from: number; to: number } | null) => void;
   appliedRange?: { from: number; to: number } | null;
 }) {
-  const { actions } = useStore();
+  const { state, actions } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const dragRef = useRef<{ id: string; startPrice: number; startDate: string; latest: Drawing[] } | null>(null);
   const historyRef = useRef<{ past: Drawing[][]; future: Drawing[][] }>({ past: [], future: [] });
+  // History lives in a ref so pointer handlers stay synchronous; the lengths are
+  // mirrored into state to drive the disabled state of the undo/redo controls.
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 
   const [tool, setTool] = useState<DrawingType | 'cursor'>('cursor');
   const [pendingAnchors, setPendingAnchors] = useState<DrawingAnchor[]>([]);
@@ -128,6 +132,19 @@ export function ChartPanel({
     controller.render({ bars: rendered, chartType: chart.chartType, showVolume: chart.showVolume, priceScaleMode: chart.priceScaleMode, indicators: indicatorSpecs });
   }, [rendered, chart.chartType, chart.showVolume, chart.priceScaleMode, indicatorSpecs]);
 
+  // The controller reads its colours from the CSS variables, so a theme switch
+  // has to be pushed into it explicitly.
+  useEffect(() => {
+    controllerRef.current?.applyTheme();
+  }, [state.preferences.theme]);
+
+  // Token colour used by the drawing layer; recomputed with the theme so the
+  // memoised draw callback redraws with the new palette.
+  const labelColor = useMemo(
+    () => cssVar('--text-primary', state.preferences.theme === 'light' ? '#141a21' : '#e7edf4'),
+    [state.preferences.theme],
+  );
+
   const draw = useCallback(() => {
     const controller = controllerRef.current;
     const canvas = canvasRef.current;
@@ -156,7 +173,7 @@ export function ChartPanel({
       if (points.some((point) => point === null)) continue;
       const resolved = points as Array<{ x: number; y: number }>;
       const selected = drawing.id === selectedId;
-      context.strokeStyle = selected ? '#ffffff' : drawing.style.color;
+      context.strokeStyle = selected ? labelColor : drawing.style.color;
       context.lineWidth = drawing.style.lineWidth;
       context.setLineDash(drawing.style.lineStyle === 'dashed' ? [5, 4] : []);
       context.beginPath();
@@ -189,7 +206,7 @@ export function ChartPanel({
           context.lineTo(Math.max(x0, x1), y);
           context.stroke();
           context.setLineDash([]);
-          context.fillStyle = withAlpha('#ffffff', 0.7);
+          context.fillStyle = withAlpha(labelColor, 0.7);
           context.fillText(`${(level * 100).toFixed(1)}%  ${formatPrice(price)}`, Math.max(x0, x1) + 4, y - 2);
         }
       }
@@ -201,7 +218,7 @@ export function ChartPanel({
           const second = resolved[1] as { x: number; y: number };
           context.fillStyle = withAlpha(drawing.style.color, 0.14);
           context.fillRect(Math.min(first.x, second.x), Math.min(first.y, second.y), Math.abs(second.x - first.x), Math.abs(second.y - first.y));
-          context.fillStyle = '#ffffff';
+          context.fillStyle = labelColor;
           context.font = '11px ui-monospace, monospace';
           const label = `${formatSignedPercent(info.pct)}  ${formatPrice(info.delta)}`;
           context.fillText(label, Math.max(first.x, second.x) + 5, Math.min(first.y, second.y) - 6);
@@ -217,7 +234,7 @@ export function ChartPanel({
 
       if (selected) {
         for (const point of resolved) {
-          context.fillStyle = '#ffffff';
+          context.fillStyle = labelColor;
           context.beginPath();
           context.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
           context.fill();
@@ -230,7 +247,7 @@ export function ChartPanel({
       const first = toPoint(pendingAnchors[0] as DrawingAnchor);
       const second = toPoint({ date: readout.date, price: readout.price });
       if (first && second) {
-        context.strokeStyle = '#ffffff';
+        context.strokeStyle = labelColor;
         context.lineWidth = 1;
         context.setLineDash([4, 4]);
         context.beginPath();
@@ -240,7 +257,7 @@ export function ChartPanel({
         context.setLineDash([]);
       }
     }
-  }, [localDrawings, selectedId, pendingAnchors, readout]);
+  }, [labelColor, localDrawings, selectedId, pendingAnchors, readout]);
 
   useEffect(() => {
     draw();
@@ -253,10 +270,14 @@ export function ChartPanel({
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller || !onRangeChange) return;
-    return controller.subscribeViewport(() => {
+    const emit = () => {
       const range = controller.getVisibleRange();
       onRangeChange(range ? { from: range.from, to: range.to } : null);
-    });
+    };
+    const unsubscribe = controller.subscribeViewport(emit);
+    // Emit once on install so range linking works before the first pan.
+    emit();
+    return unsubscribe;
   }, [onRangeChange]);
 
   // Apply a range pushed in from a linked chart.
@@ -270,31 +291,40 @@ export function ChartPanel({
     controller.setVisibleRange(appliedRange);
   }, [appliedRange]);
 
+  const syncHistory = useCallback(() => {
+    setHistorySize({ past: historyRef.current.past.length, future: historyRef.current.future.length });
+  }, []);
+
   const commitDrawings = useCallback(
-    (next: Drawing[]) => {
-      historyRef.current.past.push(localDrawings);
+    (next: Drawing[], base: Drawing[] = localDrawings) => {
+      // `base` is the state the change started from. A drag supplies its
+      // pre-drag snapshot, so Undo restores where the drag began.
+      historyRef.current.past.push(base);
       historyRef.current.future = [];
+      syncHistory();
       setDragDrawings(null);
       void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }));
     },
-    [actions, chart.id, localDrawings, workspaceId],
+    [actions, chart.id, localDrawings, syncHistory, workspaceId],
   );
 
   const undo = useCallback(() => {
     const previous = historyRef.current.past.pop();
     if (!previous) return;
     historyRef.current.future.push(localDrawings);
+    syncHistory();
     setDragDrawings(null);
     void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: previous }));
-  }, [actions, chart.id, localDrawings, workspaceId]);
+  }, [actions, chart.id, localDrawings, syncHistory, workspaceId]);
 
   const redo = useCallback(() => {
     const next = historyRef.current.future.pop();
     if (!next) return;
     historyRef.current.past.push(localDrawings);
+    syncHistory();
     setDragDrawings(null);
     void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }));
-  }, [actions, chart.id, localDrawings, workspaceId]);
+  }, [actions, chart.id, localDrawings, syncHistory, workspaceId]);
 
   const pointerToAnchor = (event: React.PointerEvent<HTMLDivElement>): DrawingAnchor | null => {
     const controller = controllerRef.current;
@@ -311,6 +341,8 @@ export function ChartPanel({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     onFocus();
+    // The shortcuts belong to this panel, so the pointer click takes focus.
+    stageRef.current?.focus({ preventScroll: true });
     const anchor = pointerToAnchor(event);
     if (!anchor) return;
 
@@ -333,6 +365,8 @@ export function ChartPanel({
       setSelectedId(hit ? hit.id : null);
       if (hit) {
         dragRef.current = { id: hit.id, startPrice: anchor.price, startDate: anchor.date, latest: localDrawings };
+        // Stop the chart from panning underneath the drawing drag.
+        controller.setDragToPan(false);
         event.currentTarget.setPointerCapture(event.pointerId);
       }
       return;
@@ -352,9 +386,21 @@ export function ChartPanel({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
     const anchor = pointerToAnchor(event);
+    // The overlay covers the pane while a tool is active, so the chart
+    // crosshair no longer fires. The readout and the preview follow the
+    // pointer event instead. With the pointer tool the chart owns the
+    // crosshair, so this path stays out of the way and cannot double-render.
+    if (anchor && tool !== 'cursor') {
+      setReadout((current) => {
+        if (current.date === anchor.date && current.price === anchor.price) return current;
+        const index = rendered.findIndex((bar) => bar.date === anchor.date);
+        return { date: anchor.date, price: anchor.price, index: index >= 0 ? index : null };
+      });
+    }
+
+    const drag = dragRef.current;
+    if (!drag || event.buttons === 0) return;
     if (!anchor) return;
     const controller = controllerRef.current;
     if (!controller) return;
@@ -378,8 +424,18 @@ export function ChartPanel({
     const drag = dragRef.current;
     if (!drag) return;
     dragRef.current = null;
+    controllerRef.current?.setDragToPan(true);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (dragDrawings) commitDrawings(dragDrawings);
+    // The pre-drag snapshot is the undo base, not the already-moved set.
+    if (dragDrawings) commitDrawings(dragDrawings, drag.latest);
+  };
+
+  const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    controllerRef.current?.setDragToPan(true);
+    setDragDrawings(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const createDrawing = (anchors: DrawingAnchor[]) => {
@@ -415,6 +471,10 @@ export function ChartPanel({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Keystrokes typed into the indicator dialog (or any form control) must
+    // never reach the drawing shortcuts.
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
     if (event.key === 'Escape') {
       selectTool('cursor');
       return;
@@ -453,6 +513,7 @@ export function ChartPanel({
           }))}
         />
         <Select
+          ariaLabel="Chart type"
           value={chart.chartType}
           onChange={(value: ChartType) => void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, chartType: value }))}
           options={[
@@ -463,6 +524,7 @@ export function ChartPanel({
           ]}
         />
         <Select
+          ariaLabel="Price scale"
           value={chart.priceScaleMode}
           onChange={(value: PriceScaleMode) => void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, priceScaleMode: value }))}
           options={[
@@ -475,10 +537,10 @@ export function ChartPanel({
         <button type="button" className="tool-button" title="Add indicator" aria-label="Add indicator" onClick={() => setIndicatorDialogOpen(true)}>
           <Plus size={14} weight="bold" />
         </button>
-        <button type="button" className="tool-button" title="Undo drawing" aria-label="Undo drawing" onClick={undo}>
+        <button type="button" className="tool-button" title="Undo drawing" aria-label="Undo drawing" disabled={historySize.past === 0} onClick={undo}>
           <ArrowCounterClockwise size={14} />
         </button>
-        <button type="button" className="tool-button" title="Redo drawing" aria-label="Redo drawing" onClick={redo}>
+        <button type="button" className="tool-button" title="Redo drawing" aria-label="Redo drawing" disabled={historySize.future === 0} onClick={redo}>
           <ArrowClockwise size={14} />
         </button>
         <button type="button" className="tool-button" title="Fit content" aria-label="Fit content" onClick={() => controllerRef.current?.fitContent()}>
@@ -509,9 +571,13 @@ export function ChartPanel({
         <div className="chart-panel" style={{ minHeight: 380 }}>
           <div
             className="chart-stage"
+            ref={stageRef}
+            tabIndex={0}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onLostPointerCapture={handlePointerCancel}
           >
             <div className="chart-canvas-host" ref={containerRef} />
             <canvas
@@ -718,6 +784,12 @@ function shiftDate(controller: ChartController, date: string, offset: number): s
   const pixelsPerBar = paneWidth / (range.to - range.from);
   const shifted = controller.xToDate(x + offset * pixelsPerBar);
   return shifted ? controller.nearestDate(shifted) : from;
+}
+
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
 }
 
 function withAlpha(hex: string, alpha: number): string {
