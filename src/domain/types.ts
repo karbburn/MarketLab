@@ -14,7 +14,10 @@ export type Frequency = 'daily' | 'weekly' | 'monthly';
 
 export type Timeframe = '1D' | '1W' | '1M';
 
-export type ChartType = 'candlestick' | 'line' | 'area' | 'baseline';
+export const CHART_TYPES = ['candlestick', 'bar', 'line', 'area', 'baseline'] as const;
+
+/** Order and labels for chart-type selectors; one source so they cannot drift. */
+export type ChartType = (typeof CHART_TYPES)[number];
 
 export type PriceScaleMode = 'normal' | 'logarithmic' | 'percentage';
 

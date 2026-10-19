@@ -184,4 +184,20 @@ test.describe('chart workspace', () => {
       .click();
     await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
   });
+
+  test('switches to the OHLC Bars chart type and keeps it after a reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const chartType = page.getByLabel('Chart type').first();
+    await expect(chartType).toHaveValue('candlestick');
+
+    await chartType.selectOption('bar');
+    await expect(chartType).toHaveValue('bar');
+    // The panel keeps rendering once the series is rebuilt as bars.
+    await waitForChart(page);
+
+    await page.reload();
+    await expect(page.getByLabel('Chart type').first()).toHaveValue('bar');
+  });
 });

@@ -23,6 +23,7 @@ import { createId } from '../../lib/id';
 import { useStore } from '../../state/store';
 import type { DatasetView } from '../../state/selectors';
 import { Segmented, Select, Tag } from '../ui';
+import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 
@@ -516,12 +517,7 @@ export function ChartPanel({
           ariaLabel="Chart type"
           value={chart.chartType}
           onChange={(value: ChartType) => void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, chartType: value }))}
-          options={[
-            { value: 'candlestick', label: 'Candles' },
-            { value: 'line', label: 'Line' },
-            { value: 'area', label: 'Area' },
-            { value: 'baseline', label: 'Baseline' },
-          ]}
+          options={CHART_TYPE_OPTIONS}
         />
         <Select
           ariaLabel="Price scale"

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Workspace } from '../../domain/types';
+import { CHART_TYPES, type Workspace } from '../../domain/types';
 import { isDateString } from '../date';
 import { anchorsRequired } from '../drawings/geometry';
 
@@ -67,7 +67,7 @@ const chartConfigSchema = z.object({
   instrumentId: z.string().min(1),
   datasetId: z.string().min(1),
   timeframe: z.enum(['1D', '1W', '1M']),
-  chartType: z.enum(['candlestick', 'line', 'area', 'baseline']),
+  chartType: z.enum(CHART_TYPES),
   showVolume: z.boolean(),
   priceScaleMode: z.enum(['normal', 'logarithmic', 'percentage']),
   visibleRange: visibleRangeSchema,
@@ -106,7 +106,7 @@ export const preferencesSchema = z.object({
   theme: z.enum(['dark', 'light']),
   defaultWorkspaceId: z.string().nullable(),
   showVolumeByDefault: z.boolean(),
-  defaultChartType: z.enum(['candlestick', 'line', 'area', 'baseline']),
+  defaultChartType: z.enum(CHART_TYPES),
   defaultTimeframe: z.enum(['1D', '1W', '1M']),
 });
 

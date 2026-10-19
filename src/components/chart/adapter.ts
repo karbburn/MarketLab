@@ -1,5 +1,6 @@
 import {
   AreaSeries,
+  BarSeries,
   BaselineSeries,
   CandlestickSeries,
   ColorType,
@@ -205,6 +206,16 @@ export class ChartController {
         borderDownColor: downColor,
         wickUpColor: upColor,
         wickDownColor: downColor,
+      });
+      series.setData(
+        input.bars.map((bar) => ({ time: bar.date as Time, open: bar.open, high: bar.high, low: bar.low, close: bar.close })),
+      );
+      this.priceSeries = series;
+    } else if (input.chartType === 'bar') {
+      const series = this.chart.addSeries(BarSeries, {
+        ...priceOptions,
+        upColor,
+        downColor,
       });
       series.setData(
         input.bars.map((bar) => ({ time: bar.date as Time, open: bar.open, high: bar.high, low: bar.low, close: bar.close })),

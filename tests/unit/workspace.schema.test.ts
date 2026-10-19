@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseWorkspace } from '../../src/lib/workspace/schema';
+import { CHART_TYPES } from '../../src/domain/types';
+import { CHART_TYPE_OPTIONS } from '../../src/lib/chartTypes';
 
 interface Anchor {
   date: string;
@@ -108,5 +110,31 @@ describe('workspace schema version', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/newer version/i);
+  });
+});
+
+describe('chart type coverage', () => {
+  it('offers exactly the supported chart types, in the domain order', () => {
+    expect(CHART_TYPE_OPTIONS.map((option) => option.value)).toEqual([...CHART_TYPES]);
+  });
+
+  it('gives every chart type a non-empty label', () => {
+    for (const option of CHART_TYPE_OPTIONS) {
+      expect(option.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepts the OHLC bar chart type in a saved workspace', () => {
+    const workspace = workspaceWith([]);
+    const charts = workspace.charts as Array<Record<string, unknown>>;
+    (charts[0] as Record<string, unknown>).chartType = 'bar';
+    expect(parseWorkspace(workspace).ok).toBe(true);
+  });
+
+  it('rejects an unknown chart type instead of coercing it', () => {
+    const workspace = workspaceWith([]);
+    const charts = workspace.charts as Array<Record<string, unknown>>;
+    (charts[0] as Record<string, unknown>).chartType = 'hlc-area';
+    expect(parseWorkspace(workspace).ok).toBe(false);
   });
 });

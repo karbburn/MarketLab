@@ -198,7 +198,7 @@ export function Select<T extends string>({
 }: {
   value: T;
   onChange: (value: T) => void;
-  options: Array<{ value: T; label: string }>;
+  options: ReadonlyArray<{ value: T; label: string }>;
   id?: string;
   disabled?: boolean;
   ariaLabel?: string;
@@ -250,7 +250,7 @@ export function Segmented<T extends string>({
 }: {
   value: T;
   onChange: (value: T) => void;
-  options: Array<{ value: T; label: string; title?: string }>;
+  options: ReadonlyArray<{ value: T; label: string; title?: string }>;
   label: string;
 }) {
   return (

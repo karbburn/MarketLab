@@ -5,6 +5,7 @@ import { datasetViews } from '../state/selectors';
 import { createBackup, parseBackup, serialiseBackup } from '../lib/export/backup';
 import { downloadTextFile, readFileAsText } from '../lib/export/download';
 import { WORKSPACE_LAYOUTS, chartCountForLayout } from '../state/defaults';
+import { CHART_TYPE_OPTIONS } from '../lib/chartTypes';
 import { EmptyState, Field, Panel, Segmented, Select, Switch, Tag, TextInput } from '../components/ui';
 
 export function WorkspacesPage() {
@@ -242,12 +243,7 @@ export function WorkspacesPage() {
               <Select
                 value={state.preferences.defaultChartType}
                 onChange={(value) => void actions.setPreferences({ defaultChartType: value })}
-                options={[
-                  { value: 'candlestick', label: 'Candles' },
-                  { value: 'line', label: 'Line' },
-                  { value: 'area', label: 'Area' },
-                  { value: 'baseline', label: 'Baseline' },
-                ]}
+                options={CHART_TYPE_OPTIONS}
               />
             </Field>
             <Field label="Default timeframe">
