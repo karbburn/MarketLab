@@ -289,8 +289,13 @@ button {
   flex: 1;
 }
 
-/* The navigation drawer is a narrow-viewport affordance only. */
-.shell-nav-toggle,
+/* The navigation control is available at every width: on narrow viewports it
+   opens the off-canvas drawer, on wide viewports it collapses the docked
+   sidebar so the workspace can take the full width. */
+.shell-nav-toggle {
+  display: inline-flex;
+}
+
 .shell-scrim {
   display: none;
 }
@@ -317,10 +322,6 @@ button {
     transform: translateX(0);
   }
 
-  .shell-nav-toggle {
-    display: inline-flex;
-  }
-
   .shell-scrim {
     display: block;
     position: fixed;
@@ -330,6 +331,19 @@ button {
     padding: 0;
     background: rgba(4, 8, 12, 0.55);
     cursor: pointer;
+  }
+}
+
+/* On wide viewports the sidebar is docked in the shell grid, so collapsing it
+   only has to remove the column. The topbar control stays visible and brings
+   it back. */
+@media (min-width: 901px) {
+  .shell.nav-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell.nav-collapsed .shell-nav {
+    display: none;
   }
 }
 

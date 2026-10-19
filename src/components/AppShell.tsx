@@ -17,7 +17,7 @@ import {
 import { useStore } from '../state/store';
 import { Toaster } from './ui';
 import { datasetViews, hasSyntheticData } from '../state/selectors';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ImportDialog } from './data/ImportDialog';
 import { DownloadDialog } from './data/DownloadDialog';
 import { BulkDownloadDialog } from './data/BulkDownloadDialog';
@@ -65,6 +65,24 @@ const TITLES: Record<string, string> = {
   '/workspaces': 'Workspaces and settings',
 };
 
+// Below this width the sidebar becomes an off-canvas drawer; above it the
+// sidebar is docked and the same control collapses it instead.
+const NARROW_NAV_QUERY = '(max-width: 900px)';
+
+function subscribeToNarrowNav(onStoreChange: () => void) {
+  const query = window.matchMedia(NARROW_NAV_QUERY);
+  query.addEventListener('change', onStoreChange);
+  return () => query.removeEventListener('change', onStoreChange);
+}
+
+function getNarrowNavSnapshot() {
+  return window.matchMedia(NARROW_NAV_QUERY).matches;
+}
+
+function useNarrowNav() {
+  return useSyncExternalStore(subscribeToNarrowNav, getNarrowNavSnapshot);
+}
+
 export function AppShell() {
   const { state, actions } = useStore();
   const location = useLocation();
@@ -72,10 +90,26 @@ export function AppShell() {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const narrow = useNarrowNav();
 
   const views = datasetViews(state);
   const synthetic = hasSyntheticData(state);
   const title = TITLES[location.pathname] ?? 'MarketLab';
+
+  // One control, two layouts: on narrow viewports it opens the drawer, on wide
+  // viewports it collapses the docked sidebar.
+  const navExpanded = narrow ? navOpen : !navCollapsed;
+  const navToggleLabel = navExpanded
+    ? narrow
+      ? 'Close navigation'
+      : 'Collapse navigation'
+    : narrow
+      ? 'Open navigation'
+      : 'Expand navigation';
+  const shellClassName = ['shell', navOpen ? 'nav-open' : '', navCollapsed ? 'nav-collapsed' : '']
+    .filter(Boolean)
+    .join(' ');
 
   // The pages inside the shell ask for the import and download dialogs
   // through the event bus, so the dialogs can live in one place.
@@ -103,7 +137,7 @@ export function AppShell() {
   }, [navOpen]);
 
   return (
-    <div className={navOpen ? 'shell nav-open' : 'shell'}>
+    <div className={shellClassName}>
       {navOpen && (
         <button
           type="button"
@@ -161,13 +195,16 @@ export function AppShell() {
           <button
             type="button"
             className="button ghost icon shell-nav-toggle"
-            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
-            aria-expanded={navOpen}
+            aria-label={navToggleLabel}
+            aria-expanded={navExpanded}
             aria-controls="primary-nav"
-            title={navOpen ? 'Close navigation' : 'Open navigation'}
-            onClick={() => setNavOpen((open) => !open)}
+            title={navToggleLabel}
+            onClick={() => {
+              if (narrow) setNavOpen((open) => !open);
+              else setNavCollapsed((collapsed) => !collapsed);
+            }}
           >
-            {navOpen ? <X size={17} /> : <List size={17} />}
+            {navExpanded ? <X size={17} /> : <List size={17} />}
           </button>
           <span className="topbar-title">{title}</span>
           <span className="topbar-spacer" />
