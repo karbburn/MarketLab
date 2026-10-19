@@ -2,7 +2,7 @@
 
 **A local-first charting and quantitative research terminal that runs entirely in the browser.**
 
-[Live application](https://marketlab.sourabhpradhan.in) · [Getting started](#getting-started) · [Architecture](#architecture) · [Scope](#scope-and-limitations)
+[Live application](https://marketlab.sourabhpradhan.in) · [Getting started](#getting-started) · [Getting data](#getting-data) · [Architecture](#architecture) · [Scope](#scope-and-limitations)
 
 MarketLab implements, from first principles, the workflow a trading terminal gives you: validated
 OHLCV ingestion, interactive charts with indicators and drawings, risk and cross-asset research,
@@ -11,17 +11,21 @@ It is a static single-page app — there is no account, no backend and no teleme
 calendar, indicator and simulation is computed on your own device. Your data lives in the
 browser's IndexedDB and is never uploaded anywhere.
 
+**MarketLab stores no bundled market data.** The library starts empty and fills with history you
+download through the optional local market-data service or import from a CSV file. Nothing is
+synthesised, and no price is ever invented to fill a gap.
+
 MarketLab is an independent project. It is not affiliated with, endorsed by, or derived from
 TradingView or any other commercial charting platform; it reimplements a familiar terminal
 *workflow* from scratch.
 
-![The MarketLab chart workspace: a candlestick series with a volume pane, drawing tools and a watchlist](docs/screenshots/workspace.png)
+![The MarketLab chart workspace: a daily candlestick series with a volume pane, drawing tools and a watchlist](docs/screenshots/workspace.png)
 
 ## Features
 
 ### Charting
 
-- Candlestick, line, area and baseline series, with a volume pane and normal, logarithmic or
+- Candlestick, bar, line, area and baseline series, with a volume pane and normal, logarithmic or
   percentage price scales.
 - Crosshair readout showing OHLC, change and session date for the bar under the pointer.
 - Layouts of one, two stacked, two side by side or four panels. Link groups keep panels that
@@ -57,13 +61,14 @@ yet (warm-up periods) are empty rather than zero.
 
 ### Data
 
+- **Download real history** — one symbol at a time, or a whole list in one batch. Every symbol is
+  reported on its own, so one unavailable ticker never discards the rest of the run.
 - **CSV import** with inferred column roles you can override, a validation report, and rejected
   rows listed with reasons (see [Importing your own data](#importing-your-own-data)).
 - **Weekly and monthly views** aggregated from daily bars, always labelled as aggregated. Daily
   data is never interpolated into intraday bars.
-- **Optional real daily bars** downloaded through a bundled local service
-  (see [Optional real market data](#optional-real-market-data)), with the provider, exchange,
-  adjustment policy and retrieval time stored next to every series.
+- **Provenance** — every downloaded series stores its provider, exchange, adjustment policy and
+  retrieval time, and shows them in the data library, the inspection panel and the chart legend.
 - **Export and backup** — datasets, quant summaries, screener results, backtest trades and the
   equity curve as CSV; the whole workspace as a versioned JSON backup that can be merged into or
   restored over the current state.
@@ -88,10 +93,9 @@ npm install
 npm run dev
 ```
 
-Open the printed URL. On first run the app seeds a bundled sample set — six instruments of 1,300
-daily sessions each, generated locally from a fixed seed — so every screen has data to show. The
-sample is labelled **not real market data** everywhere it appears and can be replaced with your
-own imports.
+Open the printed URL. The library starts empty on purpose: the first screen offers to download
+real market data, to import a CSV file, or to open the chart workspace and read how to get
+started. Nothing is pre-filled, and no placeholder prices are shown.
 
 ### Scripts
 
@@ -107,7 +111,35 @@ own imports.
 | `npm run test:e2e` | Run the Playwright end-to-end suite against a preview build. |
 | `npm run verify` | Lint, type-check, unit test and build in one pass. |
 
-## Importing your own data
+## Getting data
+
+### Downloading real history
+
+MarketLab downloads daily bars from Yahoo Finance through a small local service that lives in
+`services/market-data/`. It is deliberately outside the app: the frontend only talks to
+`127.0.0.1`, so nothing is proxied through the site you are viewing.
+
+```bash
+cd services/market-data
+python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python -m uvicorn app:app --host 127.0.0.1 --port 8787
+```
+
+Then use **Data → Download market data** for a single symbol, or **Data → Download many symbols**
+for a batch — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the batch dialog
+accepts any list you paste in. Read
+[`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the error
+model and the setup details.
+
+Worth stating plainly: **Yahoo Finance is an unofficial, undocumented source.** Downloads can be
+delayed for some venues, be rate limited, or change shape without notice, and the data is not
+licensed for redistribution. Every series keeps its provider, exchange, adjustment policy and
+retrieval timestamp so the provenance travels with the prices. The service is entirely optional:
+without it, CSV imports, previously downloaded series and every other feature keep working, and
+download attempts fail with an explicit message instead of silently producing nothing.
+
+### Importing your own data
 
 CSV import accepts a header row and infers the column roles, which you can override before
 importing:
@@ -130,36 +162,11 @@ sessions are reported as warnings. Missing sessions are reported as gaps rather 
 and every stored series carries a content hash that is also used to recognise an already-stored
 series when a backup is restored.
 
-## Optional real market data
-
-MarketLab ships with an optional local service that downloads real daily bars from Yahoo Finance
-through [`yfinance`](https://github.com/ranaroussi/yfinance). It is deliberately outside the app:
-the frontend only talks to `127.0.0.1`, so nothing is proxied through the site you are viewing.
-
-```bash
-cd services/market-data
-python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn app:app --host 127.0.0.1 --port 8787
-```
-
-Then choose **Data → Download market data** in the app. Read
-[`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the error
-model and the setup details.
-
-Worth stating plainly: **Yahoo Finance is an unofficial, undocumented source.** Downloads can be
-delayed for some venues, be rate limited, or change shape without notice, and the data is not
-licensed for redistribution. Every series keeps its provider, exchange, adjustment policy and
-retrieval timestamp so the provenance travels with the prices. The service is entirely optional:
-without it, local CSV imports, the bundled sample, previously downloaded series and every other
-feature keep working, and download attempts fail with an explicit message.
-
 ## Architecture
 
 ```
 src/
   components/     app shell, UI primitives, chart panels, chart adapter, dialogs
-  data/           deterministic synthetic sample data
   domain/         canonical domain types (bars, datasets, workspaces, drawings)
   lib/
     backtest/     rule definitions, comparison helpers, simulation engine
@@ -167,14 +174,15 @@ src/
     drawings/     drawing geometry and hit testing
     export/       CSV writers, JSON backup and browser download helpers
     indicators/   indicator implementations and registry
-    marketdata/   provider-independent client and response normalisation
+    marketdata/   provider-independent client, batch queue and response normalisation
+    migration/    removal of the legacy bundled demo series
     persistence/  IndexedDB adapter with an in-memory fallback
     quant/        performance, risk, correlation and comparison metrics
     screener/     screener fields and evaluation
     validation/   dataset validation and OHLC invariants
     workspace/    backup schema and migration
   pages/          one module per top-level screen
-  state/          store, defaults, selectors and sample seeding
+  state/          store, defaults, selectors
   styles/         design tokens and global styles
 services/
   market-data/    optional local FastAPI + yfinance service and its tests
@@ -195,6 +203,10 @@ set of design tokens, with dark and light themes.
 - **Canonical bars.** A session is identified by its date (`YYYY-MM-DD`), bucketed in UTC. Only
   daily → weekly (Monday-based) and daily → monthly aggregation is offered; intraday is
   unsupported by design, and nothing infers an intraday series from daily data.
+- **Real data or nothing.** The application ships no synthetic series. An empty library is a
+  first-run state with real actions in it, not a gap filled with invented prices. A browser that
+  ran an earlier build still holding the old demo series has them removed on load, and only
+  them: imported, downloaded and user-created records are left untouched.
 - **Deterministic maths, explicit gaps.** Indicators, metrics and the backtester are pure
   functions over stored bars, with warm-up periods reported as empty rather than zero.
 - **Validation before storage.** Imported and downloaded series are checked for OHLC invariants,
@@ -220,11 +232,13 @@ python -m pytest services/market-data/tests -q
 
 Unit tests cover the pure logic where correctness is decided: indicator values, OHLC validation
 and CSV mapping, risk metrics and correlation, screener evaluation, the backtest engine's fill
-model, backup parsing and migration, and export formatting. The end-to-end suite drives the built
-app with the locally installed Google Chrome (`channel: 'chrome'`, no browser download) and covers
-the shell, the chart workspace, drawing and keyboard behaviour, CSV import and rejection paths,
-the research screens, settings, and backup export/restore. The service test suite is
-deterministic and never touches the network.
+model, the download batch queue, backup parsing and migration, the removal of the legacy demo
+series, and export formatting. The end-to-end suite drives the built app with the locally
+installed Google Chrome (`channel: 'chrome'`, no browser download) and covers the shell, the
+chart workspace, drawing and keyboard behaviour, CSV import and rejection paths, the research
+screens, settings, backup export/restore, the download success and failure paths, and the
+first-run and migration behaviour. The service test suite is deterministic and never touches the
+network.
 
 ## Hosting
 
@@ -243,7 +257,7 @@ MarketLab is a research tool, and its edges are intentional:
   short selling, borrow costs or corporate actions beyond the adjusted close it stores.
 - State is per browser profile. Moving between browsers is done deliberately through the JSON
   backup, not through an account or a sync service.
-- Nothing here is investment advice, and the bundled sample data is synthetic by construction.
+- Nothing here is investment advice.
 
 ---
 
