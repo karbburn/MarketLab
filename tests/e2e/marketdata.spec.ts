@@ -75,6 +75,9 @@ async function stubService(page: Page, body: unknown, status = 200): Promise<voi
 
 test.describe('market data download', () => {
   test('explains the unreachable service instead of failing silently', async ({ page }) => {
+    // The request is aborted on purpose so the assertion holds whether or not
+    // the local service happens to be running on this machine.
+    await page.route('**/api/history*', (route) => route.abort());
     await page.goto('/#/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
