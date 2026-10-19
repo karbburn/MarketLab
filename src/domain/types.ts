@@ -40,7 +40,35 @@ export interface Bar {
   volume: number | null;
 }
 
-export type SourceKind = 'bundled-sample' | 'user-csv';
+/** Distinguishes where a dataset came from; drives every provenance label. */
+export type SourceKind = 'bundled-sample' | 'user-csv' | 'provider-download';
+
+/** Open set of downloadable sources; the first is Yahoo Finance via yfinance. */
+export type ProviderId = 'yahoo-finance';
+
+/**
+ * Provenance for a downloaded dataset. Optional so older locally stored data
+ * and existing backups stay valid without a migration.
+ */
+export interface DatasetProvider {
+  provider: ProviderId;
+  /** Symbol as the provider keys it (e.g. `AAPL`, `^GSPC`, `BP.L`). */
+  providerSymbol: string;
+  /** Provider-local exchange code (e.g. `NMS`) when reported, otherwise null. */
+  exchange: string | null;
+  /** Human exchange name (e.g. `NasdaqGS`) when reported, otherwise null. */
+  exchangeName: string | null;
+  instrumentType: string | null;
+  interval: string;
+  /** Declared price-adjustment convention, e.g. splits applied, dividends not reinvested. */
+  adjustment: string;
+  /** ISO instant of the retrieval, from the provider metadata, not the client. */
+  retrievedAt: string;
+  /** Exchange timezone name (e.g. `America/New_York`) when reported. */
+  timezone: string | null;
+  /** Provider-stated limitations of this download, verbatim. */
+  sourceNotes: readonly string[];
+}
 
 export interface RejectedRow {
   rowNumber: number;
@@ -80,6 +108,8 @@ export interface Dataset {
   contentHash: string;
   hasVolume: boolean;
   validation: DatasetValidationSummary;
+  /** Present exactly when `sourceKind === 'provider-download'`. */
+  provider?: DatasetProvider;
 }
 
 export interface ChartConfig {

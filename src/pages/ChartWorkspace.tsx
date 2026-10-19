@@ -398,10 +398,12 @@ export function ChartWorkspacePage() {
                       <span className="panel-sub">
                         {view.instrument?.displayName ?? view.dataset.name}
                         {view.dataset.sourceKind === 'bundled-sample' && ' - synthetic sample'}
+                        {view.dataset.sourceKind === 'provider-download' && ' - downloaded'}
                       </span>
                     </div>
                     <div className="row tight">
                       {view.dataset.sourceKind === 'bundled-sample' && <Tag tone="warn">Sample</Tag>}
+                      {view.dataset.sourceKind === 'provider-download' && <Tag tone="accent">Download</Tag>}
                       <button
                         type="button"
                         className="button sm ghost"

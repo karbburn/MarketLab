@@ -171,32 +171,16 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     };
   }
 
-  const rejected: RejectedRow[] = [];
-  const warnings: ValidationWarning[] = [];
-  let rejectedRows = 0;
-  let duplicateRows = 0;
-  let missingVolumeRows = 0;
-
-  const recordRejection = (rowNumber: number, reason: string, raw?: string, count = 1) => {
-    rejectedRows += count;
-    if (rejected.length < MAX_REJECTED_SAMPLES) rejected.push({ rowNumber, reason, raw });
-  };
-
-  interface ParsedRow {
-    date: string;
-    bar: Bar;
-    rowNumber: number;
-  }
-
-  const parsedRows: ParsedRow[] = [];
-  const seen = new Map<string, number[]>();
+  const entries: BarEntry[] = [];
+  const rowRejections: RejectedRow[] = [];
+  let rejectedRowCount = 0;
 
   rows.forEach((row, index) => {
-    const rowNumber = index + 1;
     const rawDate = dateColumn ? row[dateColumn] : '';
     const date = normaliseDate(String(rawDate ?? ''));
     if (!date) {
-      recordRejection(rowNumber, `Unrecognised date value "${rawDate ?? ''}".`, rawDate);
+      rejectedRowCount += 1;
+      rowRejections.push({ rowNumber: index + 1, reason: `Unrecognised date value "${rawDate ?? ''}".`, raw: rawDate });
       return;
     }
 
@@ -205,62 +189,158 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     const low = parseNumericCell(lowColumn ? row[lowColumn] : undefined);
     const close = parseNumericCell(closeColumn ? row[closeColumn] : undefined);
     if (open === null || high === null || low === null || close === null) {
-      recordRejection(rowNumber, 'Open, high, low and close must all be finite numbers.', [
-        row[openColumn ?? ''] ?? '',
-        row[highColumn ?? ''] ?? '',
-        row[lowColumn ?? ''] ?? '',
-        row[closeColumn ?? ''] ?? '',
-      ].join(','));
-      return;
-    }
-
-    if (open <= 0 || high <= 0 || low <= 0 || close <= 0) {
-      recordRejection(
-        rowNumber,
-        `Prices must be greater than zero for ${date}. Series with zero or negative prices (such as spread quotes) are not supported.`,
-        [open, high, low, close].join(','),
-      );
-      return;
-    }
-
-    if (high < Math.max(open, close) - NUMERIC_TOLERANCE * Math.max(1, high)) {
-      recordRejection(rowNumber, `High (${high}) is below max(open, close) for ${date}.`);
-      return;
-    }
-    if (low > Math.min(open, close) + NUMERIC_TOLERANCE * Math.max(1, low)) {
-      recordRejection(rowNumber, `Low (${low}) is above min(open, close) for ${date}.`);
-      return;
-    }
-    if (high < low && !nearlyEqual(high, low)) {
-      recordRejection(rowNumber, `High (${high}) is below low (${low}) for ${date}.`);
+      rejectedRowCount += 1;
+      rowRejections.push({
+        rowNumber: index + 1,
+        reason: 'Open, high, low and close must all be finite numbers.',
+        raw: [
+          row[openColumn ?? ''] ?? '',
+          row[highColumn ?? ''] ?? '',
+          row[lowColumn ?? ''] ?? '',
+          row[closeColumn ?? ''] ?? '',
+        ].join(','),
+      });
       return;
     }
 
     let volume: number | null = null;
+    let volumeMissing = false;
     if (volumeColumn) {
       const rawVolume = row[volumeColumn];
-      const emptyVolume = rawVolume === undefined || String(rawVolume).trim() === '';
-      if (emptyVolume) {
-        missingVolumeRows += 1;
+      if (rawVolume === undefined || String(rawVolume).trim() === '') {
+        volumeMissing = true;
       } else {
         volume = parseNumericCell(rawVolume);
         if (volume === null) {
-          recordRejection(rowNumber, `Volume "${rawVolume}" is not a finite number.`, rawVolume);
-          return;
-        }
-        if (volume < 0) {
-          recordRejection(rowNumber, `Volume (${volume}) must not be negative.`);
+          rejectedRowCount += 1;
+          rowRejections.push({ rowNumber: index + 1, reason: `Volume "${rawVolume}" is not a finite number.`, raw: rawVolume });
           return;
         }
       }
     }
 
+    entries.push({ date, open, high, low, close, volume, rowNumber: index + 1, volumeMissing });
+  });
+
+  const series = validateBarEntries({ rows: entries, duplicatePolicy });
+
+  // Row-level CSV rejections (bad dates/numbers) never reached the shared
+  // series core, so their counts and samples are merged back into its summary.
+  const summary: DatasetValidationSummary = rowRejections.length === 0
+    ? series.summary
+    : {
+        ...series.summary,
+        rejectedRows: series.summary.rejectedRows + rejectedRowCount,
+        rejected: [
+          ...series.summary.rejected,
+          ...rowRejections.slice(0, Math.max(0, MAX_REJECTED_SAMPLES - series.summary.rejected.length)),
+        ]
+          .sort((a, b) => a.rowNumber - b.rowNumber)
+          .slice(0, MAX_REJECTED_SAMPLES),
+      };
+
+  return {
+    bars: series.bars,
+    fatalErrors: series.fatalErrors,
+    hasVolume: series.hasVolume,
+    contentHash: series.contentHash,
+    summary,
+  };
+}
+
+export interface BarEntry {
+  /** Normalised `YYYY-MM-DD` exchange session date. */
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** `null` when the source provided no value for this row. */
+  volume: number | null;
+  /** 1-based index of the row within its source, for rejection reports. */
+  rowNumber: number;
+  /** Set when the row is accepted but carries no volume value at all. */
+  volumeMissing?: boolean;
+}
+
+export interface BarSeriesValidationInput {
+  rows: readonly BarEntry[];
+  duplicatePolicy: DuplicatePolicy;
+  /** Message used when zero rows survive validation. */
+  emptyMessage?: string;
+}
+
+export interface BarSeriesValidationResult {
+  bars: Bar[];
+  summary: DatasetValidationSummary;
+  fatalErrors: string[];
+  hasVolume: boolean;
+  contentHash: string;
+}
+
+/**
+ * Applies the shared series-level rules (OHLC invariants, positive prices,
+ * duplicate policy, ordering, gap reporting) to already-parsed rows. The CSV
+ * import and the market-data download pipeline both funnel through this, so
+ * downstream consumers never see different rule behaviour per source.
+ */
+export function validateBarEntries(input: BarSeriesValidationInput): BarSeriesValidationResult {
+  const { rows, duplicatePolicy } = input;
+
+  const rejected: RejectedRow[] = [];
+  const warnings: ValidationWarning[] = [];
+  let rejectedRows = 0;
+  let duplicateRows = 0;
+  let missingVolumeRows = 0;
+  const recordRejection = (rowNumber: number, reason: string, raw?: string, count = 1) => {
+    rejectedRows += count;
+    if (rejected.length < MAX_REJECTED_SAMPLES) rejected.push({ rowNumber, reason, raw });
+  };
+
+  interface ParsedRow extends BarEntry {
+    bar: Bar;
+  }
+
+  const parsedRows: ParsedRow[] = [];
+  const seen = new Map<string, number[]>();
+
+  for (const row of rows) {
+    const { date, open, high, low, close, volume } = row;
+    if (open === null || high === null || low === null || close === null || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+      recordRejection(row.rowNumber, `Open, high, low and close must all be finite numbers for ${date}.`);
+      continue;
+    }
+    if (open <= 0 || high <= 0 || low <= 0 || close <= 0) {
+      recordRejection(
+        row.rowNumber,
+        `Prices must be greater than zero for ${date}. Series with zero or negative prices (such as spread quotes) are not supported.`,
+      );
+      continue;
+    }
+    if (high < Math.max(open, close) - NUMERIC_TOLERANCE * Math.max(1, high)) {
+      recordRejection(row.rowNumber, `High (${high}) is below max(open, close) for ${date}.`);
+      continue;
+    }
+    if (low > Math.min(open, close) + NUMERIC_TOLERANCE * Math.max(1, low)) {
+      recordRejection(row.rowNumber, `Low (${low}) is above min(open, close) for ${date}.`);
+      continue;
+    }
+    if (high < low && !nearlyEqual(high, low)) {
+      recordRejection(row.rowNumber, `High (${high}) is below low (${low}) for ${date}.`);
+      continue;
+    }
+    if (volume !== null && (volume < 0 || !Number.isFinite(volume))) {
+      recordRejection(row.rowNumber, `Volume (${volume}) must not be negative for ${date}.`);
+      continue;
+    }
+    if (volume === null) missingVolumeRows += 1;
+
     const bar: Bar = { date, open, high, low, close, volume };
-    parsedRows.push({ date, bar, rowNumber });
+    parsedRows.push({ ...row, bar });
     const bucket = seen.get(date);
     if (bucket) bucket.push(parsedRows.length - 1);
     else seen.set(date, [parsedRows.length - 1]);
-  });
+  }
 
   const excluded = new Set<number>();
   for (const [date, indices] of seen) {
@@ -269,7 +349,7 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     if (duplicatePolicy === 'keep-first') {
       for (const index of indices.slice(1)) excluded.add(index);
       recordRejection(
-        parsedRows[indices[1] as number]?.rowNumber ?? 0,
+        (parsedRows[indices[1] as number]?.rowNumber ?? 0),
         `Duplicate session ${date}; kept the first occurrence.`,
         undefined,
         indices.length - 1,
@@ -277,7 +357,7 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     } else if (duplicatePolicy === 'keep-last') {
       for (const index of indices.slice(0, -1)) excluded.add(index);
       recordRejection(
-        parsedRows[indices[0] as number]?.rowNumber ?? 0,
+        (parsedRows[indices[0] as number]?.rowNumber ?? 0),
         `Duplicate session ${date}; kept the last occurrence.`,
         undefined,
         indices.length - 1,
@@ -285,7 +365,7 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
     } else {
       for (const index of indices) excluded.add(index);
       recordRejection(
-        parsedRows[indices[0] as number]?.rowNumber ?? 0,
+        (parsedRows[indices[0] as number]?.rowNumber ?? 0),
         `Duplicate session ${date}; all ${indices.length} rows rejected.`,
         undefined,
         indices.length,
@@ -310,7 +390,8 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
   }
 
   const bars = accepted.map((row) => row.bar);
-  if (bars.length === 0) fatalErrors.push('No valid rows were found in the file.');
+  const fatalErrors: string[] = [];
+  if (bars.length === 0) fatalErrors.push(input.emptyMessage ?? 'No valid rows were found in the file.');
   if (accepted.length > 0) {
     const weekendRows = bars.filter((bar) => isoWeekday(bar.date) > 5).length;
     if (weekendRows > 0) {
@@ -348,7 +429,7 @@ export function validateCsvRows(input: CsvValidationInput): CsvValidationResult 
   return {
     bars,
     fatalErrors,
-    hasVolume: Boolean(volumeColumn) && bars.some((bar) => bar.volume !== null),
+    hasVolume: bars.some((bar) => bar.volume !== null),
     contentHash: hashSource ? `fnv1a-${hashString(hashSource)}` : '',
     summary: {
       acceptedRows: bars.length,

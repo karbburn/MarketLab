@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Database, DownloadSimple, Eye } from '@phosphor-icons/react';
+import { CloudArrowDown, Database, DownloadSimple, Eye } from '@phosphor-icons/react';
 import type { Workspace } from '../domain/types';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
@@ -7,6 +7,8 @@ import { downloadTextFile } from '../lib/export/download';
 import { barsToCsv, validationToCsv } from '../lib/export/csv';
 import { formatPrice } from '../lib/format';
 import { EmptyState, Metric, Panel, Tag } from '../components/ui';
+import { DownloadDialog } from '../components/data/DownloadDialog';
+import { PROVIDER_LABEL } from '../lib/marketdata/normalize';
 
 function affectedPanels(datasetId: string, workspaces: readonly Workspace[]): number {
   return workspaces.reduce(
@@ -31,6 +33,7 @@ export function DataPage() {
   const views = useMemo(() => datasetViews(state), [state]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   const selected = views.find((view) => view.dataset.id === selectedId) ?? null;
   const previewHead = selected ? selected.bars.slice(0, 12) : [];
@@ -45,6 +48,12 @@ export function DataPage() {
         title="Stored datasets"
         subtitle={`${views.length} dataset(s) - ${state.adapterKind === 'indexeddb' ? 'persisted in this browser' : 'in memory only for this session'}`}
         flush
+        actions={
+          <button type="button" className="button ghost sm" onClick={() => setDownloadOpen(true)}>
+            <CloudArrowDown size={14} aria-hidden />
+            Download market data
+          </button>
+        }
       >
         {views.length === 0 ? (
           <EmptyState
@@ -75,7 +84,13 @@ export function DataPage() {
                     <td className="mono">{view.instrument?.symbol ?? '--'}</td>
                     <td>{view.instrument?.displayName ?? view.dataset.name}</td>
                     <td>
-                      {view.dataset.sourceKind === 'bundled-sample' ? <Tag tone="warn">Synthetic sample</Tag> : <Tag tone="accent">Imported CSV</Tag>}
+                      {view.dataset.sourceKind === 'bundled-sample' ? (
+                        <Tag tone="warn">Synthetic sample</Tag>
+                      ) : view.dataset.sourceKind === 'provider-download' ? (
+                        <Tag tone="accent">{PROVIDER_LABEL}</Tag>
+                      ) : (
+                        <Tag tone="accent">Imported CSV</Tag>
+                      )}
                     </td>
                     <td className="muted">{view.dataset.frequency}</td>
                     <td className="num">{view.dataset.rowCount.toLocaleString('en-US')}</td>
@@ -158,6 +173,13 @@ export function DataPage() {
               <Metric label="Order corrections" value={selected.dataset.validation.sortCorrections.toLocaleString('en-US')} note="Rows re-sorted by date" />
               <Metric label="Imported" value={selected.dataset.importedAt.slice(0, 10)} note={selected.dataset.timezone} />
               <Metric label="Content hash" value={selected.dataset.contentHash.slice(0, 14)} note="Stable across identical imports" />
+              {selected.dataset.provider && (
+                <>
+                  <Metric label="Provider" value={PROVIDER_LABEL} note={`${selected.dataset.provider.providerSymbol} - interval ${selected.dataset.provider.interval}`} />
+                  <Metric label="Adjustment" value={selected.dataset.provider.adjustment} note={`Exchange ${selected.dataset.provider.exchangeName ?? selected.dataset.provider.exchange ?? 'not reported'}`} />
+                  <Metric label="Retrieved" value={selected.dataset.provider.retrievedAt.slice(0, 16).replace('T', ' ')} note="Provider timestamp, UTC" />
+                </>
+              )}
             </div>
             {selected.dataset.validation.warnings.length > 0 && (
               <ul className="list-reset stack field-hint" style={{ marginTop: 10 }}>
@@ -272,8 +294,14 @@ export function DataPage() {
           <li>Volume may be empty; it is stored as missing rather than as zero, and volume-based indicators withhold output where it is missing.</li>
           <li>Duplicate sessions are handled by the policy chosen during import: reject, keep first, or keep last.</li>
           <li>Weekend rows are flagged as a warning because most exchanges do not trade then.</li>
+          <li>
+            Downloaded series carry their provider, adjustment policy and retrieval time in the inspection panel. They are
+            real but unofficial data (Yahoo Finance), can be delayed, and are not licensed for redistribution.
+          </li>
         </ul>
       </Panel>
+
+      <DownloadDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
     </div>
   );
 }

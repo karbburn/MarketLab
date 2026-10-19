@@ -133,7 +133,7 @@ export const datasetSchema = z.object({
   id: z.string().min(1),
   instrumentId: z.string().min(1),
   name: z.string(),
-  sourceKind: z.enum(['bundled-sample', 'user-csv']),
+  sourceKind: z.enum(['bundled-sample', 'user-csv', 'provider-download']),
   sourceDescription: z.string(),
   frequency: z.enum(['daily', 'weekly', 'monthly']),
   timezone: z.string(),
@@ -143,6 +143,20 @@ export const datasetSchema = z.object({
   importedAt: z.string(),
   contentHash: z.string(),
   hasVolume: z.boolean(),
+  provider: z
+    .object({
+      provider: z.enum(['yahoo-finance']),
+      providerSymbol: z.string().min(1),
+      exchange: z.string().nullable(),
+      exchangeName: z.string().nullable(),
+      instrumentType: z.string().nullable(),
+      interval: z.string(),
+      adjustment: z.string(),
+      retrievedAt: z.string(),
+      timezone: z.string().nullable(),
+      sourceNotes: z.array(z.string()),
+    })
+    .optional(),
   validation: z.object({
     acceptedRows: z.number(),
     rejectedRows: z.number(),
