@@ -1,7 +1,7 @@
 # MarketLab
 
 A local-first charting and quantitative research terminal. It runs entirely in the browser,
-stores everything on your own device, and makes no network requests at runtime.
+stores everything on your own device, and makes no third-party network requests at runtime.
 
 MarketLab is an independent project. It is not affiliated with, endorsed by, or derived from
 any commercial charting platform; it implements a familiar terminal *workflow* from scratch.
@@ -13,6 +13,9 @@ any commercial charting platform; it implements a familiar terminal *workflow* f
 - **Historical data you control** - import OHLCV CSV files, review the validation report,
   and inspect the stored series. Weekly and monthly views are aggregated from daily data
   and are labelled as such.
+- **Optional real historical data** - run the bundled local service (see below) and download
+  daily bars from Yahoo Finance (unofficial source, no API key), with the provider, exchange,
+  adjustment policy and retrieval time recorded and shown for every series.
 - **Indicators** - SMA, EMA, Bollinger Bands, RSI, MACD, Stochastic Oscillator, ATR, ADX,
   Anchored VWAP, Volume SMA with relative volume, On-Balance Volume and Ichimoku Cloud,
   each computed from first principles and tested against hand-checked values.
@@ -41,6 +44,13 @@ This project deliberately avoids overstating what it does:
 
 - The bundled data is **deterministic synthetic data**, generated locally, and is labelled
   "not real market data" wherever it appears. It exists so the app is usable on first run.
+- Data downloaded from the optional market-data service comes from **Yahoo Finance, an
+  unofficial, undocumented source**: it may be delayed for some venues, can change or
+  disappear without notice, and is not licensed for redistribution. Downloads are daily
+  only, as-traded OHLC with a separately stored adjusted close (splits applied, dividends
+  not reinvested), and every stored series keeps the provider, exchange, adjustment policy
+  and retrieval timestamp next to its prices. The app works fully without the service;
+  no request is made unless you opt in from Data → Download market data.
 - Imported data is validated: prices must be positive, `low <= min(open, close)` and
   `max(open, close) <= high` must hold, sessions must be unique under the chosen duplicate
   policy, and out-of-order rows are reported. Rejected rows are listed with reasons.
@@ -80,6 +90,28 @@ screen has data.
 The end-to-end suite drives the built app on `http://127.0.0.1:4173` using the locally
 installed Google Chrome (`channel: 'chrome'`), so no browser download is required.
 
+## Optional market-data service
+
+MarketLab can also download real (unofficial) daily historical bars from Yahoo Finance
+via a small local service in `services/market-data/`. It needs Python 3.10+:
+
+```bash
+python -m pip install fastapi uvicorn yfinance
+python -m uvicorn app:app --app-dir services/market-data --host 127.0.0.1 --port 8787
+```
+
+Then in the app: **Data → Download market data**. Notes:
+
+- The service is local-only: it binds to `127.0.0.1`, accepts requests only from the
+  app's local origins, exposes no configurable URL-fetch endpoint, and needs no API key.
+- It serves daily sessions only (`interval=1d`) with `auto_adjust=False`, so prices are
+  as-traded and an adjusted close is stored separately (dividends are not reinvested).
+- The service is optional. When it is not running, everything else in MarketLab keeps
+  working, attempts to download fail with an explicit message, and previously downloaded
+  series remain available from local storage.
+- The Python test suite for the service is deterministic and never touches the network:
+  `python -m pytest services/market-data/tests`.
+
 ## Importing your own data
 
 CSV import accepts a header row and infers the column roles, which you can override before
@@ -110,6 +142,7 @@ src/
     drawings/     drawing geometry and hit testing
     export/       CSV, JSON backup and browser download helpers
     indicators/   indicator implementations and registry
+    marketdata/   provider-independent client and response normalisation
     persistence/  IndexedDB adapter with an in-memory fallback
     quant/        performance, risk and correlation metrics
     screener/     screener fields and evaluation
@@ -117,6 +150,8 @@ src/
   pages/          one module per top-level screen
   state/          store, defaults and selectors
   styles/         design tokens and component styles
+services/
+  market-data/    optional local FastAPI + yfinance download service and its tests
 tests/
   unit/           Vitest suites
   e2e/            Playwright suites
