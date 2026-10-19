@@ -18,7 +18,7 @@ import type { Bar, ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, 
 import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
-import { isDrawingComplete, priceRangeInfo } from '../../lib/drawings/geometry';
+import { anchorsRequired, isDrawingComplete, priceRangeInfo } from '../../lib/drawings/geometry';
 import { createId } from '../../lib/id';
 import { useStore } from '../../state/store';
 import type { DatasetView } from '../../state/selectors';
@@ -38,6 +38,26 @@ const TOOLS: Array<{ id: DrawingType | 'cursor'; label: string; icon: typeof Cur
   { id: 'price-range', label: 'Measure move', icon: Ruler },
   { id: 'text', label: 'Text label', icon: TextT },
 ];
+
+/** The style a freshly created drawing starts with. */
+const DEFAULT_DRAWING_STYLE = {
+  color: '#3fb8a3',
+  lineWidth: 1.5,
+  lineStyle: 'solid',
+  fillOpacity: 0.12,
+  fontSize: 12,
+} as const;
+
+interface TextEditorState {
+  /** `null` while a brand new label is being typed, the drawing id when re-editing. */
+  id: string | null;
+  /** Anchor for a new label; an existing label already has its anchors stored. */
+  anchor: DrawingAnchor | null;
+  /** Stage-relative position of the editor, captured at the click. */
+  point: { x: number; y: number };
+  value: string;
+  original: string;
+}
 
 export function ChartPanel({
   chart,
@@ -75,6 +95,14 @@ export function ChartPanel({
   // While a drawing is being dragged or just created the local copy leads; the
   // stored workspace state remains the source of truth at rest.
   const [dragDrawings, setDragDrawings] = useState<Drawing[] | null>(null);
+  // The text tool writes real text, so a click places a label through an inline
+  // editor instead of stamping a fixed string. Nothing is stored until the
+  // label is committed, so cancelling leaves no drawing and no history entry.
+  const [textEditor, setTextEditor] = useState<TextEditorState | null>(null);
+  // Escape commits nothing, then blurs the input as it unmounts; the flag stops
+  // the blur from being read as a second, committing edit.
+  const textEditClosedRef = useRef(false);
+  const textEditorInputRef = useRef<HTMLInputElement>(null);
   const localDrawings = dragDrawings ?? chart.drawings;
   // A selection only counts while the drawing it points at still exists, so undo
   // and redo can never leave the toolbar acting on a drawing that is not there.
@@ -327,7 +355,25 @@ export function ChartPanel({
     void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }));
   }, [actions, chart.id, localDrawings, syncHistory, workspaceId]);
 
-  const pointerToAnchor = (event: React.PointerEvent<HTMLDivElement>): DrawingAnchor | null => {
+  /** Screen positions of a drawing's anchors, dropping any that do not resolve. */
+  const screenPoints = (drawing: Drawing, controller: ChartController): Array<{ x: number; y: number }> =>
+    drawing.anchors
+      .map((entry) => {
+        const x = controller.timeToX(entry.date);
+        const y = controller.priceToY(entry.price);
+        return x === null || y === null ? null : { x, y };
+      })
+      .filter((entry): entry is { x: number; y: number } => entry !== null);
+
+  const pointForAnchor = (anchor: DrawingAnchor): { x: number; y: number } | null => {
+    const controller = controllerRef.current;
+    if (!controller) return null;
+    const x = controller.timeToX(anchor.date);
+    const y = controller.priceToY(anchor.price);
+    return x === null || y === null ? null : { x, y };
+  };
+
+  const pointerToAnchor = (event: React.MouseEvent<HTMLDivElement>): DrawingAnchor | null => {
     const controller = controllerRef.current;
     if (!controller) return null;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -346,22 +392,15 @@ export function ChartPanel({
     stageRef.current?.focus({ preventScroll: true });
     const anchor = pointerToAnchor(event);
     if (!anchor) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
 
     if (tool === 'cursor') {
       const controller = controllerRef.current;
       if (!controller) return;
-      const rect = event.currentTarget.getBoundingClientRect();
-      const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
       const hit = [...localDrawings].reverse().find((drawing) => {
         if (drawing.locked) return false;
-        const screenAnchors = drawing.anchors
-          .map((entry) => {
-            const x = controller.timeToX(entry.date);
-            const y = controller.priceToY(entry.price);
-            return x === null || y === null ? null : { x, y };
-          })
-          .filter((entry): entry is { x: number; y: number } => entry !== null);
-        return hitTest(screenAnchors, drawing.type, point);
+        return drawingHit(drawing, screenPoints(drawing, controller), point);
       });
       setSelectedId(hit ? hit.id : null);
       if (hit) {
@@ -375,15 +414,28 @@ export function ChartPanel({
 
     const first = pendingAnchors[0];
     if (!first) {
-      if (tool === 'horizontal-line' || tool === 'vertical-line') {
-        createDrawing([anchor]);
-      } else {
-        setPendingAnchors([anchor]);
-      }
+      // Single-anchor tools complete on the first click.
+      if (anchorsRequired(tool as DrawingType) === 1) createDrawing([anchor], point);
+      else setPendingAnchors([anchor]);
       return;
     }
     createDrawing([first, anchor]);
     setPendingAnchors([]);
+  };
+
+  /** Re-opens the label editor for an existing text drawing. */
+  const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (tool !== 'cursor') return;
+    if (!pointerToAnchor(event)) return;
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const target = [...localDrawings]
+      .reverse()
+      .find((drawing) => drawing.type === 'text' && !drawing.locked && drawingHit(drawing, screenPoints(drawing, controller), point));
+    if (!target) return;
+    openTextEditor({ id: target.id, anchor: null, point, value: target.text ?? '', original: target.text ?? '' });
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -439,25 +491,77 @@ export function ChartPanel({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const createDrawing = (anchors: DrawingAnchor[]) => {
-    if (!isDrawingComplete({ type: tool as DrawingType, anchors })) {
+  const createDrawing = (anchors: DrawingAnchor[], point?: { x: number; y: number }) => {
+    const type = tool as DrawingType;
+    if (!isDrawingComplete({ type, anchors })) {
       setPendingAnchors(anchors);
       return;
     }
-    const type = tool as DrawingType;
+    // A text drawing is only stored once its label is typed, so a cancelled
+    // label leaves neither an invisible drawing nor a history entry behind.
+    if (type === 'text') {
+      const anchor = anchors[0] as DrawingAnchor;
+      const editorPoint = point ?? pointForAnchor(anchor);
+      if (!editorPoint) return;
+      openTextEditor({ id: null, anchor, point: editorPoint, value: '', original: '' });
+      selectTool('cursor');
+      return;
+    }
     const created: Drawing = {
       id: createId('drw'),
       type,
       anchors,
       visible: true,
       locked: false,
-      style: { color: '#3fb8a3', lineWidth: 1.5, lineStyle: 'solid', fillOpacity: 0.12, fontSize: 12 },
-      text: type === 'text' ? 'Label' : undefined,
+      style: { ...DEFAULT_DRAWING_STYLE },
       levels: type === 'fibonacci' ? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] : undefined,
     };
     commitDrawings([...localDrawings, created]);
     setSelectedId(created.id);
     selectTool('cursor');
+  };
+
+  const openTextEditor = (editor: TextEditorState) => {
+    textEditClosedRef.current = false;
+    setTextEditor(editor);
+  };
+
+  useEffect(() => {
+    if (!textEditor) return;
+    // The click that opens the editor also focuses the stage (its own default
+    // action), which would immediately blur the field and commit an empty
+    // label. Waiting a frame lets that focus land first.
+    const frame = requestAnimationFrame(() => textEditorInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [textEditor]);
+
+  const finishTextEdit = (mode: 'commit' | 'cancel') => {
+    if (textEditClosedRef.current) return;
+    textEditClosedRef.current = true;
+    const editor = textEditor;
+    if (!editor) return;
+    setTextEditor(null);
+    const value = editor.value.trim();
+    // Cancelling, or committing an empty label, stores nothing: a label with no
+    // text cannot be seen, and deleting an existing one stays an explicit act.
+    if (mode === 'cancel' || value === '') return;
+    if (editor.id === null) {
+      if (!editor.anchor) return;
+      const created: Drawing = {
+        id: createId('drw'),
+        type: 'text',
+        anchors: [editor.anchor],
+        visible: true,
+        locked: false,
+        style: { ...DEFAULT_DRAWING_STYLE },
+        text: value,
+      };
+      commitDrawings([...localDrawings, created]);
+      setSelectedId(created.id);
+      return;
+    }
+    if (value === editor.original) return;
+    commitDrawings(localDrawings.map((drawing) => (drawing.id === editor.id ? { ...drawing, text: value } : drawing)));
   };
 
   const removeSelected = useCallback(() => {
@@ -466,31 +570,40 @@ export function ChartPanel({
     setSelectedId(null);
   }, [commitDrawings, localDrawings, selectedDrawingId]);
 
-  const selectTool = (next: DrawingType | 'cursor') => {
+  const selectTool = useCallback((next: DrawingType | 'cursor') => {
     setPendingAnchors([]);
     setTool(next);
-  };
+  }, []);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    // Keystrokes typed into the indicator dialog (or any form control) must
-    // never reach the drawing shortcuts.
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
-    if (event.key === 'Escape') {
-      selectTool('cursor');
-      return;
-    }
-    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
-      event.preventDefault();
-      removeSelected();
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-      event.preventDefault();
-      if (event.shiftKey) redo();
-      else undo();
-    }
-  };
+  useEffect(() => {
+    if (!focused) return;
+    // The shortcuts belong to the focused panel, but the toolbar buttons drop
+    // focus to the document when they disable themselves (Undo, Redo, Delete),
+    // so a listener on the panel element would silently stop firing. Listening
+    // on the window while this panel is the focused one keeps them working.
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Keystrokes typed into the indicator dialog (or any form control) must
+      // never reach the drawing shortcuts.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
+      if (event.key === 'Escape') {
+        selectTool('cursor');
+        return;
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
+        event.preventDefault();
+        removeSelected();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
 
   const hoverBar: Bar | null = readout.index !== null ? (rendered[readout.index] ?? null) : rendered.length ? (rendered[rendered.length - 1] as Bar) : null;
   const previousBar = readout.index !== null && readout.index > 0 ? rendered[readout.index - 1] ?? null : rendered.length > 1 ? rendered[rendered.length - 2] ?? null : null;
@@ -498,7 +611,7 @@ export function ChartPanel({
   const tone = changePct === null ? undefined : changePct >= 0 ? 'up' : 'down';
 
   return (
-    <div className={focused ? 'chart-panel focused' : 'chart-panel'} onFocus={onFocus} tabIndex={-1} onKeyDown={handleKeyDown}>
+    <div className={focused ? 'chart-panel focused' : 'chart-panel'} onFocus={onFocus} tabIndex={-1}>
       <div className="chart-panel-head">
         <span className="chart-symbol">{instrument?.symbol ?? 'No instrument'}</span>
         <Segmented
@@ -574,6 +687,7 @@ export function ChartPanel({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerCancel}
             onLostPointerCapture={handlePointerCancel}
+            onDoubleClick={handleDoubleClick}
           >
             <div className="chart-canvas-host" ref={containerRef} />
             <canvas
@@ -621,6 +735,30 @@ export function ChartPanel({
                 );
               })}
             </div>
+
+            {textEditor && (
+              <input
+                className="drawing-text-editor"
+                ref={textEditorInputRef}
+                style={{ left: textEditor.point.x + 6, top: Math.max(2, textEditor.point.y - 12) }}
+                aria-label="Drawing label"
+                placeholder="Type a label"
+                value={textEditor.value}
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onChange={(event) => setTextEditor({ ...textEditor, value: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    finishTextEdit('commit');
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    finishTextEdit('cancel');
+                  }
+                }}
+                onBlur={() => finishTextEdit('commit')}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -684,7 +822,7 @@ function renderDrawingShape(
     context.lineTo(rect.width, first.y);
     return;
   }
-  if (drawing.type === 'vertical-line' || drawing.type === 'text') {
+  if (drawing.type === 'vertical-line') {
     context.moveTo(first.x, 0);
     context.lineTo(first.x, rect.height);
     return;
@@ -712,6 +850,24 @@ function renderDrawingShape(
     context.moveTo(second.x, first.y);
     context.lineTo(second.x, second.y);
   }
+}
+
+/**
+ * Hit-tests a drawing. A label is painted from its anchor to the right, so the
+ * box that selects it follows the text rather than the anchor alone.
+ */
+function drawingHit(drawing: Drawing, points: Array<{ x: number; y: number }>, point: { x: number; y: number }): boolean {
+  const anchor = points[0];
+  if (drawing.type === 'text' && drawing.text && anchor) {
+    const size = drawing.style.fontSize ?? 12;
+    return (
+      point.x >= anchor.x - 4 &&
+      point.x <= anchor.x + 8 + drawing.text.length * size * 0.62 &&
+      point.y >= anchor.y - size - 2 &&
+      point.y <= anchor.y + 6
+    );
+  }
+  return hitTest(points, drawing.type, point);
 }
 
 function hitTest(

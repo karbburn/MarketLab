@@ -1141,6 +1141,26 @@ table.data tr.dim td {
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* The inline label editor the text tool opens where the click landed. */
+.drawing-text-editor {
+  position: absolute;
+  z-index: 2;
+  min-width: 130px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--radius);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  box-shadow: var(--shadow-panel);
+}
+
+.drawing-text-editor::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
 .chart-layout {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
