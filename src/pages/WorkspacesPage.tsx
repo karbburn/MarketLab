@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from 'react';
 import { ArrowCounterClockwise, DownloadSimple, FloppyDisk, Plus, Trash, UploadSimple } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
-import { createBackup, parseBackup, serialiseBackup } from '../lib/export/backup';
-import { downloadTextFile, readFileAsText } from '../lib/export/download';
+import { parseBackup } from '../lib/export/backup';
+import { downloadBackupFile } from '../lib/export/backup-file';
+import { readFileAsText } from '../lib/export/download';
 import { WORKSPACE_LAYOUTS, chartCountForLayout } from '../state/defaults';
 import { CHART_TYPE_OPTIONS } from '../lib/chartTypes';
 import { EmptyState, Field, Panel, Segmented, Select, Switch, Tag, TextInput } from '../components/ui';
@@ -19,7 +20,7 @@ export function WorkspacesPage() {
   const [confirmReset, setConfirmReset] = useState(false);
 
   const exportBackup = () => {
-    const bundle = createBackup({
+    downloadBackupFile({
       instruments: state.instruments,
       datasets: state.datasets,
       bars: Object.entries(state.barsByDataset).map(([id, bars]) => ({ id, bars })),
@@ -29,7 +30,6 @@ export function WorkspacesPage() {
       screeners: state.screeners,
       backtests: state.backtests,
     });
-    downloadTextFile(`marketlab-backup-${new Date().toISOString().slice(0, 10)}.json`, serialiseBackup(bundle), 'application/json');
     actions.notify('success', 'Backup file created.');
   };
 

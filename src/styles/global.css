@@ -964,6 +964,219 @@ table.data tr.dim td {
   flex-wrap: wrap;
 }
 
+/* ---------- Command palette ---------- */
+
+/* Above every other overlay in the app - dialogs (50) and toasts (60) - so the
+   keyboard-first surface is never hidden behind a panel, dropdown or tooltip. */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(4, 7, 10, 0.62);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 9vh 16px 16px;
+}
+
+.palette {
+  width: min(660px, 100%);
+  max-height: min(70dvh, 620px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  animation: palette-in var(--duration) ease;
+}
+
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.palette-input::placeholder {
+  color: var(--text-muted);
+}
+
+.palette-kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.65;
+  white-space: nowrap;
+}
+
+.palette-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 5px;
+}
+
+.palette-group + .palette-group {
+  margin-top: 4px;
+}
+
+.palette-group-title {
+  padding: 7px 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.palette-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.palette-option[aria-selected='true'] {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.palette-option-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.palette-option-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.palette-option-meta {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.palette-note {
+  padding: 4px 8px 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.palette-empty {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  text-align: center;
+  padding: 26px 16px;
+}
+
+.palette-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.palette-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.palette-foot-spacer {
+  flex: 1;
+}
+
+.palette-trigger-kbd {
+  margin-left: 2px;
+}
+
+/* The trigger reads as a search field, not a fourth ghost action, so it is
+   discoverable next to the icon-only download controls. */
+.button.palette-trigger {
+  background: var(--surface-inset);
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.button.palette-trigger:hover:not(:disabled) {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+  /* The shortcut hint is the first thing to go when the top bar gets tight. */
+  .palette-trigger-kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .palette-backdrop {
+    padding: 8px;
+  }
+
+  .palette {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
+
+  /* The library summary is the least important hint on a phone. */
+  .palette-foot .palette-hint:last-child {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette {
+    animation: none;
+  }
+}
+
 /* ---------- Chart workspace ---------- */
 
 .workspace-grid {
