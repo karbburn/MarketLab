@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CloudArrowDown, Database, DownloadSimple, Eye } from '@phosphor-icons/react';
+import { CloudArrowDown, Database, DownloadSimple, Eye, ListChecks } from '@phosphor-icons/react';
 import type { Workspace } from '../domain/types';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
@@ -8,6 +8,7 @@ import { barsToCsv, validationToCsv } from '../lib/export/csv';
 import { formatPrice } from '../lib/format';
 import { EmptyState, Metric, Panel, Tag } from '../components/ui';
 import { DownloadDialog } from '../components/data/DownloadDialog';
+import { BulkDownloadDialog } from '../components/data/BulkDownloadDialog';
 import { PROVIDER_LABEL } from '../lib/marketdata/normalize';
 
 function affectedPanels(datasetId: string, workspaces: readonly Workspace[]): number {
@@ -34,6 +35,7 @@ export function DataPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false);
 
   const selected = views.find((view) => view.dataset.id === selectedId) ?? null;
   const previewHead = selected ? selected.bars.slice(0, 12) : [];
@@ -49,10 +51,16 @@ export function DataPage() {
         subtitle={`${views.length} dataset(s) - ${state.adapterKind === 'indexeddb' ? 'persisted in this browser' : 'in memory only for this session'}`}
         flush
         actions={
-          <button type="button" className="button ghost sm" onClick={() => setDownloadOpen(true)}>
-            <CloudArrowDown size={14} aria-hidden />
-            Download market data
-          </button>
+          <div className="row tight">
+            <button type="button" className="button ghost sm" onClick={() => setDownloadOpen(true)}>
+              <CloudArrowDown size={14} aria-hidden />
+              Download market data
+            </button>
+            <button type="button" className="button ghost sm" onClick={() => setBulkDownloadOpen(true)}>
+              <ListChecks size={14} aria-hidden />
+              Download many symbols
+            </button>
+          </div>
         }
       >
         {views.length === 0 ? (
@@ -302,6 +310,7 @@ export function DataPage() {
       </Panel>
 
       <DownloadDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
+      <BulkDownloadDialog open={bulkDownloadOpen} onClose={() => setBulkDownloadOpen(false)} />
     </div>
   );
 }

@@ -47,7 +47,11 @@ export interface AppState {
 }
 
 export interface StoreActions {
-  importDataset(bundle: DatasetBundle): Promise<void>;
+  /**
+   * Stores a dataset (and its instrument/bars). `silent` suppresses the
+   * per-dataset toast, which a bulk download replaces with its own summary.
+   */
+  importDataset(bundle: DatasetBundle, options?: { silent?: boolean }): Promise<void>;
   deleteDataset(datasetId: string): Promise<void>;
   createWorkspaceFromBase(input: { name: string; datasetId: string; instrumentId: string; layout?: Workspace['layout'] }): Promise<string | null>;
   saveWorkspace(workspace: Workspace): Promise<void>;
@@ -225,7 +229,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
 
   const actions: StoreActions = {
-    async importDataset(bundle) {
+    async importDataset(bundle, options) {
       if (!adapter) return;
       await adapter.put('instruments', bundle.instrument);
       await adapter.put('datasets', bundle.dataset);
@@ -240,7 +244,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           barsByDataset: { ...previous.barsByDataset, [bundle.dataset.id]: bundle.bars },
         };
       });
-      notify('success', `Imported ${bundle.dataset.name} (${bundle.bars.length} sessions).`);
+      if (!options?.silent) {
+        notify('success', `Imported ${bundle.dataset.name} (${bundle.bars.length} sessions).`);
+      }
     },
 
     async deleteDataset(datasetId) {

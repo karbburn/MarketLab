@@ -11,7 +11,7 @@ import {
 } from '../../lib/marketdata/normalize';
 import {
   DEFAULT_SERVICE_URL,
-  MarketDataError,
+  describeMarketDataFailure,
   fetchProviderHistory,
   fetchProviderSearch,
 } from '../../lib/marketdata/client';
@@ -154,7 +154,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
       setNotice(null);
     } catch (error) {
       setPhase('idle');
-      setNotice({ kind: 'error', text: describeFailure(error) });
+      setNotice({ kind: 'error', text: describeMarketDataFailure(error) });
     }
   };
 
@@ -321,7 +321,3 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function describeFailure(error: unknown): string {
-  if (error instanceof MarketDataError) return error.message;
-  return error instanceof Error ? error.message : 'The download failed for an unexpected reason.';
-}
