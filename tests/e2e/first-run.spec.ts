@@ -44,6 +44,11 @@ test.describe('first run and removal of the bundled demo series', () => {
   test('does not leave broken references to the removed demo series', async ({ page }) => {
     await seedLegacyLibrary(page);
 
+    // The cleanup runs after the first load reads IndexedDB. Wait for the
+    // migrated state to reach the shell before reading storage directly,
+    // otherwise this assertion races the asynchronous migration.
+    await expect(page.locator('.shell-nav')).toContainText('1 dataset loaded');
+
     // The workspace pointed at the demo series, so it is removed rather than
     // left pointing at a dataset that no longer exists.
     const workspaces = await readStore(page, 'workspaces');
