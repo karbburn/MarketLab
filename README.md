@@ -304,7 +304,7 @@ The suites are run for real and the numbers below are the current ones.
 | Suite | Size | What it covers |
 | --- | --- | --- |
 | Unit (Vitest) | 26 files, 280 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, watchlist context maths, backup parsing, the legacy-series removal and export formatting. |
-| End-to-end (Playwright) | 58 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
+| End-to-end (Playwright) | 59 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
 | Service (pytest) | 26 tests | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
@@ -324,7 +324,7 @@ deployed origin, so a user's own local service can serve the hosted application.
 ## Project status
 
 **Shipped and verified.** The features above, the full local test gate and a live deployment. The
-latest state: `npm run verify` green, 280 unit tests, 58 end-to-end tests, 26 service tests.
+latest state: `npm run verify` green, 280 unit tests, 59 end-to-end tests, 26 service tests.
 
 **Planned, not started** — the remaining account-free items selected from an internal review of
 what a charting terminal offers, in the order they are intended:
