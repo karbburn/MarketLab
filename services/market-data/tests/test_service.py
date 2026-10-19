@@ -108,6 +108,12 @@ def test_cors_allows_configured_local_origins_only(client: TestClient) -> None:
     assert foreign.get("/api/health").headers.get("access-control-allow-origin") is None
 
 
+def test_cors_allows_deployed_project_origin(client: TestClient) -> None:
+    probe = TestClient(service.app, raise_server_exceptions=False)
+    probe.headers.update({"origin": "https://marketlab.sourabhpradhan.in"})
+    assert probe.get("/api/health").headers.get("access-control-allow-origin") == "https://marketlab.sourabhpradhan.in"
+
+
 # ---------------------------------------------------------------- search ----
 
 def test_search_normalises_quotes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

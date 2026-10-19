@@ -35,8 +35,12 @@ uvicorn app:app --host 127.0.0.1 --port 8787
 ```
 
 Then in MarketLab: **Data → Download market data**. The frontend targets
-`http://127.0.0.1:8787` on the same machine; nothing remote can reach this
-service (CORS is restricted to the local dev/preview origins in code).
+`http://127.0.0.1:8787` on the same machine; the service accepts requests only
+from MarketLab's own frontends (local dev/preview origins plus the project's
+deployed site at `https://marketlab.sourabhpradhan.in`) and binds to
+`127.0.0.1`, so it is unreachable from other machines or websites. Run locally,
+the service lets the deployed app download real data too; no data ever passes
+through the deployment host.
 
 ## Endpoints
 

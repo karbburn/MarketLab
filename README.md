@@ -73,6 +73,10 @@ npm run dev        # development server
 Open the printed local URL. On first run the app seeds the bundled sample set so every
 screen has data.
 
+A maintained deployment of this repository runs at
+[`https://marketlab.sourabhpradhan.in`](https://marketlab.sourabhpradhan.in) — the same
+static app, with all data stored in that browser only.
+
 ### Scripts
 
 | Script | Purpose |

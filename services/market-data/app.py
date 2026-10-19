@@ -45,13 +45,16 @@ logger = logging.getLogger("marketlab.market_data")
 
 app = FastAPI(title="MarketLab market-data service", version=SERVICE_VERSION)
 
-# Restrict CORS to the local frontends MarketLab is served from during
-# development and preview. Nothing remote is allowed; this is a local service.
+# Restrict CORS to the frontends MarketLab may be served from during local
+# development/preview, plus the project's own deployed origin. Nothing else
+# may call this service; the service itself still binds to 127.0.0.1 only, so
+# it is unreachable from outside the user's machine.
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:4173",
     "http://127.0.0.1:4173",
+    "https://marketlab.sourabhpradhan.in",
 ]
 
 app.add_middleware(
