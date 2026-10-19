@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "description": "MarketLab: a local-first charting and quantitative research terminal.",
-  "license": "MIT",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
