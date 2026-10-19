@@ -368,17 +368,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async updateWorkspace(workspaceId, updater) {
       if (!adapter) return;
+      // Apply the edit to the in-memory workspace straight away, so a control
+      // the user just touched reflects the change before the write lands.
+      // Otherwise a controlled input is re-rendered from the stale value and
+      // the click appears to have done nothing.
+      const existing = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
+      if (!existing) return;
+      const updated = { ...updater(existing), updatedAt: new Date().toISOString() };
+      workspacesRef.current = upsertById(workspacesRef.current, updated);
+      setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
       await enqueue(`workspace:${workspaceId}`, async () => {
-        // Read the latest record when the write actually runs, so queued edits
-        // compose rather than replacing each other with stale snapshots.
-        const existing = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
-        if (!existing) return;
-        const updated = { ...updater(existing), updatedAt: new Date().toISOString() };
-        await adapter.put('workspaces', updated);
+        // Persist whatever the workspace holds when the write runs, so queued
+        // edits compose instead of replacing each other with stale snapshots.
         // A delete queued behind this write wins: do not re-insert the record.
-        if (!workspacesRef.current.some((workspace) => workspace.id === workspaceId)) return;
-        workspacesRef.current = upsertById(workspacesRef.current, updated);
-        setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
+        const current = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
+        if (!current) return;
+        await adapter.put('workspaces', current);
       });
     },
 
