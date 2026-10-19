@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DownloadSimple, FloppyDisk, Plus, Trash } from '@phosphor-icons/react';
 import type { ScreenerDefinition, ScreenerField, ScreenerFilter, ScreenerOperator } from '../domain/types';
 import { useStore } from '../state/store';
@@ -33,6 +34,7 @@ const OPERATOR_OPTIONS: Array<{ value: ScreenerOperator; label: string }> = [
 
 export function ScreenerPage() {
   const { state, actions } = useStore();
+  const navigate = useNavigate();
   const views = useMemo(() => datasetViews(state), [state]);
   const [draft, setDraft] = useState<ScreenerDefinition | null>(null);
   const [selectedSavedId, setSelectedSavedId] = useState<string>('');
@@ -92,6 +94,22 @@ export function ScreenerPage() {
       if (combinators.length > 0) combinators.splice(index === 0 ? 0 : index - 1, 1);
       return { ...current, filters: current.filters.filter((filter) => filter.id !== filterId), combinators };
     });
+  };
+
+  /**
+   * Carry a screened instrument into the research workflow. The dataset is
+   * already stored, so this only re-points the first chart of the active
+   * workspace and switches to it: no new import, and no change to the screen
+   * definition or its cutoff.
+   */
+  const openInChart = (datasetId: string, instrumentId: string) => {
+    const workspace =
+      state.workspaces.find((entry) => entry.id === state.activeWorkspaceId) ?? state.workspaces[0];
+    const chart = workspace?.charts[0];
+    if (!workspace || !chart) return;
+    void actions.setActiveWorkspace(workspace.id);
+    void actions.updateChart(workspace.id, chart.id, (config) => ({ ...config, datasetId, instrumentId }));
+    navigate('/chart');
   };
 
   return (
@@ -371,7 +389,16 @@ export function ScreenerPage() {
                 <tbody>
                   {result.rows.map((row) => (
                     <tr key={row.datasetId} className={row.passed ? '' : 'dim'}>
-                      <td className="mono">{row.symbol}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="button ghost sm"
+                          title="Open in the chart workspace"
+                          onClick={() => openInChart(row.datasetId, row.instrumentId)}
+                        >
+                          {row.symbol}
+                        </button>
+                      </td>
                       <td>{row.displayName}</td>
                       <td className="mono">{row.asOf ?? '--'}</td>
                       {definition.filters.map((filter) => (

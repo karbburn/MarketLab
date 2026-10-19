@@ -48,6 +48,23 @@ test.describe('historical screener', () => {
     await expect(page.locator('option', { hasText: 'Untitled screen' })).toBeAttached();
   });
 
+  test('opens a screened instrument in the chart workspace', async ({ page }) => {
+    await page.goto('/#/screener');
+    await page.getByRole('button', { name: 'Start a new screen' }).click();
+
+    const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
+    const row = results.locator('tbody tr').filter({ hasText: 'NRG' });
+    await row.getByRole('button', { name: 'NRG', exact: true }).click();
+
+    // The screened dataset is re-pointed at the first chart, not re-imported.
+    await expect(page.locator('.topbar-title')).toHaveText('Chart workspace');
+    await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
+
+    // The switch is persisted like any other chart edit.
+    await page.reload();
+    await expect(page.locator('.chart-symbol').first()).toHaveText('NRG');
+  });
+
   test('edits and deletes a saved screen', async ({ page }) => {
     await page.goto('/#/screener');
     await page.getByRole('button', { name: 'Start a new screen' }).click();
