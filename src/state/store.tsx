@@ -14,6 +14,7 @@ import { describeCleanup, removeSyntheticData, type SyntheticCleanupResult } fro
 import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
 import { createId } from '../lib/id';
 import { mergeBackup, type BackupBundle } from '../lib/export/backup';
+import { normaliseCompareSelections } from '../lib/workspace/compare-selections';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 
@@ -196,6 +197,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const nextScreeners = cleanup.changed ? cleanup.screeners : screeners;
       const nextBacktests = cleanup.changed ? cleanup.backtests : backtests;
 
+      // Comparison overlays reference datasets by id, so drop any selection
+      // whose dataset no longer exists before the first render.
+      const comparisons = normaliseCompareSelections(nextWorkspaces, new Set(nextDatasets.map((dataset) => dataset.id)));
+      const sanitisedWorkspaces = comparisons.workspaces;
+      if (comparisons.changed) await adapter.putMany('workspaces', sanitisedWorkspaces);
+
       // Set the attribute before the first child render so the charts read
       // the persisted palette on mount.
       applyThemeAttribute(preferences.theme);
@@ -206,8 +213,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         instruments: nextInstruments,
         datasets: nextDatasets,
         barsByDataset: cleanup.changed ? keepBars(barsByDataset, cleanup.removedDatasetIds) : barsByDataset,
-        workspaces: nextWorkspaces,
-        activeWorkspaceId: resolveActiveWorkspaceId(nextWorkspaces, preferences),
+        workspaces: sanitisedWorkspaces,
+        activeWorkspaceId: resolveActiveWorkspaceId(sanitisedWorkspaces, preferences),
         watchlists: nextWatchlists,
         preferences,
         screeners: nextScreeners,
@@ -305,7 +312,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const workspaces = latestWorkspaces
         .map((workspace) => ({
           ...workspace,
-          charts: workspace.charts.filter((chart) => chart.datasetId !== datasetId),
+          charts: workspace.charts
+            .filter((chart) => chart.datasetId !== datasetId)
+            .map((chart) => ({
+              ...chart,
+              // A removed dataset must not survive as a comparison overlay.
+              compareDatasetIds: (chart.compareDatasetIds ?? []).filter((id) => id !== datasetId),
+            })),
         }))
         .filter((workspace) => workspace.charts.length > 0);
       const screeners = latest.screeners.map((screener) => ({
@@ -492,6 +505,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
         bundle,
       );
+      // Restored workspaces may carry comparison ids that the merge remapped or
+      // that the restored library does not contain; normalise before persisting.
+      const comparisons = normaliseCompareSelections(merged.workspaces, new Set(merged.datasets.map((dataset) => dataset.id)));
+      merged.workspaces = comparisons.workspaces;
 
       if (mode === 'replace') {
         for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests'] as StoreName[]) {

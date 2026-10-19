@@ -33,6 +33,10 @@ const okHistoryBody = {
     rangeActual: { start: '2024-01-02', end: '2024-01-03' },
     retrievedAt: '2026-10-19T12:00:00+00:00',
     sourceNotes: ['a', 'b'],
+    corporateActions: [
+      { date: '2024-01-02', type: 'split', value: 2 },
+      { date: '2024-01-03', type: 'dividend', value: 0.24 },
+    ],
   },
   bars: [
     { date: '2024-01-02', open: 10, high: 11, low: 9.5, close: 10.5, adjClose: 10.4, volume: 1200 },
@@ -121,6 +125,10 @@ describe('fetchProviderHistory', () => {
     expect(history.providerMetadata.provider).toBe('yahoo-finance');
     expect(history.providerMetadata.adjustment).toContain('dividends not reinvested');
     expect(history.providerMetadata.sourceNotes).toEqual(['a', 'b']);
+    expect(history.providerMetadata.corporateActions).toEqual([
+      { date: '2024-01-02', type: 'split', value: 2 },
+      { date: '2024-01-03', type: 'dividend', value: 0.24 },
+    ]);
     expect(history.bars).toHaveLength(2);
     expect(history.bars[0]).toEqual({
       date: '2024-01-02',
@@ -130,6 +138,46 @@ describe('fetchProviderHistory', () => {
       close: 10.5,
       adjClose: 10.4,
       volume: 1200,
+    });
+  });
+
+  it('treats a service that predates corporate actions as reporting none', async () => {
+    const legacyProvider: Record<string, unknown> = { ...okHistoryBody.provider };
+    delete legacyProvider.corporateActions;
+    stubFetch(async () => jsonResponse({ ...okHistoryBody, provider: legacyProvider }));
+    const history = await fetchProviderHistory({ symbol: 'AAPL', start: '2024-01-01', end: '2024-01-10' });
+    expect(history.providerMetadata.corporateActions).toEqual([]);
+  });
+
+  it('deduplicates repeated provider actions without inventing new ones', async () => {
+    stubFetch(async () =>
+      jsonResponse({
+        ...okHistoryBody,
+        provider: {
+          ...okHistoryBody.provider,
+          corporateActions: [
+            { date: '2024-01-02', type: 'dividend', value: 0.24 },
+            { date: '2024-01-02', type: 'dividend', value: 0.24 },
+          ],
+        },
+      }),
+    );
+    const history = await fetchProviderHistory({ symbol: 'AAPL', start: '2024-01-01', end: '2024-01-10' });
+    expect(history.providerMetadata.corporateActions).toEqual([{ date: '2024-01-02', type: 'dividend', value: 0.24 }]);
+  });
+
+  it('fails a malformed corporate-action row instead of silently dropping the event', async () => {
+    stubFetch(async () =>
+      jsonResponse({
+        ...okHistoryBody,
+        provider: {
+          ...okHistoryBody.provider,
+          corporateActions: [{ date: '2024-01-02', type: 'merger', value: 1 }],
+        },
+      }),
+    );
+    await expect(fetchProviderHistory({ symbol: 'AAPL', start: '2024-01-01', end: '2024-01-10' })).rejects.toMatchObject({
+      kind: 'malformed',
     });
   });
 

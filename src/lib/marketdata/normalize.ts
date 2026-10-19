@@ -18,6 +18,7 @@
 import type {
   AssetType,
   Bar,
+  CorporateAction,
   Dataset,
   DatasetProvider,
   Instrument,
@@ -66,6 +67,7 @@ export interface ProviderHistory {
     rangeActual: { start: string; end: string };
     retrievedAt: string;
     sourceNotes: readonly string[];
+    corporateActions: readonly CorporateAction[];
   };
   bars: ProviderBarRow[];
 }
@@ -164,6 +166,7 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
     retrievedAt: metadata.retrievedAt,
     timezone: metadata.timezone,
     sourceNotes: metadata.sourceNotes,
+    corporateActions: [...(metadata.corporateActions ?? [])],
   };
 
   const instrument: Instrument = {

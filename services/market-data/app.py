@@ -97,6 +97,8 @@ SOURCE_NOTES = [
     "Fetched on demand; availability and schema can change without notice.",
     "Daily exchange-session bars only; MarketLab aggregates weekly/monthly locally.",
     "Volume is nullable: Yahoo omits it for some instrument types.",
+    "Corporate actions are provider-reported event dates and may be incomplete; "
+    "split markers do not imply a price gap because the OHLC series is split-adjusted.",
 ]
 
 
@@ -197,15 +199,50 @@ def normalise_history_frame(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return bars
 
 
+def normalise_corporate_actions(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Extracts provider-reported splits and cash dividends from a history frame.
+
+    `history(actions=True)` adds `Dividends` and `Stock Splits` columns to the
+    same daily frame. Their index is the exchange-local session date, so each
+    event is tied to the same date vocabulary as the bars. Non-positive and
+    non-numeric cells are ignored: the provider may fill absent actions with
+    zero, but no value is invented. Events are returned in date order.
+    """
+    if frame is None:
+        return []
+    columns: list[tuple[str, str]] = []
+    if "Dividends" in frame.columns:
+        columns.append(("dividend", "Dividends"))
+    if "Stock Splits" in frame.columns:
+        columns.append(("split", "Stock Splits"))
+    if not columns:
+        return []
+
+    actions: list[dict[str, Any]] = []
+    for index_value in frame.index:
+        session_date = _iso(index_value)
+        if session_date is None:
+            continue
+        row = frame.loc[index_value]
+        for action_type, column in columns:
+            value = _coerce_number(row.get(column))
+            if value is not None and value > 0:
+                actions.append({"date": session_date, "type": action_type, "value": value})
+    actions.sort(key=lambda action: (action["date"], 0 if action["type"] == "split" else 1))
+    return actions
+
+
 def fetch_history(symbol: str, start: str, end: str) -> tuple[pd.DataFrame, str | None, str | None, str | None, str | None, str | None, str | None]:
     """Downloads daily history and returns (frame, currency, exchange, exchangeName, instrumentType, displaySymbol, exchangeTimezone)."""
     try:
         ticker = yf.Ticker(symbol)
         # auto_adjust=False keeps OHLC as-traded (splits applied by Yahoo,
         # dividends not reinvested) and reports a separate `Adj Close`
-        # (dividends + splits adjusted). The adjustment policy is declared in
-        # the response metadata so two conventions are never mixed silently.
-        frame = ticker.history(start=start, end=end, interval="1d", auto_adjust=False, actions=False)
+        # (dividends + splits adjusted). `actions=True` adds provider-reported
+        # Dividends and Stock Splits columns for chart markers. The adjustment
+        # policy is declared in the response metadata so two conventions are
+        # never mixed silently.
+        frame = ticker.history(start=start, end=end, interval="1d", auto_adjust=False, actions=True)
     except Exception as error:  # yfinance raises broad, undocumented exception types
         # Yahoo answers unknown tickers with its own 404 ("Quote not found")
         # or with a delisted notice; both mean "no data", not "service broken".
@@ -368,6 +405,7 @@ async def history_endpoint(
         raise HTTPException(status_code=503, detail="The provider request timed out.") from None
 
     bars = normalise_history_frame(frame)
+    corporate_actions = normalise_corporate_actions(frame)
     metadata = {
         "provider": PROVIDER_NAME,
         "providerSymbol": symbol,
@@ -384,6 +422,7 @@ async def history_endpoint(
         "rangeActual": {"start": bars[0]["date"], "end": bars[-1]["date"]},
         "retrievedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sourceNotes": SOURCE_NOTES,
+        "corporateActions": corporate_actions,
     }
     payload = {"provider": metadata, "bars": bars}
     _cache_put(cache_key, payload)

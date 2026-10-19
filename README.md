@@ -49,6 +49,15 @@ TradingView or any other commercial charting platform; it reimplements a familia
   retracement, measure move and text label — with drag-to-move, undo/redo (`Ctrl`/`Cmd`+`Z`,
   `Shift` to redo) and `Delete` to remove a selection. Shortcuts apply only to the focused chart
   and never while a dialog or a text field has focus.
+- **Comparison overlays** — add other stored series to a panel as rebased index lines on a
+  separate left axis. Series are aligned on real shared sessions and rebased to 100 at the first
+  common session; nothing is forward-filled. The legend removes one series or clears all, and the
+  panel foot states the method and any excluded series with reasons.
+- **Corporate-action markers** — provider-reported splits and dividends from downloaded Yahoo
+  Finance history are marked on the primary series: splits above the bar, cash dividends below.
+  The panel names the provider and states that prices are already split-adjusted (so a split
+  marker is not a price gap) and that dividends are not reinvested. Imported CSVs and older
+  downloads show no markers rather than guessed events.
 
 ### Indicators
 
@@ -86,8 +95,9 @@ periods) are empty rather than zero.
   rows listed with reasons (see [Importing your own data](#importing-your-own-data)).
 - **Weekly and monthly views** aggregated from daily bars, always labelled as aggregated. Daily
   data is never interpolated into intraday bars.
-- **Provenance** — every downloaded series stores its provider, exchange, adjustment policy and
-  retrieval time, and shows them in the data library, the inspection panel and the chart legend.
+- **Provenance** — every downloaded series stores its provider, exchange, adjustment policy,
+  retrieval time and provider-reported corporate actions, and shows the source in the data
+  library, the inspection panel and the chart legend.
 - **Export and backup** — datasets, quant summaries, screener results, backtest trades and the
   equity curve as CSV; the whole workspace as a versioned JSON backup that can be merged into or
   restored over the current state.
@@ -210,8 +220,14 @@ The rules below are enforced in code, not just in the documentation:
   delayed for some venues, be rate limited, or change shape without notice, and the data is not
   licensed for redistribution.
 - **Provenance travels with the prices.** Every downloaded series stores its provider, exchange,
-  adjustment policy (`splits-applied, dividends not reinvested`) and retrieval timestamp. Adjusted
-  close is stored separately and never mixed into OHLC computations.
+  adjustment policy (`splits-applied, dividends not reinvested`), retrieval timestamp and any
+  provider-reported split/dividend events. Adjusted close is stored separately and never mixed
+  into OHLC computations.
+- **Corporate actions are reported, not inferred.** Split and dividend markers come only from the
+  provider's action columns. A split marker records the provider event date; because the OHLC is
+  split-adjusted, it does not imply a price gap. Dividend markers are cash per share and are not
+  reinvested. Actions with no matching displayed session are counted as unmarked rather than
+  moved to a nearby bar, and imported CSVs carry no corporate actions at all.
 - **Failures are reported, never papered over.** A failed or empty download is shown as such; no
   other series is substituted for it, and nothing is labelled real unless it came from a provider.
 - **Validation before storage.** Imported and downloaded series are checked for OHLC invariants,
@@ -228,6 +244,8 @@ src/
   domain/         canonical domain types (bars, datasets, workspaces, drawings)
   lib/
     backtest/     rule definitions, comparison helpers, simulation engine
+    chart/        comparison-overlay preparation and chart presentation helpers
+    corporate-actions.ts  provider-action labels and marker planning
     csv/          CSV parsing and column mapping
     drawings/     drawing geometry and hit testing
     export/       CSV writers, JSON backup and browser download helpers
@@ -285,9 +303,9 @@ The suites are run for real and the numbers below are the current ones.
 
 | Suite | Size | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | 22 files, 241 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, screener evaluation, the backtest fill model, the download batch queue, watchlist context maths, backup parsing, the legacy-series removal and export formatting. |
-| End-to-end (Playwright) | 49 tests | The shell and navigation, the chart workspace, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
-| Service (pytest) | 22 tests | Success, invalid parameters, empty results, unknown symbols, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
+| Unit (Vitest) | 26 files, 280 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, watchlist context maths, backup parsing, the legacy-series removal and export formatting. |
+| End-to-end (Playwright) | 59 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
+| Service (pytest) | 26 tests | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
 (`channel: 'chrome'`, no browser download) and seeds its own library, because the application
@@ -306,14 +324,12 @@ deployed origin, so a user's own local service can serve the hosted application.
 ## Project status
 
 **Shipped and verified.** The features above, the full local test gate and a live deployment. The
-latest state: `npm run verify` green, 241 unit tests, 49 end-to-end tests, 22 service tests.
+latest state: `npm run verify` green, 280 unit tests, 59 end-to-end tests, 26 service tests.
 
-**Planned, not started** — the account-free items selected from an internal review of what a
-charting terminal offers, in the order they are intended:
+**Planned, not started** — the remaining account-free items selected from an internal review of
+what a charting terminal offers, in the order they are intended:
 
-1. A comparison-symbol overlay on a chart, reusing the existing shared-session alignment.
-2. Provider corporate-action (split/dividend) markers, honestly labelled as provider data.
-3. A global command palette for datasets, navigation and local symbol search.
+1. A global command palette (Ctrl/Cmd-K) for datasets, navigation and local symbol search.
 
 **Deliberately out of scope.** MarketLab is an analysis and research tool, not a trading
 terminal: no intraday or streaming quotes, no brokerage connectivity, no accounts or cloud sync,
@@ -326,6 +342,8 @@ no short selling, no alerting and no replay. These are product decisions, not ga
   hiding them or substituting other data.
 - The backtester is long-only, single-position and per-series. It does not model portfolios,
   short selling, borrow costs or corporate actions beyond the adjusted close it stores.
+- Corporate-action markers are display annotations sourced from provider metadata. They do not
+  change OHLC, indicator inputs, screens or backtest calculations.
 - State is per browser profile. Moving between browsers is done deliberately through the JSON
   backup, not through an account or a sync service.
 - Nothing here is investment advice.

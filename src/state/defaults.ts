@@ -49,6 +49,7 @@ export function createChartConfig(input: {
     visibleRange: null,
     indicators: [],
     drawings: [],
+    compareDatasetIds: [],
   };
 }
 

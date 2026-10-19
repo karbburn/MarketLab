@@ -202,6 +202,92 @@ export function buildFixtureLibrary(): FixtureRecords {
 }
 
 /**
+ * A library where one stored series shares a single session with the primary.
+ * Used to prove that the comparison reports insufficient shared history
+ * instead of drawing a one-point line or forward-filling.
+ */
+export function buildSparseOverlapLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const bars = records.bars.find((entry) => entry.id === 'ds_msft');
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_msft');
+  if (bars && dataset) {
+    const series = bars.bars as FixtureBar[];
+    const last = series[series.length - 1] as FixtureBar;
+    bars.bars = [last];
+    dataset.firstDate = last.date;
+    dataset.lastDate = last.date;
+    dataset.rowCount = 1;
+  }
+  return records;
+}
+
+/** A library holding only the primary series, for the no-comparison state. */
+export function buildSingleSeriesLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  return {
+    ...records,
+    instruments: records.instruments.filter((entry) => entry.id === 'inst_aapl'),
+    datasets: records.datasets.filter((entry) => entry.id === 'ds_aapl'),
+    bars: records.bars.filter((entry) => entry.id === 'ds_aapl'),
+    watchlists: records.watchlists.map((entry) => ({
+      ...entry,
+      instrumentIds: ['inst_aapl'],
+    })),
+  };
+}
+
+/**
+ * A provider-download library carrying two provider-reported corporate
+ * actions: a split on a Friday and a dividend on the following Monday. On a
+ * daily panel both dates are sessions; on a weekly panel the Monday falls
+ * between weekly bars, which proves actions are not snapped to a neighbour.
+ */
+export function buildCorporateActionLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_aapl');
+  const barRecord = records.bars.find((entry) => entry.id === 'ds_aapl');
+  if (!dataset || !barRecord) return records;
+  const series = barRecord.bars as FixtureBar[];
+  const pair = findFridayThenMonday(series);
+  if (!pair) throw new Error('The fixture series did not contain a Friday/Monday pair.');
+
+  dataset.sourceKind = 'provider-download';
+  dataset.name = 'AAPL - daily (Yahoo Finance download)';
+  dataset.sourceDescription =
+    'Downloaded from Yahoo Finance via the local market-data service. splits-applied, dividends not reinvested (as-traded OHLC).';
+  dataset.provider = {
+    provider: 'yahoo-finance',
+    providerSymbol: 'AAPL',
+    exchange: 'NMS',
+    exchangeName: 'NasdaqGS',
+    instrumentType: 'EQUITY',
+    interval: '1d',
+    adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
+    retrievedAt: '2026-10-16T00:00:00.000Z',
+    timezone: 'America/New_York',
+    sourceNotes: ['Unofficial, undocumented Yahoo Finance data; corporate actions may be incomplete.'],
+    corporateActions: [
+      { date: pair.friday, type: 'split', value: 4 },
+      { date: pair.monday, type: 'dividend', value: 0.24 },
+    ],
+  };
+  return records;
+}
+
+function findFridayThenMonday(series: FixtureBar[]): { friday: string; monday: string } | null {
+  // Prefer a pair near the end so it falls inside the chart's default visible
+  // range; `index + 4` guarantees the following week still has a Friday bar.
+  for (let index = series.length - 5; index >= 5; index -= 1) {
+    const friday = series[index] as FixtureBar;
+    const monday = series[index + 1] as FixtureBar;
+    if (new Date(`${friday.date}T00:00:00Z`).getUTCDay() === 5 && new Date(`${monday.date}T00:00:00Z`).getUTCDay() === 1) {
+      return { friday: friday.date, monday: monday.date };
+    }
+  }
+  return null;
+}
+
+/**
  * A library in the shape an earlier build left behind: one bundled demo
  * series, one imported series, a workspace pointing at the demo series and a
  * watchlist that holds the demo instrument.

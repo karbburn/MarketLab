@@ -43,6 +43,9 @@ def history_frame(rows: list[dict[str, float | int | str]]) -> pd.DataFrame:
         },
         index=index,
     )
+    if any("dividend" in row or "split" in row for row in rows):
+        frame["Dividends"] = [row.get("dividend", 0.0) for row in rows]
+        frame["Stock Splits"] = [row.get("split", 0.0) for row in rows]
     return frame
 
 
@@ -217,6 +220,54 @@ def test_history_success_normalises_rows_and_metadata(client: TestClient, monkey
     assert first["open"] == 10.0
     assert first["volume"] == 1000
     assert first["adjClose"] == 10.5
+
+
+def test_history_includes_provider_corporate_actions(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_history(
+        monkeypatch,
+        history_frame(
+            [
+                {"date": "2024-01-02", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000, "dividend": 0.24},
+                {"date": "2024-01-03", "open": 10.5, "high": 12.0, "low": 10.1, "close": 11.25, "volume": 1_500, "split": 4.0},
+                {"date": "2024-01-04", "open": 11.25, "high": 11.5, "low": 10.8, "close": 11.1, "volume": 900, "dividend": 0.0, "split": 0.0},
+            ]
+        ),
+        EXPECTED_METADATA,
+    )
+    response = client.get("/api/history", params={"symbol": "AAPL", "start": "2024-01-01", "end": "2024-01-10"})
+    assert response.status_code == 200
+    assert response.json()["provider"]["corporateActions"] == [
+        {"date": "2024-01-02", "type": "dividend", "value": 0.24},
+        {"date": "2024-01-03", "type": "split", "value": 4.0},
+    ]
+
+
+def test_corporate_actions_sort_splits_before_dividends_on_the_same_session() -> None:
+    frame = history_frame(
+        [
+            {"date": "2024-01-02", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000, "dividend": 0.24, "split": 2.0},
+        ]
+    )
+    actions = service.normalise_corporate_actions(frame)
+    assert [action["type"] for action in actions] == ["split", "dividend"]
+
+
+def test_corporate_actions_ignore_absent_and_non_positive_values() -> None:
+    frame = history_frame(
+        [
+            {"date": "2024-01-02", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000},
+            {"date": "2024-01-03", "open": 10.5, "high": 12.0, "low": 10.1, "close": 11.25, "volume": 1_500, "dividend": -0.5, "split": 0.0},
+        ]
+    )
+    assert service.normalise_corporate_actions(frame) == []
+
+
+def test_corporate_actions_are_empty_when_the_provider_has_no_action_columns() -> None:
+    frame = history_frame(
+        [{"date": "2024-01-02", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000}]
+    )
+    assert "Dividends" not in frame.columns
+    assert service.normalise_corporate_actions(frame) == []
 
 
 def test_history_cache_hits_and_misses(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

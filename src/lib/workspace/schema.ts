@@ -73,6 +73,9 @@ const chartConfigSchema = z.object({
   visibleRange: visibleRangeSchema,
   indicators: z.array(indicatorInstanceSchema),
   drawings: z.array(drawingSchema),
+  // Absent in workspaces saved before comparison overlays existed; default to
+  // none rather than rejecting the whole workspace.
+  compareDatasetIds: z.array(z.string()).default([]),
 });
 
 const linkGroupSchema = z.object({
@@ -129,6 +132,12 @@ export const barSchema = z.object({
   volume: z.number().finite().nullable(),
 });
 
+const corporateActionSchema = z.object({
+  date: dateString,
+  type: z.enum(['split', 'dividend']),
+  value: z.number().finite().positive(),
+});
+
 export const datasetSchema = z.object({
   id: z.string().min(1),
   instrumentId: z.string().min(1),
@@ -155,6 +164,9 @@ export const datasetSchema = z.object({
       retrievedAt: z.string(),
       timezone: z.string().nullable(),
       sourceNotes: z.array(z.string()),
+      // Older downloads predate corporate-action capture; default to none
+      // instead of rejecting the dataset.
+      corporateActions: z.array(corporateActionSchema).default([]),
     })
     .optional(),
   validation: z.object({

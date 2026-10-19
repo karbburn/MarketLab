@@ -38,6 +38,7 @@ function metadata(overrides: Record<string, unknown> = {}) {
     rangeActual: { start: '2024-01-02', end: '2024-01-04' },
     retrievedAt: '2026-10-19T12:00:00+00:00',
     sourceNotes: ['note-a'],
+    corporateActions: [],
     ...overrides,
   };
 }
@@ -181,6 +182,36 @@ describe('buildDatasetBundle', () => {
     expect(dataset.provider?.sourceNotes).toEqual(['note-a']);
 
     bars.forEach((bar: Bar) => expect(isDateString(bar.date)).toBe(true));
+  });
+
+  it('stores provider corporate actions and leaves their dates untouched', () => {
+    const history = {
+      ...HISTORY,
+      providerMetadata: metadata({
+        corporateActions: [
+          { date: '2024-01-03', type: 'dividend', value: 0.24 },
+          { date: '2024-01-02', type: 'split', value: 2 },
+        ],
+      }),
+    };
+    const validation = validateProviderBars(HISTORY.bars, 'keep-first');
+    const bundle = buildDatasetBundle({ history, validation, importedAt: '2026-10-19T12:00:05.000Z' });
+    expect(bundle.dataset.provider?.corporateActions).toEqual([
+      { date: '2024-01-03', type: 'dividend', value: 0.24 },
+      { date: '2024-01-02', type: 'split', value: 2 },
+    ]);
+  });
+
+  it('treats a legacy provider payload without corporate actions as reporting none', () => {
+    const legacyMetadata: Record<string, unknown> = { ...metadata() };
+    delete legacyMetadata.corporateActions;
+    const validation = validateProviderBars(HISTORY.bars, 'keep-first');
+    const bundle = buildDatasetBundle({
+      history: { ...HISTORY, providerMetadata: legacyMetadata as typeof HISTORY.providerMetadata },
+      validation,
+      importedAt: '2026-10-19T12:00:05.000Z',
+    });
+    expect(bundle.dataset.provider?.corporateActions).toEqual([]);
   });
 
   it('keeps the adjustment policy on the dataset so conventions can never be mixed silently', () => {
