@@ -85,8 +85,12 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
     return validateCsvRows({ rows: parsed.rows, mapping, duplicatePolicy });
   }, [parsed, mapping, duplicatePolicy]);
 
+  // Rows beyond the parser limit were dropped, so partial data must not be
+  // imported silently. Parser diagnostics are surfaced next to the preview.
+  const rowsDropped = parsed ? parsed.truncated || parsed.totalRows > parsed.rows.length : false;
+
   const commit = async () => {
-    if (!parsed || !validation || validation.fatalErrors.length > 0) return;
+    if (!parsed || !validation || validation.fatalErrors.length > 0 || rowsDropped) return;
     setBusy(true);
     try {
       const bars: Bar[] = validation.bars;
@@ -119,6 +123,10 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
       await actions.importDataset({ instrument, dataset, bars });
       reset();
       onClose();
+    } catch (importError) {
+      const message = importError instanceof Error ? importError.message : 'The dataset could not be imported.';
+      setError(message);
+      actions.notify('error', message);
     } finally {
       setBusy(false);
     }
@@ -143,7 +151,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
           <button
             type="button"
             className="button primary"
-            disabled={!validation || validation.fatalErrors.length > 0 || busy}
+            disabled={!validation || validation.fatalErrors.length > 0 || rowsDropped || busy}
             onClick={() => void commit()}
           >
             {busy ? 'Importing...' : 'Import dataset'}
@@ -166,6 +174,8 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
             accept=".csv,text/csv,.txt"
             onChange={(event) => {
               const file = event.target.files?.[0];
+              // Clear the value so choosing the same file again fires onChange.
+              event.target.value = '';
               if (file) void handleFile(file);
             }}
           />
@@ -239,6 +249,22 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
                 </tbody>
               </table>
             </div>
+            {(rowsDropped || parsed.errors.length > 0) && (
+              <div className="panel-body stack" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                {rowsDropped && (
+                  <span className="field-error">
+                    Only the first {parsed.rows.length.toLocaleString('en-US')} rows can be imported; the remaining{' '}
+                    {Math.max(0, parsed.totalRows - parsed.rows.length).toLocaleString('en-US')} row(s) were dropped. Split the
+                    file before importing.
+                  </span>
+                )}
+                {parsed.errors.map((parserError) => (
+                  <span key={`${parserError.row}-${parserError.message}`} className="field-hint">
+                    Row {parserError.row}: {parserError.message}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid-3">

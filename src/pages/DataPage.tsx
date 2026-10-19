@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Database, DownloadSimple, Eye } from '@phosphor-icons/react';
+import type { Workspace } from '../domain/types';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { downloadTextFile } from '../lib/export/download';
@@ -7,14 +8,36 @@ import { barsToCsv, validationToCsv } from '../lib/export/csv';
 import { formatPrice } from '../lib/format';
 import { EmptyState, Metric, Panel, Tag } from '../components/ui';
 
+function affectedPanels(datasetId: string, workspaces: readonly Workspace[]): number {
+  return workspaces.reduce(
+    (total, workspace) => total + workspace.charts.filter((chart) => chart.datasetId === datasetId).length,
+    0,
+  );
+}
+
+function affectedDrawings(datasetId: string, workspaces: readonly Workspace[]): number {
+  return workspaces.reduce(
+    (total, workspace) =>
+      total +
+      workspace.charts
+        .filter((chart) => chart.datasetId === datasetId)
+        .reduce((count, chart) => count + chart.drawings.length, 0),
+    0,
+  );
+}
+
 export function DataPage() {
   const { state, actions } = useStore();
   const views = useMemo(() => datasetViews(state), [state]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const selected = views.find((view) => view.dataset.id === selectedId) ?? null;
   const previewHead = selected ? selected.bars.slice(0, 12) : [];
-  const previewTail = selected && selected.bars.length > 12 ? selected.bars.slice(-6) : [];
+  // Only add the tail when it cannot overlap the head, so no session is printed
+  // twice and the omitted count can never go negative.
+  const previewTail = selected && selected.bars.length > 18 ? selected.bars.slice(-6) : [];
+  const omittedRows = selected ? Math.max(0, selected.bars.length - previewHead.length - previewTail.length) : 0;
 
   return (
     <div className="page">
@@ -80,9 +103,31 @@ export function DataPage() {
                           <DownloadSimple size={12} aria-hidden />
                           Export
                         </button>
-                        <button type="button" className="button ghost sm danger" onClick={() => void actions.deleteDataset(view.dataset.id)}>
-                          Delete
-                        </button>
+                        {confirmDeleteId === view.dataset.id ? (
+                          <span className="row tight">
+                            <span className="field-hint">
+                              Removes {affectedPanels(view.dataset.id, state.workspaces)} panel(s) and{' '}
+                              {affectedDrawings(view.dataset.id, state.workspaces)} drawing(s)
+                            </span>
+                            <button
+                              type="button"
+                              className="button ghost sm danger"
+                              onClick={() => {
+                                setConfirmDeleteId(null);
+                                void actions.deleteDataset(view.dataset.id);
+                              }}
+                            >
+                              Delete dataset
+                            </button>
+                            <button type="button" className="button ghost sm" onClick={() => setConfirmDeleteId(null)}>
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button type="button" className="button ghost sm danger" onClick={() => setConfirmDeleteId(view.dataset.id)}>
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -128,7 +173,11 @@ export function DataPage() {
 
           <Panel
             title="Bars"
-            subtitle={`First ${previewHead.length} and last ${previewTail.length} rows of ${selected.bars.length}`}
+            subtitle={
+              previewTail.length > 0
+                ? `First ${previewHead.length} and last ${previewTail.length} rows of ${selected.bars.length}`
+                : `${previewHead.length} of ${selected.bars.length} rows`
+            }
             flush
           >
             <div className="table-wrap">
@@ -154,10 +203,10 @@ export function DataPage() {
                       <td className="num">{bar.volume === null ? '--' : bar.volume.toLocaleString('en-US')}</td>
                     </tr>
                   ))}
-                  {previewTail.length > 0 && (
+                  {previewTail.length > 0 && omittedRows > 0 && (
                     <tr>
                       <td colSpan={6} className="faint" style={{ textAlign: 'center' }}>
-                        {selected.bars.length - previewHead.length - previewTail.length} rows omitted
+                        {omittedRows} rows omitted
                       </td>
                     </tr>
                   )}

@@ -33,35 +33,43 @@ export function WorkspacesPage() {
   };
 
   const onPickFile = async (file: File) => {
-    const text = await readFileAsText(file);
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      actions.notify('error', 'That file is not valid JSON.');
-      return;
+      const text = await readFileAsText(file);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        actions.notify('error', 'That file is not valid JSON.');
+        return;
+      }
+      const result = parseBackup(parsed);
+      if (!result.ok) {
+        actions.notify('error', result.error);
+        return;
+      }
+      const skippedNote = result.skipped.length > 0 ? ` ${result.skipped.length} entr${result.skipped.length === 1 ? 'y' : 'ies'} will be skipped.` : '';
+      setPendingBackup({
+        text,
+        summary: `${result.value.datasets.length} dataset(s), ${result.value.workspaces.length} workspace(s), ${result.value.bars.reduce((total, entry) => total + entry.bars.length, 0).toLocaleString('en-US')} sessions.${skippedNote}`,
+      });
+    } catch (readError) {
+      actions.notify('error', readError instanceof Error ? readError.message : 'The backup file could not be read.');
     }
-    const result = parseBackup(parsed);
-    if (!result.ok) {
-      actions.notify('error', result.error);
-      return;
-    }
-    const skippedNote = result.skipped.length > 0 ? ` ${result.skipped.length} entr${result.skipped.length === 1 ? 'y' : 'ies'} will be skipped.` : '';
-    setPendingBackup({
-      text,
-      summary: `${result.value.datasets.length} dataset(s), ${result.value.workspaces.length} workspace(s), ${result.value.bars.reduce((total, entry) => total + entry.bars.length, 0).toLocaleString('en-US')} sessions.${skippedNote}`,
-    });
   };
 
   const applyPending = async () => {
     if (!pendingBackup) return;
-    const parsed = parseBackup(JSON.parse(pendingBackup.text));
-    if (!parsed.ok) {
-      actions.notify('error', parsed.error);
-      return;
+    try {
+      const parsed = parseBackup(JSON.parse(pendingBackup.text));
+      if (!parsed.ok) {
+        actions.notify('error', parsed.error);
+        return;
+      }
+      await actions.restoreBackup(parsed.value, importMode);
+      setPendingBackup(null);
+    } catch (restoreError) {
+      actions.notify('error', restoreError instanceof Error ? restoreError.message : 'The backup could not be restored.');
     }
-    await actions.restoreBackup(parsed.value, importMode);
-    setPendingBackup(null);
   };
 
   return (
@@ -94,7 +102,7 @@ export function WorkspacesPage() {
                       <td>
                         {renameId === workspace.id ? (
                           <div className="row tight">
-                            <TextInput value={renameDraft} onChange={setRenameDraft} />
+                            <TextInput ariaLabel="Workspace name" value={renameDraft} onChange={setRenameDraft} />
                             <button
                               type="button"
                               className="button sm primary"
@@ -125,7 +133,9 @@ export function WorkspacesPage() {
                       </td>
                       <td className="num">{indicators}</td>
                       <td className="num">{drawings}</td>
-                      <td className="muted">{workspace.linkGroups[0]?.properties.join(', ') || 'none'}</td>
+                      <td className="muted">
+                        {workspace.linkGroups[0]?.properties.filter((property) => property !== 'crosshair').join(', ') || 'none'}
+                      </td>
                       <td className="mono faint">{workspace.updatedAt.slice(0, 16).replace('T', ' ')}</td>
                       <td>
                         <div className="row tight">
