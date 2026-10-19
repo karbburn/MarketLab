@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   BacktestConfig,
   Bar,
@@ -31,6 +31,8 @@ export interface DatasetBundle {
 
 export interface AppState {
   status: 'loading' | 'ready';
+  /** Set when the initial read fails so the shell can say so instead of showing an empty library. */
+  loadError: string | null;
   adapterKind: 'indexeddb' | 'memory';
   instruments: Instrument[];
   datasets: Dataset[];
@@ -80,6 +82,7 @@ type SettingsRecord = { id: string; schemaVersion: number; seededAt: string };
 
 const EMPTY_STATE: AppState = {
   status: 'loading',
+  loadError: null,
   adapterKind: 'memory',
   instruments: [],
   datasets: [],
@@ -96,6 +99,32 @@ const EMPTY_STATE: AppState = {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const adapter = useAdapter();
+  // Latest committed state for async actions, which must not build a record
+  // from the render-time snapshot (that snapshot can be several writes stale).
+  const stateRef = useRef(state);
+  const preferencesRef = useRef(state.preferences);
+  const workspacesRef = useRef(state.workspaces);
+  // Writes are serialised per record so a slow write cannot overwrite a newer
+  // one, and so consecutive updates compose instead of racing.
+  const writeQueues = useRef(new Map<string, Promise<unknown>>());
+
+  useEffect(() => {
+    stateRef.current = state;
+    preferencesRef.current = state.preferences;
+    workspacesRef.current = state.workspaces;
+  }, [state]);
+
+  const enqueue = <T,>(key: string, task: () => Promise<T>): Promise<T> => {
+    const previous = writeQueues.current.get(key) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    writeQueues.current.set(key, next);
+    void next
+      .finally(() => {
+        if (writeQueues.current.get(key) === next) writeQueues.current.delete(key);
+      })
+      .catch(() => undefined);
+    return next;
+  };
 
   // Load everything once, then seed bundled samples on first run.
   useEffect(() => {
@@ -131,6 +160,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           seededAt: new Date().toISOString(),
         });
         if (cancelled) return;
+        // Set the attribute before the first child render so the charts read
+        // the persisted palette on mount.
+        applyThemeAttribute(preferences.theme);
         setState((previous) => ({
           ...previous,
           status: 'ready',
@@ -139,7 +171,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           datasets: seededData.datasets,
           barsByDataset: seededData.barsByDataset,
           workspaces: seededData.workspaces,
-          activeWorkspaceId: seededData.workspaces[0]?.id ?? null,
+          activeWorkspaceId: resolveActiveWorkspaceId(seededData.workspaces, preferences),
           watchlists: seededData.watchlists,
           preferences,
           screeners,
@@ -148,6 +180,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      applyThemeAttribute(preferences.theme);
       setState((previous) => ({
         ...previous,
         status: 'ready',
@@ -156,14 +189,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         datasets,
         barsByDataset,
         workspaces,
-        activeWorkspaceId: workspaces[0]?.id ?? null,
+        activeWorkspaceId: resolveActiveWorkspaceId(workspaces, preferences),
         watchlists,
         preferences,
         screeners,
         backtests,
+        loadError: null,
       }));
-    })().catch(() => {
-      if (!cancelled) setState((previous) => ({ ...previous, status: 'ready' }));
+    })().catch((error: unknown) => {
+      if (cancelled) return;
+      // Keep the app usable, but never present a failed read as an empty library.
+      const message = error instanceof Error ? error.message : 'Local storage could not be read.';
+      setState((previous) => ({
+        ...previous,
+        status: 'ready',
+        loadError: `Local data could not be read: ${message}`,
+      }));
     });
     return () => {
       cancelled = true;
@@ -172,8 +213,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Apply the theme to the document element.
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    document.documentElement.dataset.theme = state.preferences.theme;
+    applyThemeAttribute(state.preferences.theme);
   }, [state.preferences.theme]);
 
   const notify = (kind: ToastKind, message: string) => {
@@ -205,60 +245,76 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async deleteDataset(datasetId) {
       if (!adapter) return;
-      const dataset = state.datasets.find((entry) => entry.id === datasetId);
+      const before = stateRef.current;
+      const dataset = before.datasets.find((entry) => entry.id === datasetId);
       await adapter.remove('datasets', datasetId);
       await adapter.remove('bars', datasetId);
       let instrumentRemoved = false;
       if (dataset) {
-        const stillUsed = state.datasets.some((entry) => entry.id !== datasetId && entry.instrumentId === dataset.instrumentId);
+        const stillUsed = before.datasets.some((entry) => entry.id !== datasetId && entry.instrumentId === dataset.instrumentId);
         if (!stillUsed) {
           await adapter.remove('instruments', dataset.instrumentId);
           instrumentRemoved = true;
         }
       }
-      setState((previous) => {
-        const barsByDataset = { ...previous.barsByDataset };
-        delete barsByDataset[datasetId];
-        const workspaces = previous.workspaces
-          .map((workspace) => ({
-            ...workspace,
-            charts: workspace.charts.filter((chart) => chart.datasetId !== datasetId),
-          }))
-          .filter((workspace) => workspace.charts.length > 0);
-        return {
-          ...previous,
-          datasets: previous.datasets.filter((entry) => entry.id !== datasetId),
-          instruments: instrumentRemoved && dataset
-            ? previous.instruments.filter((entry) => entry.id !== dataset.instrumentId)
-            : previous.instruments,
-          barsByDataset,
-          workspaces,
-          activeWorkspaceId: workspaces.some((workspace) => workspace.id === previous.activeWorkspaceId)
-            ? previous.activeWorkspaceId
-            : workspaces[0]?.id ?? null,
-          screeners: previous.screeners.map((screener) => ({
-            ...screener,
-            universeDatasetIds: screener.universeDatasetIds.filter((id) => id !== datasetId),
-          })),
-        };
-      });
+
+      const latest = stateRef.current;
+      // workspacesRef also sees writes that are queued but not rendered yet.
+      const latestWorkspaces = workspacesRef.current;
+      const barsByDataset = { ...latest.barsByDataset };
+      delete barsByDataset[datasetId];
+      const workspaces = latestWorkspaces
+        .map((workspace) => ({
+          ...workspace,
+          charts: workspace.charts.filter((chart) => chart.datasetId !== datasetId),
+        }))
+        .filter((workspace) => workspace.charts.length > 0);
+      const screeners = latest.screeners.map((screener) => ({
+        ...screener,
+        universeDatasetIds: screener.universeDatasetIds.filter((id) => id !== datasetId),
+      }));
+      // Persist the cleanup, not only the React state: otherwise the next load
+      // resurrects panels and screens that point at the removed dataset.
+      const removedWorkspaces = latestWorkspaces.filter(
+        (workspace) => !workspaces.some((entry) => entry.id === workspace.id),
+      );
+      for (const workspace of removedWorkspaces) await adapter.remove('workspaces', workspace.id);
+      await adapter.putMany('workspaces', workspaces);
+      await adapter.putMany('screeners', screeners);
+      workspacesRef.current = workspaces;
+
+      setState((previous) => ({
+        ...previous,
+        datasets: previous.datasets.filter((entry) => entry.id !== datasetId),
+        instruments: instrumentRemoved && dataset
+          ? previous.instruments.filter((entry) => entry.id !== dataset.instrumentId)
+          : previous.instruments,
+        barsByDataset,
+        workspaces,
+        activeWorkspaceId: workspaces.some((workspace) => workspace.id === previous.activeWorkspaceId)
+          ? previous.activeWorkspaceId
+          : workspaces[0]?.id ?? null,
+        screeners,
+      }));
       notify('info', 'Dataset removed.');
     },
 
     async createWorkspaceFromBase({ name, datasetId, instrumentId, layout }) {
       if (!adapter) return null;
+      const preferences = preferencesRef.current;
       const workspace = createWorkspace({
         name,
         layout,
         base: {
           instrumentId,
           datasetId,
-          showVolume: state.preferences.showVolumeByDefault,
-          chartType: state.preferences.defaultChartType,
-          timeframe: state.preferences.defaultTimeframe,
+          showVolume: preferences.showVolumeByDefault,
+          chartType: preferences.defaultChartType,
+          timeframe: preferences.defaultTimeframe,
         },
       });
       await adapter.put('workspaces', workspace);
+      workspacesRef.current = [...workspacesRef.current, workspace];
       setState((previous) => ({ ...previous, workspaces: [...previous.workspaces, workspace], activeWorkspaceId: workspace.id }));
       notify('success', `Created workspace "${workspace.name}".`);
       return workspace.id;
@@ -273,11 +329,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async updateWorkspace(workspaceId, updater) {
       if (!adapter) return;
-      const existing = state.workspaces.find((workspace) => workspace.id === workspaceId);
-      if (!existing) return;
-      const updated = { ...updater(existing), updatedAt: new Date().toISOString() };
-      await adapter.put('workspaces', updated);
-      setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
+      await enqueue(`workspace:${workspaceId}`, async () => {
+        // Read the latest record when the write actually runs, so queued edits
+        // compose rather than replacing each other with stale snapshots.
+        const existing = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
+        if (!existing) return;
+        const updated = { ...updater(existing), updatedAt: new Date().toISOString() };
+        await adapter.put('workspaces', updated);
+        // A delete queued behind this write wins: do not re-insert the record.
+        if (!workspacesRef.current.some((workspace) => workspace.id === workspaceId)) return;
+        workspacesRef.current = upsertById(workspacesRef.current, updated);
+        setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
+      });
     },
 
     async updateChart(workspaceId, chartId, updater) {
@@ -289,15 +352,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async deleteWorkspace(workspaceId) {
       if (!adapter) return;
-      await adapter.remove('workspaces', workspaceId);
-      setState((previous) => {
-        const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
-        return {
-          ...previous,
-          workspaces,
-          activeWorkspaceId:
-            previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
-        };
+      await enqueue(`workspace:${workspaceId}`, async () => {
+        await adapter.remove('workspaces', workspaceId);
+        workspacesRef.current = workspacesRef.current.filter((workspace) => workspace.id !== workspaceId);
+        setState((previous) => {
+          const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
+          return {
+            ...previous,
+            workspaces,
+            activeWorkspaceId:
+              previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
+          };
+        });
       });
       notify('info', 'Workspace deleted.');
     },
@@ -357,14 +423,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async setPreferences(partial) {
       if (!adapter) return;
-      const preferences = { ...state.preferences, ...partial };
-      await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
-      setState((previous) => ({ ...previous, preferences }));
+      // Paint the new palette before React re-renders the charts.
+      applyThemeAttribute(partial.theme ?? preferencesRef.current.theme);
+      await enqueue('preferences', async () => {
+        const preferences = { ...preferencesRef.current, ...partial };
+        await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
+        preferencesRef.current = preferences;
+        setState((previous) => ({ ...previous, preferences }));
+      });
     },
 
     async restoreBackup(bundle, mode) {
       if (!adapter) return;
-      const base = mode === 'replace' ? EMPTY_STATE : state;
+      const base = mode === 'replace' ? EMPTY_STATE : stateRef.current;
       const merged = mergeBackup(
         {
           instruments: base.instruments,
@@ -395,8 +466,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await adapter.putMany('watchlists', merged.watchlists);
       await adapter.putMany('screeners', merged.screeners);
       await adapter.putMany('backtests', merged.backtests);
-      if (bundle.preferences) await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
+      if (bundle.preferences) {
+        await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
+        applyThemeAttribute(bundle.preferences.theme);
+      }
 
+      const nextPreferences = bundle.preferences ?? preferencesRef.current;
+      workspacesRef.current = merged.workspaces;
+      preferencesRef.current = nextPreferences;
       setState((previous) => ({
         ...previous,
         status: 'ready',
@@ -412,7 +489,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         watchlists: merged.watchlists,
         screeners: merged.screeners,
         backtests: merged.backtests,
-        preferences: bundle.preferences ?? previous.preferences,
+        preferences: nextPreferences,
       }));
 
       notify(
@@ -432,6 +509,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       const seededData = await seedSamples(adapter);
       await adapter.put<SettingsRecord>('settings', { id: 'app', schemaVersion: APP_SCHEMA_VERSION, seededAt: new Date().toISOString() });
+      workspacesRef.current = seededData.workspaces;
       setState((previous) => ({
         ...EMPTY_STATE,
         status: 'ready',
@@ -478,6 +556,18 @@ function stripPreferenceId(record: PreferencesRecord): UserPreferences {
   const { id: _id, ...preferences } = record;
   void _id;
   return preferences;
+}
+
+function applyThemeAttribute(theme: UserPreferences['theme']): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme;
+}
+
+/** Prefers the stored default workspace, falling back to the first one. */
+function resolveActiveWorkspaceId(workspaces: readonly Workspace[], preferences: UserPreferences): string | null {
+  const preferred = preferences.defaultWorkspaceId;
+  if (preferred && workspaces.some((workspace) => workspace.id === preferred)) return preferred;
+  return workspaces[0]?.id ?? null;
 }
 
 function upsertById<T extends { id: string }>(list: readonly T[], value: T): T[] {

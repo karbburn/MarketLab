@@ -117,6 +117,11 @@ export function AppShell() {
         <header className="topbar">
           <span className="topbar-title">{title}</span>
           <span className="topbar-spacer" />
+          {state.loadError && (
+            <span className="tag down" title={state.loadError}>
+              Local data could not be read
+            </span>
+          )}
           {state.adapterKind === 'memory' && <span className="tag warn">Storage unavailable: changes will not persist</span>}
           <button type="button" className="button sm" onClick={() => setImportOpen(true)}>
             <UploadSimple size={13} weight="bold" aria-hidden />
