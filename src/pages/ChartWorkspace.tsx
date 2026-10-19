@@ -4,7 +4,8 @@ import type { LinkProperty, WorkspaceLayout } from '../domain/types';
 import { useStore } from '../state/store';
 import { activeWorkspace, datasetViews } from '../state/selectors';
 import { WORKSPACE_LAYOUTS, chartCountForLayout, duplicateChartConfig, withLayout } from '../state/defaults';
-import { formatPrice, formatSignedPercent } from '../lib/format';
+import { formatCompact, formatCount, formatPercent, formatPrice, formatSignedPercent } from '../lib/format';
+import { WATCHLIST_CONTEXT_SESSIONS, watchlistContext } from '../lib/watchlist-context';
 import { EmptyState, Panel, Segmented, Select, Tag, TextInput, Switch } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { ChartPanel } from '../components/chart/ChartPanel';
@@ -357,21 +358,42 @@ export function ChartWorkspacePage() {
               <EmptyState title="Empty watchlist" body="Add instruments from the list below." />
             ) : (
               <div className="table-wrap">
-                <table className="data">
+                <table className="data watchlist-table">
                   <thead>
                     <tr>
                       <th>Symbol</th>
                       <th className="num">Last</th>
                       <th className="num">Day</th>
+                      <th className="num" title="Average reported volume over the last 30 sessions">
+                        Avg vol 30
+                      </th>
+                      <th className="num" title="High-low spread as a percentage of the low over the last 30 sessions">
+                        Range 30
+                      </th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
                     {watchlistViews.map((view) => {
-                      const bars = view.bars;
-                      const last = bars[bars.length - 1];
-                      const previous = bars[bars.length - 2];
-                      const change = last && previous && previous.close !== 0 ? ((last.close - previous.close) / previous.close) * 100 : null;
+                      const context = watchlistContext(view.bars);
+                      const windowLabel =
+                        context.sessions === WATCHLIST_CONTEXT_SESSIONS
+                          ? `${context.sessions} sessions`
+                          : `${context.sessions} available session${context.sessions === 1 ? '' : 's'}`;
+                      const volumeTitle =
+                        context.averageVolume === null
+                          ? 'No volume was reported for the context window.'
+                          : `Average volume of ${formatCount(Math.round(context.averageVolume))} from ${context.volumeSessions} reporting session${
+                              context.volumeSessions === 1 ? '' : 's'
+                            } over the last ${windowLabel}${
+                              context.volumeSessions < context.sessions ? '; missing volume excluded' : ''
+                            }.`;
+                      const rangeTitle =
+                        context.low === null || context.high === null
+                          ? 'High and low prices are unavailable for the context window.'
+                          : `High-low range over the last ${windowLabel}: ${formatPrice(context.low)} to ${formatPrice(
+                              context.high,
+                            )}${context.rangePct === null ? '' : ` (${formatPercent(context.rangePct, 1)} of the low)`}.`;
                       const isFocused = focusedChart?.datasetId === view.dataset.id;
                       return (
                         <tr key={view.dataset.id} className={isFocused ? '' : undefined}>
@@ -385,9 +407,15 @@ export function ChartWorkspacePage() {
                               {view.instrument?.symbol ?? '--'}
                             </button>
                           </td>
-                          <td className="num">{last ? formatPrice(last.close) : '--'}</td>
-                          <td className={`num ${change === null ? '' : change >= 0 ? 'up' : 'down'}`}>
-                            {change === null ? '--' : formatSignedPercent(change)}
+                          <td className="num">{context.lastClose === null ? '--' : formatPrice(context.lastClose)}</td>
+                          <td className={`num ${context.changePct === null ? '' : context.changePct >= 0 ? 'up' : 'down'}`}>
+                            {context.changePct === null ? '--' : formatSignedPercent(context.changePct)}
+                          </td>
+                          <td className="num" title={volumeTitle}>
+                            {context.averageVolume === null ? '--' : formatCompact(context.averageVolume)}
+                          </td>
+                          <td className="num" title={rangeTitle}>
+                            {context.rangePct === null ? '--' : formatPercent(context.rangePct, 1)}
                           </td>
                           <td>
                             <button
@@ -409,6 +437,15 @@ export function ChartWorkspacePage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {activeWatchlist && watchlistViews.length > 0 && (
+              <div className="watchlist-note">
+                <span className="panel-sub">
+                  Avg vol and range use the last {WATCHLIST_CONTEXT_SESSIONS} sessions; shorter histories use every
+                  available session. Range is the high-low spread as a percentage of the low, and missing volume is
+                  excluded from the average.
+                </span>
               </div>
             )}
           </Panel>
@@ -455,6 +492,7 @@ export function ChartWorkspacePage() {
             <ul className="list-reset stack field-hint">
               <li>Drag on empty chart space to pan, scroll to zoom.</li>
               <li>Pick a drawing tool, then click once for a level or twice for a two-point shape.</li>
+              <li>The text tool opens a field where you click; double-click a label to change it.</li>
               <li>Escape cancels a half-drawn shape and returns to the pointer tool.</li>
               <li>Delete removes the selected drawing, Ctrl+Z undoes and Ctrl+Shift+Z redoes.</li>
             </ul>

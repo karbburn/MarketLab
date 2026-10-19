@@ -293,8 +293,13 @@ button {
   flex: 1;
 }
 
-/* The navigation drawer is a narrow-viewport affordance only. */
-.shell-nav-toggle,
+/* The navigation control is available at every width: on narrow viewports it
+   opens the off-canvas drawer, on wide viewports it collapses the docked
+   sidebar so the workspace can take the full width. */
+.shell-nav-toggle {
+  display: inline-flex;
+}
+
 .shell-scrim {
   display: none;
 }
@@ -321,10 +326,6 @@ button {
     transform: translateX(0);
   }
 
-  .shell-nav-toggle {
-    display: inline-flex;
-  }
-
   .shell-scrim {
     display: block;
     position: fixed;
@@ -334,6 +335,19 @@ button {
     padding: 0;
     background: rgba(4, 8, 12, 0.55);
     cursor: pointer;
+  }
+}
+
+/* On wide viewports the sidebar is docked in the shell grid, so collapsing it
+   only has to remove the column. The topbar control stays visible and brings
+   it back. */
+@media (min-width: 901px) {
+  .shell.nav-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell.nav-collapsed .shell-nav {
+    display: none;
   }
 }
 
@@ -364,7 +378,7 @@ button {
 
 .page-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 14px;
   align-items: start;
 }
@@ -766,6 +780,22 @@ table.data th.num {
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+table.data.watchlist-table th,
+table.data.watchlist-table td {
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+.watchlist-note {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.watchlist-note .panel-sub {
+  line-height: 1.45;
 }
 
 table.data tr.dim td {
@@ -1184,6 +1214,26 @@ table.data tr.dim td {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* The inline label editor the text tool opens where the click landed. */
+.drawing-text-editor {
+  position: absolute;
+  z-index: 2;
+  min-width: 130px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--radius);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  box-shadow: var(--shadow-panel);
+}
+
+.drawing-text-editor::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 .chart-layout {

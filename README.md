@@ -105,9 +105,10 @@ periods) are empty rather than zero.
 ### Workspace
 
 Named workspaces with their own panel layouts, watchlists that load an instrument into the
-focused panel, persisted preferences (including light and dark themes), and a data library that
-shows the stored series, their source, frequency, session counts, first and last session and
-content hash — with per-series inspection, export and deletion.
+focused panel and show last close, day change, 30-session average volume and a high-low range
+shown as a percentage of the low, persisted preferences (including light and dark themes), and a
+data library that shows the stored series, their source, frequency, session counts, first and last
+session and content hash — with per-series inspection, export and deletion.
 
 ## Screenshots
 
@@ -302,8 +303,8 @@ The suites are run for real and the numbers below are the current ones.
 
 | Suite | Size | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | 25 files, 273 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, backup parsing, the legacy-series removal and export formatting. |
-| End-to-end (Playwright) | 54 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, drawing and keyboard behaviour, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
+| Unit (Vitest) | 26 files, 280 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, watchlist context maths, backup parsing, the legacy-series removal and export formatting. |
+| End-to-end (Playwright) | 58 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
 | Service (pytest) | 26 tests | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
@@ -323,13 +324,12 @@ deployed origin, so a user's own local service can serve the hosted application.
 ## Project status
 
 **Shipped and verified.** The features above, the full local test gate and a live deployment. The
-latest state: `npm run verify` green, 273 unit tests, 54 end-to-end tests, 26 service tests.
+latest state: `npm run verify` green, 280 unit tests, 58 end-to-end tests, 26 service tests.
 
 **Planned, not started** — the remaining account-free items selected from an internal review of
 what a charting terminal offers, in the order they are intended:
 
-1. Watchlist context columns: last close, 30-session average volume and range.
-2. A global command palette (Ctrl/Cmd-K) for datasets, navigation and local symbol search.
+1. A global command palette (Ctrl/Cmd-K) for datasets, navigation and local symbol search.
 
 **Deliberately out of scope.** MarketLab is an analysis and research tool, not a trading
 terminal: no intraday or streaming quotes, no brokerage connectivity, no accounts or cloud sync,
