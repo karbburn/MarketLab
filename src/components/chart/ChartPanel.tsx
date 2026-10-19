@@ -570,31 +570,40 @@ export function ChartPanel({
     setSelectedId(null);
   }, [commitDrawings, localDrawings, selectedDrawingId]);
 
-  const selectTool = (next: DrawingType | 'cursor') => {
+  const selectTool = useCallback((next: DrawingType | 'cursor') => {
     setPendingAnchors([]);
     setTool(next);
-  };
+  }, []);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    // Keystrokes typed into the indicator dialog (or any form control) must
-    // never reach the drawing shortcuts.
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
-    if (event.key === 'Escape') {
-      selectTool('cursor');
-      return;
-    }
-    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
-      event.preventDefault();
-      removeSelected();
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-      event.preventDefault();
-      if (event.shiftKey) redo();
-      else undo();
-    }
-  };
+  useEffect(() => {
+    if (!focused) return;
+    // The shortcuts belong to the focused panel, but the toolbar buttons drop
+    // focus to the document when they disable themselves (Undo, Redo, Delete),
+    // so a listener on the panel element would silently stop firing. Listening
+    // on the window while this panel is the focused one keeps them working.
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Keystrokes typed into the indicator dialog (or any form control) must
+      // never reach the drawing shortcuts.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
+      if (event.key === 'Escape') {
+        selectTool('cursor');
+        return;
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
+        event.preventDefault();
+        removeSelected();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
 
   const hoverBar: Bar | null = readout.index !== null ? (rendered[readout.index] ?? null) : rendered.length ? (rendered[rendered.length - 1] as Bar) : null;
   const previousBar = readout.index !== null && readout.index > 0 ? rendered[readout.index - 1] ?? null : rendered.length > 1 ? rendered[rendered.length - 2] ?? null : null;
@@ -602,7 +611,7 @@ export function ChartPanel({
   const tone = changePct === null ? undefined : changePct >= 0 ? 'up' : 'down';
 
   return (
-    <div className={focused ? 'chart-panel focused' : 'chart-panel'} onFocus={onFocus} tabIndex={-1} onKeyDown={handleKeyDown}>
+    <div className={focused ? 'chart-panel focused' : 'chart-panel'} onFocus={onFocus} tabIndex={-1}>
       <div className="chart-panel-head">
         <span className="chart-symbol">{instrument?.symbol ?? 'No instrument'}</span>
         <Segmented
