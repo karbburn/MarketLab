@@ -1322,6 +1322,20 @@ table.data tr.dim td {
   white-space: nowrap;
 }
 
+/* Options of the batch symbol field are list items, not nested buttons: the
+ * textarea keeps focus while the active option is announced through
+ * aria-activedescendant. */
+.suggestion-list li.suggestion {
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.suggestion-list li.suggestion:hover,
+.suggestion-list li.suggestion[aria-selected='true'] {
+  background: var(--surface-hover);
+}
+
 .divider {
   height: 1px;
   background: var(--border-subtle);

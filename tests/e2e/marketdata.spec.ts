@@ -112,6 +112,51 @@ async function stubPerSymbol(page: Page): Promise<void> {
   });
 }
 
+/** A provider search response, as the real service returns it for a name query. */
+const SEARCH_RESULTS = [
+  {
+    symbol: 'GOOGL',
+    name: 'Alphabet Inc.',
+    exchange: 'NMS',
+    exchangeName: 'NASDAQ',
+    type: 'Equity',
+    sector: 'Communication Services',
+    industry: 'Internet Content & Information',
+  },
+  {
+    symbol: 'GOOG',
+    name: 'Alphabet Inc.',
+    exchange: 'NMS',
+    exchangeName: 'NASDAQ',
+    type: 'Equity',
+    sector: 'Communication Services',
+    industry: 'Internet Content & Information',
+  },
+];
+
+/**
+ * Serves provider symbol suggestions and records the queries the app sent, so a
+ * test can prove the search used the typed token rather than the whole field.
+ */
+async function stubSearch(page: Page, results: unknown[] = SEARCH_RESULTS): Promise<string[]> {
+  const queries: string[] = [];
+  await page.route('**/api/search*', async (route) => {
+    if (route.request().method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: CORS_HEADERS });
+      return;
+    }
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    queries.push(query);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ provider: 'yahoo-finance', query, results }),
+    });
+  });
+  return queries;
+}
+
 test.describe('market data download', () => {
   test('explains the unreachable service instead of failing silently', async ({ page }) => {
     // The request is aborted on purpose so the assertion holds whether or not
@@ -215,6 +260,67 @@ test.describe('bulk market data download', () => {
     await expect(dialog.getByText(/1 duplicate\(s\) removed/)).toBeVisible();
     await expect(dialog.getByText(/Ignored: \?\?bad\?\?/)).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Download 2 symbols' })).toBeEnabled();
+  });
+
+  test('suggests tickers for a company name and replaces only that line', async ({ page }) => {
+    const queries = await stubSearch(page);
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    const field = dialog.locator('#bulk-symbols');
+
+    await field.fill('amzn\ngoogle');
+    const list = dialog.getByRole('listbox', { name: 'Symbol suggestions' });
+    await expect(list).toBeVisible();
+    await expect(list.getByRole('option')).toHaveCount(2);
+    await expect(list.getByRole('option').first()).toContainText('GOOGL');
+    await expect(list.getByRole('option').first()).toContainText('Alphabet Inc.');
+
+    // Only the token under the caret is searched, never the whole batch.
+    expect(queries).toEqual(['google']);
+
+    await list.getByRole('option', { name: /GOOGL/ }).click();
+
+    // The pick replaces "google" and leaves the symbol already typed intact.
+    await expect(field).toHaveValue('amzn\nGOOGL, ');
+    await expect(list).toBeHidden();
+    await expect(dialog.getByText(/2 symbols ready/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Download 2 symbols' })).toBeEnabled();
+  });
+
+  test('drives the suggestions from the keyboard without closing the dialog', async ({ page }) => {
+    await stubSearch(page);
+    await page.goto('/#/data');
+    await openBulkDialog(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
+    const field = dialog.locator('#bulk-symbols');
+    const list = dialog.getByRole('listbox', { name: 'Symbol suggestions' });
+
+    await field.fill('google');
+    await expect(list).toBeVisible();
+
+    const options = list.getByRole('option');
+    await page.keyboard.press('ArrowDown');
+    await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
+    await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true');
+    // The list wraps rather than trapping focus on the last option.
+    await page.keyboard.press('ArrowDown');
+    await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true');
+
+    await page.keyboard.press('Enter');
+    await expect(field).toHaveValue('GOOGL, ');
+
+    // A new query reopens the list. The first Escape only dismisses it, which
+    // is the standard behaviour of a combobox inside a dialog.
+    await field.fill('google');
+    await expect(list).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(list).toBeHidden();
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
   });
 
   test('stores every symbol of a batch and reports each result', async ({ page }) => {
