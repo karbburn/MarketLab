@@ -27,5 +27,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Python (service)
+__pycache__/
+.pytest_cache/
+.venv/
+
 # Generated artifacts
 *.zip

@@ -1,0 +1,69 @@
+# MarketLab market-data service
+
+An optional, local-only FastAPI wrapper around [`yfinance`](https://github.com/ranaroussi/yfinance)
+that gives MarketLab historical daily OHLCV downloads and symbol search without
+any API key.
+
+**What this is not:** an official or guaranteed Yahoo Finance feed. Data may be
+delayed, incomplete, or change shape without notice; availability can fail
+(transient outages, rate limiting). MarketLab treats every failure as a
+first-class state and keeps working offline with CSV imports, bundled samples and
+already-downloaded datasets.
+
+Only **daily** bars are served. MarketLab's canonical model is date-only exchange
+sessions; weekly/monthly views are aggregated inside the app, and intraday is
+deliberately unsupported. OHLC is as-traded (splits applied by Yahoo, dividends
+not reinvested); the separate `adjClose` column is captured but not yet used by
+ computations. The adjustment policy is recorded in every download's metadata.
+
+## Setup
+
+```bash
+cd services/market-data
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Run
+
+```bash
+uvicorn app:app --host 127.0.0.1 --port 8787
+```
+
+Then in MarketLab: **Data → Download market data**. The frontend targets
+`http://127.0.0.1:8787` on the same machine; nothing remote can reach this
+service (CORS is restricted to the local dev/preview origins in code).
+
+## Endpoints
+
+| Route | Purpose |
+|---|---|
+| `GET /api/health` | availability + provider/library versions |
+| `GET /api/search?q=<2-64 chars>&limit<=20` | symbol lookup (fuzzy), returns symbol/name/exchange/type |
+| `GET /api/history?symbol=AAPL&start=2020-01-01&end=2025-01-01` | daily bars + provenance metadata |
+
+Errors are always JSON `{"detail": "..."}`: `400` invalid input, `404` no data
+for the symbol/range, `429` provider throttled, `502` malformed provider
+response, `503` provider timeout. Results are cached in-process for 10 minutes.
+
+## Tests (deterministic; no network)
+
+```bash
+cd services/market-data
+python -m pytest tests -q
+```
+
+## Optional live smoke check (manual; requires network)
+
+This is **not** part of the automated suite and may fail due to Yahoo-side
+issues independent of this code:
+
+```bash
+uvicorn app:app --port 8787 &
+curl "http://127.0.0.1:8787/api/health"
+curl "http://127.0.0.1:8787/api/history?symbol=AAPL&start=2025-09-01&end=2025-09-30"
+```
