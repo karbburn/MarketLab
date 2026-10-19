@@ -1,17 +1,17 @@
 # MarketLab
 
-**A local-first charting and quantitative research terminal that runs entirely in the browser.**
+**A local-first charting and quantitative research terminal that runs entirely in your browser.**
 
-[Live application](https://marketlab.sourabhpradhan.in) · [Getting started](#getting-started) · [Getting data](#getting-data) · [Architecture](#architecture) · [Scope](#scope-and-limitations)
+[Live application](https://marketlab.sourabhpradhan.in) · [Features](#features) · [Screenshots](#screenshots) · [Getting started](#getting-started) · [Getting data](#getting-data) · [Data and provenance](#data-and-provenance) · [Architecture](#architecture) · [Testing](#testing) · [Project status](#project-status) · [Scope and limitations](#scope-and-limitations)
 
-MarketLab implements, from first principles, the workflow a trading terminal gives you: validated
-OHLCV ingestion, interactive charts with indicators and drawings, risk and cross-asset research,
-historical screening, rule-based backtesting, and export or backup of everything you have stored.
-It is a static single-page app — there is no account, no backend and no telemetry, and every
-calendar, indicator and simulation is computed on your own device. Your data lives in the
-browser's IndexedDB and is never uploaded anywhere.
+MarketLab implements, from first principles, the workflow a professional charting terminal gives
+you: validated OHLCV ingestion, interactive charts with indicators and drawings, risk and
+cross-asset research, historical screening, rule-based backtesting, and export or backup of
+everything you have stored. It is a static single-page application — there is no account, no
+backend, no analytics or telemetry, and every calendar, indicator and simulation is computed on
+your own device. Your data lives in the browser's IndexedDB and is never uploaded anywhere.
 
-**MarketLab stores no bundled market data.** The library starts empty and fills with history you
+**MarketLab ships no bundled market data.** The library starts empty and fills with history you
 download through the optional local market-data service or import from a CSV file. Nothing is
 synthesised, and no price is ever invented to fill a gap.
 
@@ -19,14 +19,28 @@ MarketLab is an independent project. It is not affiliated with, endorsed by, or 
 TradingView or any other commercial charting platform; it reimplements a familiar terminal
 *workflow* from scratch.
 
-![The MarketLab chart workspace: a daily candlestick series with a volume pane, drawing tools and a watchlist](docs/screenshots/workspace.png)
+![The chart workspace: a daily AAPL candlestick series with a volume pane, the drawing toolbar and the instrument sidebar](docs/screenshots/workspace.png)
+
+## Contents
+
+- [Features](#features)
+  - [Charting](#charting) · [Indicators](#indicators) · [Research](#research) · [Data](#data) · [Workspace](#workspace)
+- [Screenshots](#screenshots)
+- [Getting started](#getting-started)
+- [Getting data](#getting-data)
+- [Data and provenance](#data-and-provenance)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Hosting](#hosting)
+- [Project status](#project-status)
+- [Scope and limitations](#scope-and-limitations)
 
 ## Features
 
 ### Charting
 
-- Candlestick, bar, line, area and baseline series, with a volume pane and normal, logarithmic or
-  percentage price scales.
+- Candlestick, OHLC bar, line, area and baseline series, with a volume pane and normal,
+  logarithmic or percentage price scales.
 - Crosshair readout showing OHLC, change and session date for the bar under the pointer.
 - Layouts of one, two stacked, two side by side or four panels. Link groups keep panels that
   share a dataset and timeframe in step for symbol, timeframe or visible range, and reducing a
@@ -39,10 +53,15 @@ TradingView or any other commercial charting platform; it reimplements a familia
 ### Indicators
 
 Twelve indicators, each computed from first principles (no third-party maths library) and
-unit-tested against hand-checked values: SMA, EMA, Bollinger Bands, RSI, MACD, Stochastic
-Oscillator, ATR, ADX, Anchored VWAP, Volume SMA with relative volume, On-Balance Volume and
-Ichimoku Cloud. Parameters are clamped to their declared bounds, and outputs that do not exist
-yet (warm-up periods) are empty rather than zero.
+unit-tested against hand-checked values:
+
+- **Trend:** SMA, EMA, ADX, Ichimoku Cloud, Anchored VWAP
+- **Momentum:** RSI, MACD, Stochastic Oscillator
+- **Volatility:** Bollinger Bands, ATR
+- **Volume:** Volume SMA with relative volume, On-Balance Volume
+
+Parameters are clamped to their declared bounds, and outputs that do not exist yet (warm-up
+periods) are empty rather than zero.
 
 ### Research
 
@@ -52,18 +71,17 @@ yet (warm-up periods) are empty rather than zero.
   matrix over shared sessions. Assumptions (for example, a zero risk-free rate) are printed next
   to the numbers they affect.
 - **Screener** — field/operator/value rules evaluated over the sessions you have stored, with the
-  matched series, per-row filter columns and a count of how many series were evaluated.
+  matched series, per-row filter columns and a count of how many series were evaluated. A result
+  opens in the chart workspace without re-importing it or moving the screen's cutoff.
 - **Backtest** — a long-only rule engine with entry, exit, stop-loss and take-profit rules,
   position sizing, commission and slippage, an equity curve against buy-and-hold, a drawdown
-  chart and a trade log you can export.
-
-![Quant lab: risk and return metrics with normalised performance and rolling volatility charts](docs/screenshots/quant-lab.png)
+  chart and a trade log you can export. Execution assumptions are printed next to the results.
 
 ### Data
 
-- **Download real history** — one symbol at a time, or a whole list in one batch of up to 50. Every
-  symbol is reported on its own, so one unavailable ticker never discards the rest of the run, and
-  the failed symbols can be retried without repeating the whole list.
+- **Download real history** — one symbol at a time, or a whole list in one batch of up to 50.
+  Symbols are de-duplicated and reported one by one, so a single unavailable ticker never
+  discards the rest of the run; **Retry failed** re-requests only the symbols that failed.
 - **CSV import** with inferred column roles you can override, a validation report, and rejected
   rows listed with reasons (see [Importing your own data](#importing-your-own-data)).
 - **Weekly and monthly views** aggregated from daily bars, always labelled as aggregated. Daily
@@ -80,6 +98,25 @@ Named workspaces with their own panel layouts, watchlists that load an instrumen
 focused panel, persisted preferences (including light and dark themes), and a data library that
 shows the stored series, their source, frequency, session counts, first and last session and
 content hash — with per-series inspection, export and deletion.
+
+## Screenshots
+
+All screenshots were captured from a real provider download (AAPL, MSFT, NVDA, SPY and QQQ
+through the local market-data service), so the provenance shown in them — provider, exchange,
+adjustment policy and retrieval timestamp — is real rather than illustrative.
+
+**Chart workspace** — the image at the top of this file: daily AAPL bars with the crosshair
+readout, volume pane, drawing toolbar and the downloaded instrument list. Five series are stored;
+the readout shows the 2026-10-16 session closing at 343.46 on NasdaqGS.
+
+**Quant lab** — risk and return metrics with the provenance note, normalised performance and
+rolling volatility. The coverage readout reports 1254 stored sessions for AAPL; assumptions such
+as the zero risk-free rate are printed next to the metrics they affect.
+
+![Quant lab: risk and return metrics with normalised performance and rolling volatility charts](docs/screenshots/quant-lab.png)
+
+**Rule-based backtest** — strategy parameters, results against buy-and-hold, and the trade log
+export. The execution model is restated above the results rather than buried in documentation.
 
 ![Rule-based backtest: strategy parameters, results against buy-and-hold, and a per-trade log](docs/screenshots/backtest.png)
 
@@ -129,17 +166,13 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8787
 
 Then use **Data → Download market data** for a single symbol, or **Data → Download many symbols**
 for a batch of up to 50 — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the
-batch dialog accepts any list you paste in. Symbols are de-duplicated and reported one by one;
-if some fail, **Retry failed** re-requests only those. Read
+batch dialog accepts any list you paste in. Read
 [`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the error
 model and the setup details.
 
-Worth stating plainly: **Yahoo Finance is an unofficial, undocumented source.** Downloads can be
-delayed for some venues, be rate limited, or change shape without notice, and the data is not
-licensed for redistribution. Every series keeps its provider, exchange, adjustment policy and
-retrieval timestamp so the provenance travels with the prices. The service is entirely optional:
-without it, CSV imports, previously downloaded series and every other feature keep working, and
-download attempts fail with an explicit message instead of silently producing nothing.
+The service is entirely optional. Without it, CSV imports, previously downloaded series and every
+other feature keep working, and download attempts fail with an explicit message instead of
+silently producing nothing.
 
 ### Importing your own data
 
@@ -163,6 +196,28 @@ chosen duplicate policy (`reject`, `keep first` or `keep last`). Out-of-order ro
 sessions are reported as warnings. Missing sessions are reported as gaps rather than invented,
 and every stored series carries a content hash that is also used to recognise an already-stored
 series when a backup is restored.
+
+## Data and provenance
+
+The rules below are enforced in code, not just in the documentation:
+
+- **Real data or nothing.** No synthetic series ship with the application. An empty library is a
+  first-run state with real actions in it, not a gap filled with invented prices. A browser that
+  ran an earlier build still holding the old demo series has them removed on load, and only them:
+  imported, downloaded and user-created records are left untouched.
+- **Unofficial source, stated plainly.** Yahoo Finance is an undocumented source. Downloads can be
+  delayed for some venues, be rate limited, or change shape without notice, and the data is not
+  licensed for redistribution.
+- **Provenance travels with the prices.** Every downloaded series stores its provider, exchange,
+  adjustment policy (`splits-applied, dividends not reinvested`) and retrieval timestamp. Adjusted
+  close is stored separately and never mixed into OHLC computations.
+- **Failures are reported, never papered over.** A failed or empty download is shown as such; no
+  other series is substituted for it, and nothing is labelled real unless it came from a provider.
+- **Validation before storage.** Imported and downloaded series are checked for OHLC invariants,
+  duplicate sessions and unorderable rows before they are written, and the reasons for rejected
+  rows are shown to you.
+- **No timeframe is invented.** Sessions are daily; aggregation is only downward (daily → weekly
+  or monthly) and is labelled as aggregated. Nothing infers an intraday series from daily data.
 
 ## Architecture
 
@@ -205,15 +260,8 @@ set of design tokens, with dark and light themes.
 - **Canonical bars.** A session is identified by its date (`YYYY-MM-DD`), bucketed in UTC. Only
   daily → weekly (Monday-based) and daily → monthly aggregation is offered; intraday is
   unsupported by design, and nothing infers an intraday series from daily data.
-- **Real data or nothing.** The application ships no synthetic series. An empty library is a
-  first-run state with real actions in it, not a gap filled with invented prices. A browser that
-  ran an earlier build still holding the old demo series has them removed on load, and only
-  them: imported, downloaded and user-created records are left untouched.
 - **Deterministic maths, explicit gaps.** Indicators, metrics and the backtester are pure
   functions over stored bars, with warm-up periods reported as empty rather than zero.
-- **Validation before storage.** Imported and downloaded series are checked for OHLC invariants,
-  duplicate sessions and unorderable rows before they are written, and the reasons for rejected
-  rows are shown to you.
 - **A disclosed execution model.** Signals are evaluated on a session's close and orders fill at
   the next session's open — no same-bar fill, no look-ahead. Costs and slippage apply to both
   sides; when a bar touches both the stop and the target, the stop is assumed to fill first; a
@@ -232,15 +280,18 @@ npm run test:e2e                   # Playwright against the built app on 127.0.0
 python -m pytest services/market-data/tests -q
 ```
 
-Unit tests cover the pure logic where correctness is decided: indicator values, OHLC validation
-and CSV mapping, risk metrics and correlation, screener evaluation, the backtest engine's fill
-model, the download batch queue, backup parsing and migration, the removal of the legacy demo
-series, and export formatting. The end-to-end suite drives the built app with the locally
-installed Google Chrome (`channel: 'chrome'`, no browser download) and covers the shell, the
-chart workspace, drawing and keyboard behaviour, CSV import and rejection paths, the research
-screens, settings, backup export/restore, the single and batch download success, failure and
-retry paths, and the first-run and migration behaviour. The service test suite is deterministic
-and never touches the network.
+The suites are run for real and the numbers below are the current ones.
+
+| Suite | Size | What it covers |
+| --- | --- | --- |
+| Unit (Vitest) | 21 files, 234 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, screener evaluation, the backtest fill model, the download batch queue, backup parsing, the legacy-series removal and export formatting. |
+| End-to-end (Playwright) | 44 tests | The shell and navigation, the chart workspace, drawing and keyboard behaviour, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure and retry paths, first-run guidance and the migration. |
+| Service (pytest) | 22 tests | Success, invalid parameters, empty results, unknown symbols, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
+
+The end-to-end suite drives the built app with the locally installed Google Chrome
+(`channel: 'chrome'`, no browser download) and seeds its own library, because the application
+bundles no data. The download paths stub the provider, so the suite does not depend on Yahoo
+Finance or on the local service being reachable.
 
 ## Hosting
 
@@ -248,9 +299,27 @@ and never touches the network.
 uses hash routing and stores data per browser profile, the same build can be served from any
 static host — the deployment linked at the top of this file runs exactly this bundle.
 
-## Scope and limitations
+The optional market-data service is deliberately not deployed. Its CORS whitelist includes the
+deployed origin, so a user's own local service can serve the hosted application.
 
-MarketLab is a research tool, and its edges are intentional:
+## Project status
+
+**Shipped and verified.** The features above, the full local test gate and a live deployment. The
+latest state: `npm run verify` green, 234 unit tests, 44 end-to-end tests, 22 service tests.
+
+**Planned, not started** — the account-free items selected from an internal review of what a
+charting terminal offers, in the order they are intended:
+
+1. A comparison-symbol overlay on a chart, reusing the existing shared-session alignment.
+2. Provider corporate-action (split/dividend) markers, honestly labelled as provider data.
+3. Watchlist context columns: last close, 30-session average volume and range.
+4. A global command palette for datasets, navigation and local symbol search.
+
+**Deliberately out of scope.** MarketLab is an analysis and research tool, not a trading
+terminal: no intraday or streaming quotes, no brokerage connectivity, no accounts or cloud sync,
+no short selling, no alerting and no replay. These are product decisions, not gaps.
+
+## Scope and limitations
 
 - Sessions are daily; there is no streaming quote feed, no tick data and no intraday timeframe.
 - Downloads depend on an unofficial provider and can fail; the app reports failures instead of
