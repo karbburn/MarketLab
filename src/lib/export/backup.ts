@@ -8,7 +8,8 @@ import type {
   Watchlist,
   Workspace,
 } from '../../domain/types';
-import { parseWorkspace } from '../workspace/schema';
+import { isDateString } from '../date';
+import { backtestConfigSchema, parseWorkspace, screenerDefinitionSchema } from '../workspace/schema';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -93,12 +94,36 @@ export function parseBackup(
     return kept;
   };
 
+  function isFiniteNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
+  function isBar(value: unknown): value is Bar {
+    if (!isRecord(value)) return false;
+    return (
+      isDateString(value.date) &&
+      isFiniteNumber(value.open) &&
+      value.open > 0 &&
+      isFiniteNumber(value.high) &&
+      value.high > 0 &&
+      isFiniteNumber(value.low) &&
+      value.low > 0 &&
+      isFiniteNumber(value.close) &&
+      value.close > 0 &&
+      (value.volume === null || (isFiniteNumber(value.volume) && value.volume >= 0))
+    );
+  }
+
   const isInstruments = (value: unknown): value is Instrument => isRecord(value) && typeof value.id === 'string' && typeof value.symbol === 'string';
   const isDatasets = (value: unknown): value is Dataset => isRecord(value) && typeof value.id === 'string' && typeof value.rowCount === 'number';
-  const isBars = (value: unknown): value is { id: string; bars: Bar[] } => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.bars);
+  const isBars = (value: unknown): value is { id: string; bars: Bar[] } =>
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    Array.isArray(value.bars) &&
+    value.bars.every((bar) => isBar(bar));
   const isWatchlists = (value: unknown): value is Watchlist => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.instrumentIds);
-  const isScreeners = (value: unknown): value is ScreenerDefinition => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.filters);
-  const isBacktests = (value: unknown): value is BacktestConfig => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.entry);
+  const isScreeners = (value: unknown): value is ScreenerDefinition => screenerDefinitionSchema.safeParse(value).success;
+  const isBacktests = (value: unknown): value is BacktestConfig => backtestConfigSchema.safeParse(value).success;
 
   const workspaces: Workspace[] = [];
   if (Array.isArray(input.workspaces)) {
@@ -274,6 +299,15 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
   }));
   overwritten += acceptedWatchlists.filter((watchlist) => baseIds.watchlists.has(watchlist.id)).length;
 
+  const acceptedScreeners = bundle.screeners.map((screener) => ({
+    ...screener,
+    universeDatasetIds: [...new Set(screener.universeDatasetIds.map((id) => datasetRemap.get(id) ?? id))],
+  }));
+  const acceptedBacktests = bundle.backtests.map((backtest) => {
+    const replacement = datasetRemap.get(backtest.datasetId);
+    return replacement ? { ...backtest, datasetId: replacement } : backtest;
+  });
+
   overwritten += bundle.screeners.filter((entry) => baseIds.screeners.has(entry.id)).length;
   overwritten += bundle.backtests.filter((entry) => baseIds.backtests.has(entry.id)).length;
 
@@ -289,8 +323,8 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     barsByDataset,
     workspaces: mergeById(base.workspaces, acceptedWorkspaces),
     watchlists: mergeById(base.watchlists, acceptedWatchlists),
-    screeners: mergeById(base.screeners, bundle.screeners),
-    backtests: mergeById(base.backtests, bundle.backtests),
+    screeners: mergeById(base.screeners, acceptedScreeners),
+    backtests: mergeById(base.backtests, acceptedBacktests),
     overwritten,
     duplicateDatasets,
     remappedPanels,

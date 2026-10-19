@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createBackup, mergeBackup, type BackupBundle } from '../../src/lib/export/backup';
-import type { Bar, Dataset, Instrument, Watchlist, Workspace } from '../../src/domain/types';
+import { createBackup, mergeBackup, parseBackup, type BackupBundle } from '../../src/lib/export/backup';
+import type { BacktestConfig, Bar, Dataset, Instrument, ScreenerDefinition, Watchlist, Workspace } from '../../src/domain/types';
 
 function instrument(id: string, symbol: string): Instrument {
   return { id, symbol, displayName: symbol, assetType: 'equity', currency: 'USD' };
@@ -67,6 +67,45 @@ function workspace(id: string, datasetId: string, instrumentId: string): Workspa
 
 function watchlist(id: string, instrumentIds: string[]): Watchlist {
   return { id, name: id, instrumentIds, createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' };
+}
+
+function screener(id: string, universeDatasetIds: string[]): ScreenerDefinition {
+  return {
+    id,
+    name: id,
+    schemaVersion: 1,
+    universeDatasetIds,
+    combinators: [],
+    filters: [],
+    cutoff: null,
+    sortBy: 'symbol',
+    sortDirection: 'asc',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+  };
+}
+
+function backtest(id: string, datasetId: string): BacktestConfig {
+  return {
+    id,
+    name: id,
+    datasetId,
+    startDate: null,
+    endDate: null,
+    initialCapital: 10_000,
+    positionSizePct: 100,
+    commissionBps: 0,
+    slippageBps: 0,
+    stopLossPct: null,
+    takeProfitPct: null,
+    entry: [],
+    exit: [],
+    entryLogic: 'AND',
+    exitLogic: 'OR',
+    execution: 'next-open',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+  };
 }
 
 const emptyBase = {
@@ -179,6 +218,33 @@ describe('mergeBackup', () => {
     expect(result.instruments.map((entry) => entry.id)).toEqual(['i-new']);
   });
 
+  it('remaps saved backtests and screeners when a dataset is deduplicated', () => {
+    const base = {
+      ...emptyBase,
+      instruments: [instrument('i-new', 'AAA')],
+      datasets: [dataset('d-new', 'i-new', 'hash-1')],
+      barsByDataset: { 'd-new': bars },
+    };
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i-old', 'AAA')],
+      datasets: [dataset('d-old', 'i-old', 'hash-1')],
+      bars: [{ id: 'd-old', bars }],
+      workspaces: [],
+      watchlists: [],
+      preferences: null,
+      screeners: [screener('s-old', ['d-old'])],
+      backtests: [backtest('bt-old', 'd-old')],
+    };
+
+    const result = mergeBackup(base, bundle);
+    expect(result.duplicateDatasets).toBe(1);
+    expect(result.screeners[0]?.universeDatasetIds).toEqual(['d-new']);
+    expect(result.backtests[0]?.datasetId).toBe('d-new');
+  });
+
   it('round-trips a backup that was just exported', () => {
     const entities = {
       instruments: [instrument('i1', 'AAA')],
@@ -196,5 +262,89 @@ describe('mergeBackup', () => {
     expect(result.datasets).toHaveLength(1);
     expect(result.workspaces[0]?.charts[0]?.datasetId).toBe('d1');
     expect(result.barsByDataset.d1).toHaveLength(2);
+  });
+});
+
+describe('parseBackup validation', () => {
+  function backupInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i1', 'AAA')],
+      datasets: [dataset('d1', 'i1', 'hash-1')],
+      bars: [{ id: 'd1', bars }],
+      workspaces: [],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+      ...overrides,
+    };
+  }
+
+  it('accepts a well-formed backup', () => {
+    const result = parseBackup(backupInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datasets).toHaveLength(1);
+    expect(result.value.bars).toHaveLength(1);
+  });
+
+  it('rejects a bars entry containing anything that is not a valid bar', () => {
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: [1, 2, 3] }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.skipped).toContain('bars:d1');
+  });
+
+  it('rejects an invalid bar inside an otherwise well-formed series', () => {
+    const invalidBars = [...bars, { date: '2024-02-31', open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }];
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: invalidBars }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.skipped).toContain('bars:d1');
+  });
+
+  it('rejects screeners that do not satisfy the screener schema', () => {
+    const incomplete = {
+      id: 's1',
+      name: 'incomplete',
+      schemaVersion: 1,
+      universeDatasetIds: ['d1'],
+      filters: [],
+      cutoff: null,
+      sortBy: 'symbol',
+      sortDirection: 'asc',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    };
+    const result = parseBackup(backupInput({ screeners: [incomplete] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.screeners).toEqual([]);
+    expect(result.skipped).toContain('screeners:s1');
+  });
+
+  it('rejects backtests that do not satisfy the backtest schema', () => {
+    const incomplete = {
+      ...backtest('bt1', 'd1'),
+      exit: undefined,
+    };
+    const result = parseBackup(backupInput({ backtests: [incomplete] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.backtests).toEqual([]);
+    expect(result.skipped).toContain('backtests:bt1');
+  });
+
+  it('accepts valid screeners and backtests', () => {
+    const result = parseBackup(backupInput({ screeners: [screener('s1', ['d1'])], backtests: [backtest('bt1', 'd1')] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.screeners).toHaveLength(1);
+    expect(result.value.backtests).toHaveLength(1);
   });
 });

@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { Workspace } from '../../domain/types';
+import { isDateString } from '../date';
+import { anchorsRequired } from '../drawings/geometry';
 
 export const WORKSPACE_SCHEMA_VERSION = 1;
 
-const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected an ISO session date (YYYY-MM-DD).');
+const dateString = z.string().refine((value) => isDateString(value), 'Expected a valid ISO session date (YYYY-MM-DD).');
 
 const drawingAnchorSchema = z.object({
   date: dateString,
@@ -18,16 +20,27 @@ const drawingStyleSchema = z.object({
   lineStyle: z.enum(['solid', 'dashed']).optional(),
 });
 
-const drawingSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum(['trendline', 'ray', 'horizontal-line', 'vertical-line', 'rectangle', 'text', 'price-range', 'fibonacci']),
-  anchors: z.array(drawingAnchorSchema).min(1),
-  text: z.string().optional(),
-  visible: z.boolean(),
-  locked: z.boolean(),
-  style: drawingStyleSchema,
-  levels: z.array(z.number().min(0).max(1)).optional(),
-});
+const drawingSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.enum(['trendline', 'ray', 'horizontal-line', 'vertical-line', 'rectangle', 'text', 'price-range', 'fibonacci']),
+    anchors: z.array(drawingAnchorSchema).min(1),
+    text: z.string().optional(),
+    visible: z.boolean(),
+    locked: z.boolean(),
+    style: drawingStyleSchema,
+    levels: z.array(z.number().min(0).max(1)).optional(),
+  })
+  .superRefine((drawing, ctx) => {
+    const required = anchorsRequired(drawing.type);
+    if (drawing.anchors.length < required) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['anchors'],
+        message: `${drawing.type} drawings require at least ${required} anchor(s).`,
+      });
+    }
+  });
 
 const indicatorStyleSchema = z.object({
   color: z.string().optional(),
@@ -225,10 +238,13 @@ export function parseWorkspace(input: unknown): { ok: true; value: Workspace } |
   let candidate = input;
   if (candidate && typeof candidate === 'object' && 'schemaVersion' in candidate) {
     const version = (candidate as { schemaVersion?: unknown }).schemaVersion;
-    if (typeof version === 'number' && version > WORKSPACE_SCHEMA_VERSION) {
+    if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
+      return { ok: false, error: 'The workspace schema version is missing or invalid.' };
+    }
+    if (version > WORKSPACE_SCHEMA_VERSION) {
       return { ok: false, error: `This workspace was saved by a newer version (schema ${version}).` };
     }
-    candidate = migrateWorkspace(candidate as Record<string, unknown>, typeof version === 'number' ? version : 0);
+    candidate = migrateWorkspace(candidate as Record<string, unknown>, version);
   }
   const parsed = workspaceSchema.safeParse(candidate);
   if (!parsed.success) {

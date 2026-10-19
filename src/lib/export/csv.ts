@@ -9,9 +9,13 @@ import { formatPrice } from '../format';
 
 function escapeCsv(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
-  const text = typeof value === 'number' ? String(value) : value;
-  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
+  // Numeric cells are written verbatim (including negative numbers) and are
+  // never treated as formulas. String cells that could be interpreted as a
+  // spreadsheet formula are prefixed with an apostrophe before quoting.
+  if (typeof value === 'number') return String(value);
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/[",\n\r]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
+  return safe;
 }
 
 export function toCsv(headers: readonly string[], rows: ReadonlyArray<ReadonlyArray<string | number | null | undefined>>): string {
