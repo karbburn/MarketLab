@@ -77,7 +77,7 @@ export function WorkspacesPage() {
     <div className="page">
       <Panel title="Workspaces" subtitle={`${state.workspaces.length} saved`} flush>
         {state.workspaces.length === 0 ? (
-          <EmptyState title="No workspaces" body="Import data and create a workspace from the chart page." />
+          <EmptyState title="No workspaces" body="Download or import market data, then create a workspace from the chart page." />
         ) : (
           <div className="table-wrap">
             <table className="data">
@@ -360,7 +360,7 @@ export function WorkspacesPage() {
                 }}
               >
                 <ArrowCounterClockwise size={13} aria-hidden />
-                Yes, reset to the bundled sample set
+                Yes, delete all local data
               </button>
               <button type="button" className="button ghost" onClick={() => setConfirmReset(false)}>
                 Cancel
@@ -370,7 +370,7 @@ export function WorkspacesPage() {
             <div className="row">
               <button type="button" className="button" onClick={() => setConfirmReset(true)}>
                 <FloppyDisk size={13} aria-hidden />
-                Reset local data to the bundled samples
+                Delete all local data
               </button>
               <span className="field-hint">Export a backup first if you want to keep anything.</span>
             </div>

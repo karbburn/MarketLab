@@ -32,6 +32,22 @@ export class MarketDataError extends Error {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * Turns any download failure into one actionable sentence for the UI.
+ *
+ * Shared by the single-symbol and bulk download paths so a failure reads the
+ * same way regardless of how many symbols were requested.
+ */
+export function describeMarketDataFailure(error: unknown): string {
+  if (error instanceof MarketDataError) return error.message;
+  return error instanceof Error ? error.message : 'The download failed for an unexpected reason.';
+}
+
+/** True only for a provider-throttling failure, which warrants a longer pause. */
+export function isMarketDataThrottled(error: unknown): boolean {
+  return error instanceof MarketDataError && error.kind === 'throttled';
+}
+
 export async function checkServiceHealth(baseUrl: string = DEFAULT_SERVICE_URL, signal?: AbortSignal): Promise<boolean> {
   try {
     const response = await request(`${baseUrl}/api/health`, signal ?? null);

@@ -6,6 +6,7 @@ import { activeWorkspace, datasetViews } from '../state/selectors';
 import { WORKSPACE_LAYOUTS, chartCountForLayout, duplicateChartConfig, withLayout } from '../state/defaults';
 import { formatPrice, formatSignedPercent } from '../lib/format';
 import { EmptyState, Panel, Segmented, Select, Tag, TextInput, Switch } from '../components/ui';
+import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { ChartPanel } from '../components/chart/ChartPanel';
 
 const LINK_PROPERTIES: Array<{ id: LinkProperty; label: string; note: string }> = [
@@ -105,12 +106,37 @@ export function ChartWorkspacePage() {
   if (!workspace) {
     return (
       <div className="page">
-        <Panel title="Chart workspace">
-          <EmptyState
+        {views.length === 0 ? (
+          <GetStartedPanel title="Nothing to chart yet" />
+        ) : (
+          <Panel
             title="No workspace"
-            body="Every workspace needs at least one dataset. Import a CSV from the top bar, or reset local data to restore the bundled samples."
-          />
-        </Panel>
+            subtitle="A workspace holds the panels, indicators and drawings for the series you chart."
+          >
+            <div className="stack">
+              <p className="panel-sub">
+                There is no workspace stored in this browser. Create one from the series you already have.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => {
+                    const first = views[0];
+                    if (!first?.instrument) return;
+                    void actions.createWorkspaceFromBase({
+                      name: 'Primary',
+                      datasetId: first.dataset.id,
+                      instrumentId: first.instrument.id,
+                    });
+                  }}
+                >
+                  Create a workspace
+                </button>
+              </div>
+            </div>
+          </Panel>
+        )}
       </div>
     );
   }
@@ -397,7 +423,7 @@ export function ChartWorkspacePage() {
                       <span className="mono">{view.instrument?.symbol ?? '--'}</span>
                       <span className="panel-sub">
                         {view.instrument?.displayName ?? view.dataset.name}
-                        {view.dataset.sourceKind === 'bundled-sample' && ' - synthetic sample'}
+                        {view.dataset.sourceKind === 'bundled-sample' && ' - legacy demo data'}
                         {view.dataset.sourceKind === 'provider-download' && ' - downloaded'}
                       </span>
                     </div>

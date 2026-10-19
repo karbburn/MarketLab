@@ -11,6 +11,7 @@ import { downloadTextFile } from '../lib/export/download';
 import { screenerToCsv } from '../lib/export/csv';
 import { formatPercent, formatPrice } from '../lib/format';
 import { EmptyState, Field, NumberInput, Panel, Select, Tag, TextInput } from '../components/ui';
+import { GetStartedPanel } from '../components/data/GetStartedPanel';
 
 const FIELD_OPTIONS: Array<{ value: ScreenerField; label: string; unit: 'pct' | 'level' | 'ratio' }> = [
   { value: 'return', label: 'Return over window', unit: 'pct' },
@@ -62,6 +63,16 @@ export function ScreenerPage() {
     setDraft(created);
     setSelectedSavedId('');
   };
+
+  // A screen needs a universe of stored series; without any, there is nothing
+  // to screen and the controls would only offer empty selections.
+  if (views.length === 0) {
+    return (
+      <div className="page">
+        <GetStartedPanel title="No market data to screen" />
+      </div>
+    );
+  }
 
   const updateDraft = (updater: (current: ScreenerDefinition) => ScreenerDefinition) => {
     setDraft((current) => (current ? updater(current) : current));

@@ -43,7 +43,14 @@ export interface Bar {
   volume: number | null;
 }
 
-/** Distinguishes where a dataset came from; drives every provenance label. */
+/**
+ * Distinguishes where a dataset came from; drives every provenance label.
+ *
+ * `bundled-sample` is a legacy value: the synthetic demo series it described
+ * are no longer created. It stays in the union so older stored data and older
+ * backups still validate, and the migration in `lib/migration` removes those
+ * records on load.
+ */
 export type SourceKind = 'bundled-sample' | 'user-csv' | 'provider-download';
 
 /** Open set of downloadable sources; the first is Yahoo Finance via yfinance. */

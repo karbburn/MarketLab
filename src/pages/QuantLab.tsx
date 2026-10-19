@@ -14,6 +14,7 @@ import { formatPercent, formatPrice } from '../lib/format';
 import { downloadTextFile } from '../lib/export/download';
 import { quantSummaryToCsv } from '../lib/export/csv';
 import { EmptyState, Field, Metric, NumberInput, Panel, Select, Tag } from '../components/ui';
+import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 
 const PALETTE = ['#3fb8a3', '#d8a13f', '#5b9bd5', '#e2586a', '#35c48d', '#8aa0b8'];
@@ -117,9 +118,7 @@ export function QuantLabPage() {
   if (views.length === 0) {
     return (
       <div className="page">
-        <Panel title="Quant lab">
-          <EmptyState title="No data" body="Import a CSV or reset local data to run risk and comparison analytics." />
-        </Panel>
+        <GetStartedPanel title="No market data to analyse" />
       </div>
     );
   }

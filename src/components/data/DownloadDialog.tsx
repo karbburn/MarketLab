@@ -11,7 +11,7 @@ import {
 } from '../../lib/marketdata/normalize';
 import {
   DEFAULT_SERVICE_URL,
-  MarketDataError,
+  describeMarketDataFailure,
   fetchProviderHistory,
   fetchProviderSearch,
 } from '../../lib/marketdata/client';
@@ -20,6 +20,13 @@ import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
 
 const SYMBOL_RE = /^[A-Za-z0-9._^=:-]{1,16}$/;
 const SEARCH_DEBOUNCE_MS = 400;
+
+/**
+ * Sensible starting points for a first download. They are suggestions, not a
+ * guarantee: the provider decides what exists, and a symbol that cannot be
+ * downloaded is reported as a failure rather than replaced by other data.
+ */
+const SUGGESTED_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'SPY', 'QQQ'];
 
 type Phase = 'idle' | 'downloading' | 'review';
 type Notice = { kind: 'error' | 'info'; text: string } | null;
@@ -154,7 +161,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
       setNotice(null);
     } catch (error) {
       setPhase('idle');
-      setNotice({ kind: 'error', text: describeFailure(error) });
+      setNotice({ kind: 'error', text: describeMarketDataFailure(error) });
     }
   };
 
@@ -234,6 +241,27 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
           <Field label="End (optional)" hint="Defaults to today.">
             <TextInput id="download-end" value={end} onChange={setEnd} placeholder="YYYY-MM-DD" />
           </Field>
+        </div>
+
+        <div className="row tight" style={{ marginTop: 10, alignItems: 'center' }}>
+          <span className="field-label">Suggested symbols</span>
+          {SUGGESTED_SYMBOLS.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              className="button ghost sm mono"
+              onClick={() => {
+                setSymbol(suggestion);
+                setSuggestions(null);
+              }}
+            >
+              {suggestion}
+            </button>
+          ))}
+          <span className="field-hint">
+            Availability depends on the provider. A symbol that cannot be downloaded fails with an explicit message; no
+            other series is substituted for it.
+          </span>
         </div>
 
         {suggestions !== null && (
@@ -321,7 +349,3 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function describeFailure(error: unknown): string {
-  if (error instanceof MarketDataError) return error.message;
-  return error instanceof Error ? error.message : 'The download failed for an unexpected reason.';
-}

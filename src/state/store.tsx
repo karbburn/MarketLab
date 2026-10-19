@@ -9,8 +9,8 @@ import type {
   Watchlist,
   Workspace,
 } from '../domain/types';
-import { buildSampleBundles } from '../data/sample';
 import { createPersistence, type PersistenceAdapter, type StoreName } from '../lib/persistence/db';
+import { describeCleanup, removeSyntheticData, type SyntheticCleanupResult } from '../lib/migration/remove-synthetic';
 import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
 import { createId } from '../lib/id';
 import { mergeBackup, type BackupBundle } from '../lib/export/backup';
@@ -47,7 +47,11 @@ export interface AppState {
 }
 
 export interface StoreActions {
-  importDataset(bundle: DatasetBundle): Promise<void>;
+  /**
+   * Stores a dataset (and its instrument/bars). `silent` suppresses the
+   * per-dataset toast, which a bulk download replaces with its own summary.
+   */
+  importDataset(bundle: DatasetBundle, options?: { silent?: boolean }): Promise<void>;
   deleteDataset(datasetId: string): Promise<void>;
   createWorkspaceFromBase(input: { name: string; datasetId: string; instrumentId: string; layout?: Workspace['layout'] }): Promise<string | null>;
   saveWorkspace(workspace: Workspace): Promise<void>;
@@ -78,7 +82,7 @@ const StoreContext = createContext<StoreValue | null>(null);
 
 type PreferencesRecord = UserPreferences & { id: string };
 type BarsRecord = { id: string; bars: Bar[] };
-type SettingsRecord = { id: string; schemaVersion: number; seededAt: string };
+type SettingsRecord = { id: string; schemaVersion: number; installedAt: string; syntheticDataRemovedAt?: string | null };
 
 const EMPTY_STATE: AppState = {
   status: 'loading',
@@ -126,7 +130,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return next;
   };
 
-  // Load everything once, then seed bundled samples on first run.
+  const notify = (kind: ToastKind, message: string) => {
+    const toast: Toast = { id: createId('toast'), kind, message };
+    setState((previous) => ({ ...previous, toasts: [...previous.toasts, toast] }));
+    setTimeout(() => {
+      setState((previous) => ({ ...previous, toasts: previous.toasts.filter((entry) => entry.id !== toast.id) }));
+    }, kind === 'error' ? 9000 : 5000);
+  };
+
+  // Load everything once, then remove the bundled demo series from any browser
+  // that still holds them. Nothing is seeded: the library starts empty and
+  // fills from real downloads or CSV imports.
   useEffect(() => {
     if (!adapter) return;
     let cancelled = false;
@@ -147,55 +161,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const barsByDataset: Record<string, Bar[]> = {};
       for (const record of barRecords) barsByDataset[record.id] = record.bars;
 
-      const preferences = preferencesRecords[0]
+      let preferences = preferencesRecords[0]
         ? stripPreferenceId(preferencesRecords[0])
         : DEFAULT_PREFERENCES;
 
-      const seeded = settings.some((record) => record.id === 'app');
-      if (instruments.length === 0 && !seeded) {
-        const seededData = await seedSamples(adapter);
+      // Remove the bundled demo series, if an earlier build left them behind.
+      const cleanup = removeSyntheticData({ instruments, datasets, workspaces, watchlists, screeners, backtests });
+      if (cleanup.changed) {
+        if (preferences.defaultWorkspaceId && cleanup.removedWorkspaceIds.includes(preferences.defaultWorkspaceId)) {
+          preferences = { ...preferences, defaultWorkspaceId: null };
+          await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
+        }
+        await persistCleanup(adapter, cleanup);
         await adapter.put<SettingsRecord>('settings', {
           id: 'app',
           schemaVersion: APP_SCHEMA_VERSION,
-          seededAt: new Date().toISOString(),
+          installedAt: installedAt(settings),
+          syntheticDataRemovedAt: new Date().toISOString(),
         });
-        if (cancelled) return;
-        // Set the attribute before the first child render so the charts read
-        // the persisted palette on mount.
-        applyThemeAttribute(preferences.theme);
-        setState((previous) => ({
-          ...previous,
-          status: 'ready',
-          adapterKind: adapter.kind,
-          instruments: seededData.instruments,
-          datasets: seededData.datasets,
-          barsByDataset: seededData.barsByDataset,
-          workspaces: seededData.workspaces,
-          activeWorkspaceId: resolveActiveWorkspaceId(seededData.workspaces, preferences),
-          watchlists: seededData.watchlists,
-          preferences,
-          screeners,
-          backtests,
-        }));
-        return;
+      } else if (!settings.some((record) => record.id === 'app')) {
+        await adapter.put<SettingsRecord>('settings', {
+          id: 'app',
+          schemaVersion: APP_SCHEMA_VERSION,
+          installedAt: new Date().toISOString(),
+          syntheticDataRemovedAt: null,
+        });
       }
+      if (cancelled) return;
 
+      const nextInstruments = cleanup.changed ? cleanup.instruments : instruments;
+      const nextDatasets = cleanup.changed ? cleanup.datasets : datasets;
+      const nextWorkspaces = cleanup.changed ? cleanup.workspaces : workspaces;
+      const nextWatchlists = cleanup.changed ? cleanup.watchlists : watchlists;
+      const nextScreeners = cleanup.changed ? cleanup.screeners : screeners;
+      const nextBacktests = cleanup.changed ? cleanup.backtests : backtests;
+
+      // Set the attribute before the first child render so the charts read
+      // the persisted palette on mount.
       applyThemeAttribute(preferences.theme);
       setState((previous) => ({
         ...previous,
         status: 'ready',
         adapterKind: adapter.kind,
-        instruments,
-        datasets,
-        barsByDataset,
-        workspaces,
-        activeWorkspaceId: resolveActiveWorkspaceId(workspaces, preferences),
-        watchlists,
+        instruments: nextInstruments,
+        datasets: nextDatasets,
+        barsByDataset: cleanup.changed ? keepBars(barsByDataset, cleanup.removedDatasetIds) : barsByDataset,
+        workspaces: nextWorkspaces,
+        activeWorkspaceId: resolveActiveWorkspaceId(nextWorkspaces, preferences),
+        watchlists: nextWatchlists,
         preferences,
-        screeners,
-        backtests,
+        screeners: nextScreeners,
+        backtests: nextBacktests,
         loadError: null,
       }));
+      if (cleanup.changed) notify('info', describeCleanup(cleanup));
     })().catch((error: unknown) => {
       if (cancelled) return;
       // Keep the app usable, but never present a failed read as an empty library.
@@ -216,20 +235,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     applyThemeAttribute(state.preferences.theme);
   }, [state.preferences.theme]);
 
-  const notify = (kind: ToastKind, message: string) => {
-    const toast: Toast = { id: createId('toast'), kind, message };
-    setState((previous) => ({ ...previous, toasts: [...previous.toasts, toast] }));
-    setTimeout(() => {
-      setState((previous) => ({ ...previous, toasts: previous.toasts.filter((entry) => entry.id !== toast.id) }));
-    }, kind === 'error' ? 9000 : 5000);
-  };
-
   const actions: StoreActions = {
-    async importDataset(bundle) {
+    async importDataset(bundle, options) {
       if (!adapter) return;
       await adapter.put('instruments', bundle.instrument);
       await adapter.put('datasets', bundle.dataset);
       await adapter.put<BarsRecord>('bars', { id: bundle.dataset.id, bars: bundle.bars });
+
+      // The library starts empty, so the first real dataset gets a workspace
+      // of its own; otherwise the chart page would have nothing to render.
+      let nextActiveWorkspaceId = stateRef.current.activeWorkspaceId;
+      let nextWorkspaces = workspacesRef.current;
+      if (nextWorkspaces.length === 0) {
+        const preferences = preferencesRef.current;
+        const workspace = createWorkspace({
+          name: 'Primary',
+          layout: 'single',
+          base: {
+            instrumentId: bundle.instrument.id,
+            datasetId: bundle.dataset.id,
+            showVolume: preferences.showVolumeByDefault,
+            chartType: preferences.defaultChartType,
+            timeframe: preferences.defaultTimeframe,
+          },
+        });
+        await adapter.put('workspaces', workspace);
+        nextWorkspaces = [workspace];
+        workspacesRef.current = nextWorkspaces;
+        nextActiveWorkspaceId = workspace.id;
+      }
+
       setState((previous) => {
         const instruments = upsertById(previous.instruments, bundle.instrument);
         const datasets = upsertById(previous.datasets, bundle.dataset);
@@ -238,9 +273,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           instruments,
           datasets,
           barsByDataset: { ...previous.barsByDataset, [bundle.dataset.id]: bundle.bars },
+          workspaces: nextWorkspaces,
+          activeWorkspaceId: nextActiveWorkspaceId,
         };
       });
-      notify('success', `Imported ${bundle.dataset.name} (${bundle.bars.length} sessions).`);
+      if (!options?.silent) {
+        notify('success', `Imported ${bundle.dataset.name} (${bundle.bars.length} sessions).`);
+      }
     },
 
     async deleteDataset(datasetId) {
@@ -507,23 +546,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'] as StoreName[]) {
         await adapter.clear(store);
       }
-      const seededData = await seedSamples(adapter);
-      await adapter.put<SettingsRecord>('settings', { id: 'app', schemaVersion: APP_SCHEMA_VERSION, seededAt: new Date().toISOString() });
-      workspacesRef.current = seededData.workspaces;
+      await adapter.put<SettingsRecord>('settings', {
+        id: 'app',
+        schemaVersion: APP_SCHEMA_VERSION,
+        installedAt: new Date().toISOString(),
+        syntheticDataRemovedAt: null,
+      });
+      workspacesRef.current = [];
       setState((previous) => ({
         ...EMPTY_STATE,
         status: 'ready',
         adapterKind: adapter.kind,
-        instruments: seededData.instruments,
-        datasets: seededData.datasets,
-        barsByDataset: seededData.barsByDataset,
-        workspaces: seededData.workspaces,
-        activeWorkspaceId: seededData.workspaces[0]?.id ?? null,
-        watchlists: seededData.watchlists,
         preferences: previous.preferences,
         toasts: previous.toasts,
       }));
-      notify('success', 'Local data reset to the bundled sample set.');
+      notify('info', 'All local data was deleted.');
     },
 
     notify,
@@ -578,42 +615,41 @@ function upsertById<T extends { id: string }>(list: readonly T[], value: T): T[]
   return next;
 }
 
-async function seedSamples(adapter: PersistenceAdapter): Promise<{
-  instruments: Instrument[];
-  datasets: Dataset[];
-  barsByDataset: Record<string, Bar[]>;
-  workspaces: Workspace[];
-  watchlists: Watchlist[];
-}> {
-  const bundles = buildSampleBundles();
-  const instruments = bundles.map((bundle) => bundle.instrument);
-  const datasets = bundles.map((bundle) => bundle.dataset);
-  const barsByDataset: Record<string, Bar[]> = {};
-  for (const bundle of bundles) barsByDataset[bundle.dataset.id] = bundle.bars;
-
-  await adapter.putMany('instruments', instruments);
-  await adapter.putMany('datasets', datasets);
-  await adapter.putMany<BarsRecord>(
-    'bars',
-    bundles.map((bundle) => ({ id: bundle.dataset.id, bars: bundle.bars })),
-  );
-
-  const first = bundles[0];
-  const workspaces: Workspace[] = [];
-  if (first) {
-    workspaces.push(
-      createWorkspace({
-        name: 'Primary',
-        layout: 'single',
-        base: { instrumentId: first.instrument.id, datasetId: first.dataset.id, showVolume: true },
-      }),
-    );
+/** Drops the bars of the removed datasets and keeps every other series. */
+function keepBars(barsByDataset: Record<string, Bar[]>, removedDatasetIds: readonly string[]): Record<string, Bar[]> {
+  const removed = new Set(removedDatasetIds);
+  const next: Record<string, Bar[]> = {};
+  for (const [id, bars] of Object.entries(barsByDataset)) {
+    if (!removed.has(id)) next[id] = bars;
   }
-  const watchlist = createWatchlist('Demo watchlist', instruments.map((instrument) => instrument.id));
-  await adapter.putMany('workspaces', workspaces);
-  await adapter.putMany('watchlists', [watchlist]);
+  return next;
+}
 
-  return { instruments, datasets, barsByDataset, workspaces, watchlists: [watchlist] };
+/** The install timestamp of an existing app record, or now for a fresh one. */
+function installedAt(settings: readonly SettingsRecord[]): string {
+  const existing = settings.find((record) => record.id === 'app');
+  const value = (existing as { installedAt?: string; seededAt?: string } | undefined)?.installedAt
+    ?? (existing as { seededAt?: string } | undefined)?.seededAt;
+  return value ?? new Date().toISOString();
+}
+
+/**
+ * Writes the removal of the bundled demo series to storage. Only the records
+ * that the cleanup touched are removed or rewritten; imported, downloaded and
+ * user-created records are left exactly as they are.
+ */
+async function persistCleanup(adapter: PersistenceAdapter, cleanup: SyntheticCleanupResult): Promise<void> {
+  for (const datasetId of cleanup.removedDatasetIds) {
+    await adapter.remove('datasets', datasetId);
+    await adapter.remove('bars', datasetId);
+  }
+  for (const instrumentId of cleanup.removedInstrumentIds) await adapter.remove('instruments', instrumentId);
+  for (const workspaceId of cleanup.removedWorkspaceIds) await adapter.remove('workspaces', workspaceId);
+  for (const watchlistId of cleanup.removedWatchlistIds) await adapter.remove('watchlists', watchlistId);
+  for (const backtestId of cleanup.removedBacktestIds) await adapter.remove('backtests', backtestId);
+  await adapter.putMany('workspaces', cleanup.workspaces);
+  await adapter.putMany('watchlists', cleanup.watchlists);
+  await adapter.putMany('screeners', cleanup.screeners);
 }
 
 export function useStore(): StoreValue {

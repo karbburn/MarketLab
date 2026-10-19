@@ -10,6 +10,7 @@ import { downloadTextFile } from '../lib/export/download';
 import { equityToCsv, tradesToCsv } from '../lib/export/csv';
 import { formatPercent, formatPrice, formatSignedPercent, formatSignedPrice } from '../lib/format';
 import { EmptyState, Field, Metric, NumberInput, Panel, Select, Tag, TextInput } from '../components/ui';
+import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 
 const RULE_FIELDS: Array<{ value: RuleField; label: string; needsSecondary: boolean; implicitThreshold: boolean }> = [
@@ -105,9 +106,7 @@ export function BacktestPage() {
   if (views.length === 0) {
     return (
       <div className="page">
-        <Panel title="Backtest">
-          <EmptyState title="No data" body="Import a CSV or reset local data to simulate a strategy." />
-        </Panel>
+        <GetStartedPanel title="No market data to simulate" />
       </div>
     );
   }

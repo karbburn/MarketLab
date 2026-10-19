@@ -142,6 +142,37 @@ export function TextInput({
   );
 }
 
+export function TextArea({
+  value,
+  onChange,
+  placeholder,
+  id,
+  rows = 4,
+  disabled,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  id?: string;
+  rows?: number;
+  disabled?: boolean;
+  ariaLabel?: string;
+}) {
+  return (
+    <textarea
+      id={id}
+      aria-label={ariaLabel}
+      className="input"
+      rows={rows}
+      value={value}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value)}
+    />
+  );
+}
+
 export function NumberInput({
   value,
   onChange,

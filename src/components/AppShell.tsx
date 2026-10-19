@@ -10,6 +10,7 @@ import {
   Sun,
   Moon,
   UploadSimple,
+  CloudArrowDown,
   List,
   X,
 } from '@phosphor-icons/react';
@@ -18,6 +19,9 @@ import { Toaster } from './ui';
 import { datasetViews, hasSyntheticData } from '../state/selectors';
 import { useEffect, useState } from 'react';
 import { ImportDialog } from './data/ImportDialog';
+import { DownloadDialog } from './data/DownloadDialog';
+import { BulkDownloadDialog } from './data/BulkDownloadDialog';
+import { BULK_DOWNLOAD_DATA_EVENT, DOWNLOAD_DATA_EVENT, IMPORT_DATA_EVENT } from '../lib/ui-events';
 
 interface NavEntry {
   to: string;
@@ -65,11 +69,29 @@ export function AppShell() {
   const { state, actions } = useStore();
   const location = useLocation();
   const [importOpen, setImportOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
 
   const views = datasetViews(state);
   const synthetic = hasSyntheticData(state);
   const title = TITLES[location.pathname] ?? 'MarketLab';
+
+  // The pages inside the shell ask for the import and download dialogs
+  // through the event bus, so the dialogs can live in one place.
+  useEffect(() => {
+    const onImport = () => setImportOpen(true);
+    const onDownload = () => setDownloadOpen(true);
+    const onBulkDownload = () => setBulkDownloadOpen(true);
+    window.addEventListener(IMPORT_DATA_EVENT, onImport);
+    window.addEventListener(DOWNLOAD_DATA_EVENT, onDownload);
+    window.addEventListener(BULK_DOWNLOAD_DATA_EVENT, onBulkDownload);
+    return () => {
+      window.removeEventListener(IMPORT_DATA_EVENT, onImport);
+      window.removeEventListener(DOWNLOAD_DATA_EVENT, onDownload);
+      window.removeEventListener(BULK_DOWNLOAD_DATA_EVENT, onBulkDownload);
+    };
+  }, []);
 
   useEffect(() => {
     if (!navOpen) return;
@@ -128,7 +150,7 @@ export function AppShell() {
           </div>
           {synthetic && (
             <div style={{ padding: '0 8px 6px' }}>
-              <span className="tag warn">Synthetic sample</span>
+              <span className="tag warn">Legacy demo data</span>
             </div>
           )}
         </div>
@@ -155,6 +177,10 @@ export function AppShell() {
             </span>
           )}
           {state.adapterKind === 'memory' && <span className="tag warn">Storage unavailable: changes will not persist</span>}
+          <button type="button" className="button ghost sm" aria-label="Download data" onClick={() => setDownloadOpen(true)}>
+            <CloudArrowDown size={13} weight="bold" aria-hidden />
+            <span className="topbar-action-label">Download data</span>
+          </button>
           <button type="button" className="button sm" aria-label="Import data" onClick={() => setImportOpen(true)}>
             <UploadSimple size={13} weight="bold" aria-hidden />
             <span className="topbar-action-label">Import data</span>
@@ -177,6 +203,8 @@ export function AppShell() {
 
       <Toaster />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <DownloadDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
+      <BulkDownloadDialog open={bulkDownloadOpen} onClose={() => setBulkDownloadOpen(false)} />
     </div>
   );
 }

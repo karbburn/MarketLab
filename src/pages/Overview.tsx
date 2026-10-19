@@ -1,11 +1,12 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, ChartLineUp, Database, Flask, FunnelSimple, PlayCircle } from '@phosphor-icons/react';
+import { ArrowRight, ChartLineUp, Flask, FunnelSimple, PlayCircle } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { datasetViews, sessionCount } from '../state/selectors';
 import { summarise } from '../lib/quant/metrics';
 import { formatPercent, formatPrice, formatSignedPercent } from '../lib/format';
 import { Metric, Panel, Tag } from '../components/ui';
+import { GetStartedPanel } from '../components/data/GetStartedPanel';
 
 export function OverviewPage() {
   const { state } = useStore();
@@ -37,54 +38,55 @@ export function OverviewPage() {
     return row.summary.lastDate > latest ? row.summary.lastDate : latest;
   }, null);
   const synthetic = rows.some((row) => row.view.dataset.sourceKind === 'bundled-sample');
+  const isEmpty = rows.length === 0;
 
   return (
     <div className="page">
-      <div className="grid-4">
-        <Panel title="Datasets">
-          <Metric label="Stored locally" value={String(state.datasets.length)} note={`${state.instruments.length} instruments`} />
-        </Panel>
-        <Panel title="Sessions">
-          <Metric label="Total rows" value={totalSessions.toLocaleString('en-US')} note={`${sessions.toLocaleString('en-US')} in memory`} />
-        </Panel>
-        <Panel title="History span">
-          <Metric label="Coverage" value={firstDate && lastDate ? `${firstDate.slice(0, 7)} to ${lastDate.slice(0, 7)}` : '--'} note={firstDate && lastDate ? `${firstDate} through ${lastDate}` : 'No data loaded'} />
-        </Panel>
-        <Panel title="Workspaces">
-          <Metric label="Saved" value={String(state.workspaces.length)} note={`${state.watchlists.length} watchlist(s)`} />
-        </Panel>
-      </div>
-
-      {synthetic && (
-        <div className="panel">
-          <div className="panel-body row">
-            <Tag tone="warn">Synthetic data</Tag>
-            <span className="panel-sub">
-              The bundled demo series are generated locally from a fixed seed. They are not real market data and are not
-              connected to any live feed. Import your own CSV from Data to replace or extend them.
-            </span>
+      {isEmpty ? (
+        <GetStartedPanel title="Welcome to MarketLab" />
+      ) : (
+        <>
+          <div className="grid-4">
+            <Panel title="Datasets">
+              <Metric label="Stored locally" value={String(state.datasets.length)} note={`${state.instruments.length} instruments`} />
+            </Panel>
+            <Panel title="Sessions">
+              <Metric label="Total rows" value={totalSessions.toLocaleString('en-US')} note={`${sessions.toLocaleString('en-US')} in memory`} />
+            </Panel>
+            <Panel title="History span">
+              <Metric label="Coverage" value={firstDate && lastDate ? `${firstDate.slice(0, 7)} to ${lastDate.slice(0, 7)}` : '--'} note={firstDate && lastDate ? `${firstDate} through ${lastDate}` : 'No data loaded'} />
+            </Panel>
+            <Panel title="Workspaces">
+              <Metric label="Saved" value={String(state.workspaces.length)} note={`${state.watchlists.length} watchlist(s)`} />
+            </Panel>
           </div>
-        </div>
+
+          {synthetic && (
+            <div className="panel">
+              <div className="panel-body row">
+                <Tag tone="warn">Legacy demo data</Tag>
+                <span className="panel-sub">
+                  These series came from an earlier build of the application. They are generated locally from a fixed seed,
+                  are not real market data and are not connected to any live feed.
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      <Panel
-        title="Instruments in view"
-        subtitle="Metrics are computed from the stored daily bars, not from a live feed"
-        flush
-        actions={
-          <Link className="button sm" to="/chart">
-            Open chart workspace
-            <ArrowRight size={13} aria-hidden />
-          </Link>
-        }
-      >
-        {rows.length === 0 ? (
-          <div className="empty">
-            <Database size={22} aria-hidden />
-            <span className="empty-title">No datasets</span>
-            <span className="empty-body">Import a CSV or reset local data to restore the bundled sample set.</span>
-          </div>
-        ) : (
+      {!isEmpty && (
+        <Panel
+          title="Instruments in view"
+          subtitle="Metrics are computed from the stored daily bars, not from a live feed"
+          flush
+          actions={
+            <Link className="button sm" to="/chart">
+              Open chart workspace
+              <ArrowRight size={13} aria-hidden />
+            </Link>
+          }
+        >
           <div className="table-wrap">
             <table className="data">
               <thead>
@@ -125,8 +127,8 @@ export function OverviewPage() {
               </tbody>
             </table>
           </div>
-        )}
-      </Panel>
+        </Panel>
+      )}
 
       <div className="grid-3">
         <Panel title="Chart workspace" subtitle="Multi-panel charts with linked symbol, timeframe and range">
