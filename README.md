@@ -61,8 +61,9 @@ yet (warm-up periods) are empty rather than zero.
 
 ### Data
 
-- **Download real history** — one symbol at a time, or a whole list in one batch. Every symbol is
-  reported on its own, so one unavailable ticker never discards the rest of the run.
+- **Download real history** — one symbol at a time, or a whole list in one batch of up to 50. Every
+  symbol is reported on its own, so one unavailable ticker never discards the rest of the run, and
+  the failed symbols can be retried without repeating the whole list.
 - **CSV import** with inferred column roles you can override, a validation report, and rejected
   rows listed with reasons (see [Importing your own data](#importing-your-own-data)).
 - **Weekly and monthly views** aggregated from daily bars, always labelled as aggregated. Daily
@@ -127,8 +128,9 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8787
 ```
 
 Then use **Data → Download market data** for a single symbol, or **Data → Download many symbols**
-for a batch — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the batch dialog
-accepts any list you paste in. Read
+for a batch of up to 50 — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the
+batch dialog accepts any list you paste in. Symbols are de-duplicated and reported one by one;
+if some fail, **Retry failed** re-requests only those. Read
 [`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the error
 model and the setup details.
 
@@ -236,9 +238,9 @@ model, the download batch queue, backup parsing and migration, the removal of th
 series, and export formatting. The end-to-end suite drives the built app with the locally
 installed Google Chrome (`channel: 'chrome'`, no browser download) and covers the shell, the
 chart workspace, drawing and keyboard behaviour, CSV import and rejection paths, the research
-screens, settings, backup export/restore, the download success and failure paths, and the
-first-run and migration behaviour. The service test suite is deterministic and never touches the
-network.
+screens, settings, backup export/restore, the single and batch download success, failure and
+retry paths, and the first-run and migration behaviour. The service test suite is deterministic
+and never touches the network.
 
 ## Hosting
 
