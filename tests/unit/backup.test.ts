@@ -193,6 +193,37 @@ describe('mergeBackup', () => {
     expect(result.instruments.map((entry) => entry.id).sort()).toEqual(['i-new', 'i-old']);
   });
 
+  it('keeps identical bars under a different symbol instead of treating them as one series', () => {
+    // Same OHLCV, different instrument: content alone is not identity.
+    const base = {
+      ...emptyBase,
+      instruments: [instrument('i-aaa', 'AAA')],
+      datasets: [dataset('d-aaa', 'i-aaa', 'hash-1')],
+      barsByDataset: { 'd-aaa': bars },
+    };
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i-bbb', 'BBB')],
+      datasets: [dataset('d-bbb', 'i-bbb', 'hash-1')],
+      bars: [{ id: 'd-bbb', bars }],
+      workspaces: [workspace('ws-bbb', 'd-bbb', 'i-bbb')],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(base, bundle);
+
+    expect(result.duplicateDatasets).toBe(0);
+    expect(result.datasets.map((entry) => entry.id).sort()).toEqual(['d-aaa', 'd-bbb']);
+    expect(result.workspaces[0]?.charts[0]?.datasetId).toBe('d-bbb');
+    expect(result.workspaces[0]?.charts[0]?.instrumentId).toBe('i-bbb');
+    expect(result.instruments.map((entry) => entry.id).sort()).toEqual(['i-aaa', 'i-bbb']);
+  });
+
   it('remaps comparison overlays through the same duplicate-series resolution', () => {
     const base = {
       ...emptyBase,

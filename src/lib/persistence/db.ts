@@ -8,6 +8,8 @@
  * that their work will not survive a reload.
  */
 
+import { createCrossTabChannel } from './cross-tab';
+
 export type StoreName =
   | 'instruments'
   | 'datasets'
@@ -35,6 +37,27 @@ export interface Identified {
   id: string;
 }
 
+/**
+ * The operations available inside one adapter transaction. Reads see writes
+ * made earlier in the same transaction; nothing is durable until the callback
+ * passed to `transaction` resolves.
+ */
+export interface PersistenceTransaction {
+  list<T>(store: StoreName): Promise<T[]>;
+  get<T>(store: StoreName, id: string): Promise<T | undefined>;
+  put<T extends Identified>(store: StoreName, value: T): Promise<void>;
+  putMany<T extends Identified>(store: StoreName, values: readonly T[]): Promise<void>;
+  remove(store: StoreName, id: string): Promise<void>;
+  clear(store: StoreName): Promise<void>;
+}
+
+export interface TransactionOptions {
+  /** Read-only transactions cannot write and are not broadcast to other tabs. */
+  mode?: 'readonly' | 'readwrite';
+  /** Set false for internal re-reads so they do not echo around other tabs. */
+  notify?: boolean;
+}
+
 export interface PersistenceAdapter {
   readonly kind: 'indexeddb' | 'memory';
   list<T>(store: StoreName): Promise<T[]>;
@@ -43,6 +66,17 @@ export interface PersistenceAdapter {
   putMany<T extends Identified>(store: StoreName, values: readonly T[]): Promise<void>;
   remove(store: StoreName, id: string): Promise<void>;
   clear(store: StoreName): Promise<void>;
+  /**
+   * Runs `operation` atomically over `stores`. A throw rolls every write back.
+   * IndexedDB uses one native transaction; the memory adapter stages copies.
+   */
+  transaction<T>(
+    stores: readonly StoreName[],
+    operation: (tx: PersistenceTransaction) => Promise<T> | T,
+    options?: TransactionOptions,
+  ): Promise<T>;
+  /** Fires after a committed write from another tab. Absent on the memory adapter. */
+  subscribe?(listener: () => void): () => void;
 }
 
 const DB_NAME = 'marketlab';
@@ -80,6 +114,44 @@ export function createMemoryAdapter(): PersistenceAdapter {
     async clear(store: StoreName): Promise<void> {
       table(store).clear();
     },
+    async transaction<T>(
+      stores: readonly StoreName[],
+      operation: (tx: PersistenceTransaction) => Promise<T> | T,
+    ): Promise<T> {
+      // Stage complete copies of the touched tables. A thrown operation simply
+      // drops the staged maps, so earlier writes are never visible.
+      const staged = new Map<StoreName, Map<string, unknown>>();
+      for (const store of new Set(stores)) staged.set(store, new Map(table(store)));
+      const stagedTable = (store: StoreName) => {
+        const found = staged.get(store);
+        if (!found) throw new Error(`Store "${store}" is not part of this transaction.`);
+        return found;
+      };
+      const tx: PersistenceTransaction = {
+        async list<U>(store: StoreName): Promise<U[]> {
+          return [...stagedTable(store).values()].map((value) => clone(value as U));
+        },
+        async get<U>(store: StoreName, id: string): Promise<U | undefined> {
+          const value = stagedTable(store).get(id);
+          return value === undefined ? undefined : clone(value as U);
+        },
+        async put<U extends Identified>(store: StoreName, value: U): Promise<void> {
+          stagedTable(store).set(value.id, clone(value));
+        },
+        async putMany<U extends Identified>(store: StoreName, values: readonly U[]): Promise<void> {
+          for (const value of values) stagedTable(store).set(value.id, clone(value));
+        },
+        async remove(store: StoreName, id: string): Promise<void> {
+          stagedTable(store).delete(id);
+        },
+        async clear(store: StoreName): Promise<void> {
+          stagedTable(store).clear();
+        },
+      };
+      const result = await operation(tx);
+      for (const [store, records] of staged) tables.set(store, records);
+      return result;
+    },
   };
 }
 
@@ -107,12 +179,48 @@ function openDatabase(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id' });
       }
     };
-    open.onsuccess = () => resolve(open.result);
+    open.onsuccess = () => {
+      const db = open.result;
+      // Another tab is upgrading the schema. Keeping this connection open would
+      // block it; close and reload so this tab reads the new version instead of
+      // continuing on a stale snapshot.
+      db.onversionchange = () => {
+        db.close();
+        if (typeof window !== 'undefined') window.location.reload();
+      };
+      resolve(db);
+    };
     open.onerror = () => reject(open.error ?? new Error('Could not open IndexedDB'));
   });
 }
 
+function indexedTransaction(tx: IDBTransaction): PersistenceTransaction {
+  return {
+    async list<T>(store: StoreName): Promise<T[]> {
+      return request<T[]>(tx.objectStore(store).getAll());
+    },
+    async get<T>(store: StoreName, id: string): Promise<T | undefined> {
+      return (await request<T | undefined>(tx.objectStore(store).get(id))) ?? undefined;
+    },
+    async put<T extends Identified>(store: StoreName, value: T): Promise<void> {
+      await request(tx.objectStore(store).put(value));
+    },
+    async putMany<T extends Identified>(store: StoreName, values: readonly T[]): Promise<void> {
+      const objectStore = tx.objectStore(store);
+      for (const value of values) await request(objectStore.put(value));
+    },
+    async remove(store: StoreName, id: string): Promise<void> {
+      await request(tx.objectStore(store).delete(id));
+    },
+    async clear(store: StoreName): Promise<void> {
+      await request(tx.objectStore(store).clear());
+    },
+  };
+}
+
 export function createIndexedDbAdapter(db: IDBDatabase): PersistenceAdapter {
+  const channel = createCrossTabChannel('marketlab');
+  const publish = () => channel.publish();
   return {
     kind: 'indexeddb',
     async list<T>(store: StoreName): Promise<T[]> {
@@ -128,6 +236,7 @@ export function createIndexedDbAdapter(db: IDBDatabase): PersistenceAdapter {
       const tx = db.transaction(store, 'readwrite');
       tx.objectStore(store).put(value);
       await transactionDone(tx);
+      publish();
     },
     async putMany<T extends Identified>(store: StoreName, values: readonly T[]): Promise<void> {
       if (values.length === 0) return;
@@ -135,16 +244,49 @@ export function createIndexedDbAdapter(db: IDBDatabase): PersistenceAdapter {
       const objectStore = tx.objectStore(store);
       for (const value of values) objectStore.put(value);
       await transactionDone(tx);
+      publish();
     },
     async remove(store: StoreName, id: string): Promise<void> {
       const tx = db.transaction(store, 'readwrite');
       tx.objectStore(store).delete(id);
       await transactionDone(tx);
+      publish();
     },
     async clear(store: StoreName): Promise<void> {
       const tx = db.transaction(store, 'readwrite');
       tx.objectStore(store).clear();
       await transactionDone(tx);
+      publish();
+    },
+    async transaction<T>(
+      stores: readonly StoreName[],
+      operation: (tx: PersistenceTransaction) => Promise<T> | T,
+      options?: TransactionOptions,
+    ): Promise<T> {
+      const unique = [...new Set(stores)];
+      if (unique.length === 0) throw new Error('A persistence transaction needs at least one store.');
+      const mode = options?.mode ?? 'readwrite';
+      const tx = db.transaction(unique, mode);
+      const done = transactionDone(tx);
+      // Attach a handler now so an abort triggered by the operation is not an
+      // unhandled rejection before the `await done` below.
+      void done.catch(() => undefined);
+      try {
+        const result = await operation(indexedTransaction(tx));
+        await done;
+        if (mode === 'readwrite' && options?.notify !== false) publish();
+        return result;
+      } catch (error) {
+        try {
+          tx.abort();
+        } catch {
+          // The transaction already aborted or completed; the original error wins.
+        }
+        throw error;
+      }
+    },
+    subscribe(listener: () => void): () => void {
+      return channel.subscribe(listener);
     },
   };
 }

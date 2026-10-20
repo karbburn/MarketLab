@@ -250,9 +250,23 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
   };
   let overwritten = 0;
 
+  const instrumentById = new Map<string, Instrument>();
+  for (const instrument of [...base.instruments, ...bundle.instruments]) instrumentById.set(instrument.id, instrument);
+
+  // Content alone is not identity: an index and an ETF tracking it can share an
+  // identical short window. Only treat a hash match as the same series when the
+  // symbol and currency also agree, so a restore never re-points a panel at a
+  // different instrument.
+  const seriesKey = (dataset: Dataset): string | null => {
+    const instrument = instrumentById.get(dataset.instrumentId);
+    if (!instrument || !dataset.contentHash) return null;
+    return `${dataset.contentHash}\u0000${instrument.symbol}\u0000${instrument.currency}`;
+  };
+
   const hashToLocal = new Map<string, Dataset>();
   for (const dataset of base.datasets) {
-    if (dataset.contentHash) hashToLocal.set(dataset.contentHash, dataset);
+    const key = seriesKey(dataset);
+    if (key) hashToLocal.set(key, dataset);
   }
 
   const acceptedDatasets: Dataset[] = [];
@@ -265,14 +279,15 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
       overwritten += 1;
       continue;
     }
-    const equivalent = dataset.contentHash ? hashToLocal.get(dataset.contentHash) : undefined;
+    const key = seriesKey(dataset);
+    const equivalent = key ? hashToLocal.get(key) : undefined;
     if (equivalent) {
       datasetRemap.set(dataset.id, equivalent.id);
       duplicateDatasets += 1;
       continue;
     }
     acceptedDatasets.push(dataset);
-    if (dataset.contentHash) hashToLocal.set(dataset.contentHash, dataset);
+    if (key) hashToLocal.set(key, dataset);
   }
 
   const resolved = new Map<string, Dataset>();
