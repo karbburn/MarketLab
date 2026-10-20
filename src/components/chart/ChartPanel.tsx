@@ -6,6 +6,7 @@ import {
   ChartLineUp,
   Cursor,
   FrameCorners,
+  ListBullets,
   Minus,
   Plus,
   Ruler,
@@ -21,6 +22,7 @@ import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
 import { anchorsRequired, isDrawingComplete, priceRangeInfo } from '../../lib/drawings/geometry';
+import { removeDrawing } from '../../lib/drawings/management';
 import { createId } from '../../lib/id';
 import { useStore } from '../../state/store';
 import { datasetViews, type DatasetView } from '../../state/selectors';
@@ -32,6 +34,7 @@ import { changePercent, hoverBars } from '../../lib/chart/readout';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
+import { DrawingManager } from './DrawingManager';
 
 const TOOLS: Array<{ id: DrawingType | 'cursor'; label: string; icon: typeof Cursor }> = [
   { id: 'cursor', label: 'Pointer and selection', icon: Cursor },
@@ -99,9 +102,10 @@ export function ChartPanel({
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
-  // While a drawing is being dragged or just created the local copy leads; the
-  // stored workspace state remains the source of truth at rest.
-  const [dragDrawings, setDragDrawings] = useState<Drawing[] | null>(null);
+  const [drawingManagerOpen, setDrawingManagerOpen] = useState(false);
+  // While a drawing is being dragged or edited the local copy leads; the stored
+  // workspace state remains the source of truth at rest.
+  const [draftDrawings, setDraftDrawings] = useState<Drawing[] | null>(null);
   // The text tool writes real text, so a click places a label through an inline
   // editor instead of stamping a fixed string. Nothing is stored until the
   // label is committed, so cancelling leaves no drawing and no history entry.
@@ -110,11 +114,18 @@ export function ChartPanel({
   // the blur from being read as a second, committing edit.
   const textEditClosedRef = useRef(false);
   const textEditorInputRef = useRef<HTMLInputElement>(null);
-  const localDrawings = dragDrawings ?? chart.drawings;
+  const managerButtonRef = useRef<HTMLButtonElement>(null);
+  const localDrawings = draftDrawings ?? chart.drawings;
+  // The ref makes a sequence of quick manager edits compose even when React has
+  // not re-rendered with the previous edit yet.
+  const localDrawingsRef = useRef(localDrawings);
+  useEffect(() => {
+    localDrawingsRef.current = localDrawings;
+  }, [localDrawings]);
   // A selection only counts while the drawing it points at still exists, so undo
   // and redo can never leave the toolbar acting on a drawing that is not there.
-  const selectedDrawingId =
-    selectedId !== null && localDrawings.some((drawing) => drawing.id === selectedId) ? selectedId : null;
+  const selectedDrawing = selectedId === null ? null : localDrawings.find((drawing) => drawing.id === selectedId) ?? null;
+  const selectedDrawingId = selectedDrawing?.id ?? null;
 
   const bars = useMemo(() => view?.bars ?? [], [view]);
   const dataset = view?.dataset ?? null;
@@ -395,35 +406,55 @@ export function ChartPanel({
   }, []);
 
   const commitDrawings = useCallback(
-    (next: Drawing[], base: Drawing[] = localDrawings) => {
+    (next: Drawing[], base: Drawing[] = localDrawingsRef.current) => {
+      if (next === base) return;
       // `base` is the state the change started from. A drag supplies its
       // pre-drag snapshot, so Undo restores where the drag began.
       historyRef.current.past.push(base);
       historyRef.current.future = [];
       syncHistory();
-      setDragDrawings(null);
-      void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }));
+      localDrawingsRef.current = next;
+      setDraftDrawings(next);
+      void actions
+        .updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }))
+        .then(() => setDraftDrawings((current) => (current === next ? null : current)));
     },
-    [actions, chart.id, localDrawings, syncHistory, workspaceId],
+    [actions, chart.id, syncHistory, workspaceId],
+  );
+
+  /** Applies a manager edit to the freshest local list, then records one step. */
+  const mutateDrawings = useCallback(
+    (mutate: (drawings: Drawing[]) => Drawing[]) => {
+      const current = localDrawingsRef.current;
+      const next = mutate(current);
+      if (next !== current) commitDrawings(next, current);
+    },
+    [commitDrawings],
   );
 
   const undo = useCallback(() => {
     const previous = historyRef.current.past.pop();
     if (!previous) return;
-    historyRef.current.future.push(localDrawings);
+    historyRef.current.future.push(localDrawingsRef.current);
     syncHistory();
-    setDragDrawings(null);
-    void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: previous }));
-  }, [actions, chart.id, localDrawings, syncHistory, workspaceId]);
+    localDrawingsRef.current = previous;
+    setDraftDrawings(previous);
+    void actions
+      .updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: previous }))
+      .then(() => setDraftDrawings((current) => (current === previous ? null : current)));
+  }, [actions, chart.id, syncHistory, workspaceId]);
 
   const redo = useCallback(() => {
     const next = historyRef.current.future.pop();
     if (!next) return;
-    historyRef.current.past.push(localDrawings);
+    historyRef.current.past.push(localDrawingsRef.current);
     syncHistory();
-    setDragDrawings(null);
-    void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }));
-  }, [actions, chart.id, localDrawings, syncHistory, workspaceId]);
+    localDrawingsRef.current = next;
+    setDraftDrawings(next);
+    void actions
+      .updateChart(workspaceId, chart.id, (config) => ({ ...config, drawings: next }))
+      .then(() => setDraftDrawings((current) => (current === next ? null : current)));
+  }, [actions, chart.id, syncHistory, workspaceId]);
 
   /** Screen positions of a drawing's anchors, dropping any that do not resolve. */
   const screenPoints = (drawing: Drawing, controller: ChartController): Array<{ x: number; y: number }> =>
@@ -474,7 +505,7 @@ export function ChartPanel({
       });
       setSelectedId(hit ? hit.id : null);
       if (hit) {
-        dragRef.current = { id: hit.id, startPrice: anchor.price, startDate: anchor.date, latest: localDrawings };
+        dragRef.current = { id: hit.id, startPrice: anchor.price, startDate: anchor.date, latest: localDrawingsRef.current };
         // Stop the chart from panning underneath the drawing drag.
         controller.setDragToPan(false);
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -540,7 +571,8 @@ export function ChartPanel({
         })),
       };
     });
-    setDragDrawings(next);
+    localDrawingsRef.current = next;
+    setDraftDrawings(next);
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -550,14 +582,15 @@ export function ChartPanel({
     controllerRef.current?.setDragToPan(true);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     // The pre-drag snapshot is the undo base, not the already-moved set.
-    if (dragDrawings) commitDrawings(dragDrawings, drag.latest);
+    const moved = localDrawingsRef.current;
+    if (moved !== drag.latest) commitDrawings(moved, drag.latest);
   };
 
   const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current) return;
     dragRef.current = null;
     controllerRef.current?.setDragToPan(true);
-    setDragDrawings(null);
+    setDraftDrawings(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
@@ -586,7 +619,7 @@ export function ChartPanel({
       style: { ...DEFAULT_DRAWING_STYLE },
       levels: type === 'fibonacci' ? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] : undefined,
     };
-    commitDrawings([...localDrawings, created]);
+    commitDrawings([...localDrawingsRef.current, created]);
     setSelectedId(created.id);
     selectTool('cursor');
   };
@@ -626,19 +659,23 @@ export function ChartPanel({
         style: { ...DEFAULT_DRAWING_STYLE },
         text: value,
       };
-      commitDrawings([...localDrawings, created]);
+      commitDrawings([...localDrawingsRef.current, created]);
       setSelectedId(created.id);
       return;
     }
     if (value === editor.original) return;
-    commitDrawings(localDrawings.map((drawing) => (drawing.id === editor.id ? { ...drawing, text: value } : drawing)));
+    const current = localDrawingsRef.current;
+    commitDrawings(current.map((drawing) => (drawing.id === editor.id ? { ...drawing, text: value } : drawing)), current);
   };
 
   const removeSelected = useCallback(() => {
     if (!selectedDrawingId) return;
-    commitDrawings(localDrawings.filter((drawing) => drawing.id !== selectedDrawingId));
+    const current = localDrawingsRef.current;
+    const next = removeDrawing(current, selectedDrawingId);
+    if (next === current) return;
+    commitDrawings(next, current);
     setSelectedId(null);
-  }, [commitDrawings, localDrawings, selectedDrawingId]);
+  }, [commitDrawings, selectedDrawingId]);
 
   const removeComparison = useCallback(
     (datasetId: string) => {
@@ -659,6 +696,11 @@ export function ChartPanel({
     setTool(next);
   }, []);
 
+  const closeDrawingManager = useCallback(() => {
+    setDrawingManagerOpen(false);
+    requestAnimationFrame(() => managerButtonRef.current?.focus());
+  }, []);
+
   useEffect(() => {
     if (!focused) return;
     // The shortcuts belong to the focused panel, but the toolbar buttons drop
@@ -671,7 +713,12 @@ export function ChartPanel({
       const target = event.target as HTMLElement | null;
       if (target?.closest('input, select, textarea, [contenteditable="true"], [role="dialog"]')) return;
       if (event.key === 'Escape') {
+        if (drawingManagerOpen) {
+          closeDrawingManager();
+          return;
+        }
         selectTool('cursor');
+        setSelectedId(null);
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedDrawingId) {
@@ -687,7 +734,7 @@ export function ChartPanel({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
+  }, [closeDrawingManager, drawingManagerOpen, focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
 
   const { hoverBar, previousBar } = hoverBars(rendered, readout.index);
   const changePct = changePercent(hoverBar, previousBar);
@@ -739,6 +786,17 @@ export function ChartPanel({
         <button type="button" className="tool-button" title="Add indicator" aria-label="Add indicator" onClick={() => setIndicatorDialogOpen(true)}>
           <Plus size={14} weight="bold" />
         </button>
+        <button
+          ref={managerButtonRef}
+          type="button"
+          className="tool-button"
+          title={`Drawing objects (${localDrawings.length})`}
+          aria-label="Drawing objects"
+          aria-pressed={drawingManagerOpen}
+          onClick={() => setDrawingManagerOpen((open) => !open)}
+        >
+          <ListBullets size={14} />
+        </button>
         <button type="button" className="tool-button" title="Undo drawing" aria-label="Undo drawing" disabled={historySize.past === 0} onClick={undo}>
           <ArrowCounterClockwise size={14} />
         </button>
@@ -765,7 +823,15 @@ export function ChartPanel({
               <entry.icon size={15} weight={tool === entry.id ? 'bold' : 'regular'} />
             </button>
           ))}
-          <button type="button" className="tool-button" aria-label="Delete selected drawing" title="Delete selected drawing" disabled={!selectedDrawingId} onClick={removeSelected} style={{ opacity: selectedDrawingId ? 1 : 0.4 }}>
+          <button
+            type="button"
+            className="tool-button"
+            aria-label="Delete selected drawing"
+            title={selectedDrawing?.locked ? 'Unlock to delete' : 'Delete selected drawing'}
+            disabled={!selectedDrawing || selectedDrawing.locked}
+            onClick={removeSelected}
+            style={{ opacity: selectedDrawing && !selectedDrawing.locked ? 1 : 0.4 }}
+          >
             <Trash size={15} />
           </button>
         </div>
@@ -895,6 +961,16 @@ export function ChartPanel({
                   }
                 }}
                 onBlur={() => finishTextEdit('commit')}
+              />
+            )}
+
+            {drawingManagerOpen && (
+              <DrawingManager
+                drawings={localDrawings}
+                selectedId={selectedDrawingId}
+                onSelect={setSelectedId}
+                onMutate={mutateDrawings}
+                onClose={closeDrawingManager}
               />
             )}
           </div>

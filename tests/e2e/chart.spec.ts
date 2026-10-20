@@ -6,12 +6,31 @@ import { formatCompact, formatPercent, formatPrice } from '../../src/lib/format'
  * Reads the drawings stored on the first chart of the first workspace. The
  * assertions below check the stored records, not only what the toolbar shows.
  */
-async function readDrawings(
-  page: Page,
-): Promise<Array<{ type: string; anchors: unknown[]; text?: string }>> {
+async function readDrawings(page: Page): Promise<
+  Array<{
+    type: string;
+    anchors: unknown[];
+    text?: string;
+    visible: boolean;
+    locked: boolean;
+    style: { color: string; lineWidth: number; lineStyle?: string; fillOpacity?: number; fontSize?: number };
+  }>
+> {
   const workspaces = await readStore(page, 'workspaces');
-  const charts = (workspaces[0] as { charts?: Array<{ drawings?: Array<{ type: string; anchors: unknown[]; text?: string }> }> })
-    ?.charts;
+  const charts = (
+    workspaces[0] as {
+      charts?: Array<{
+        drawings?: Array<{
+          type: string;
+          anchors: unknown[];
+          text?: string;
+          visible: boolean;
+          locked: boolean;
+          style: { color: string; lineWidth: number; lineStyle?: string; fillOpacity?: number; fontSize?: number };
+        }>;
+      }>;
+    }
+  )?.charts;
   return charts?.[0]?.drawings ?? [];
 }
 
@@ -383,6 +402,171 @@ test.describe('chart workspace', () => {
     const edited = await readDrawings(page);
     expect(edited).toHaveLength(1);
     expect(edited[0]).toMatchObject({ type: 'text', text: 'Breakdown' });
+  });
+
+  test('manages drawing visibility, locking and deletion from the object list', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Zone rectangle' }).click();
+    await stage.click({ position: { x: 240, y: 100 } });
+    await stage.click({ position: { x: 430, y: 190 } });
+
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await expect(manager).toBeVisible();
+    await expect(manager).toBeFocused();
+    await expect(manager.getByText('1 object', { exact: true })).toBeVisible();
+
+    const row = manager.getByRole('button', { name: 'Select Zone rectangle' });
+    await expect(row).toHaveAttribute('aria-current', 'true');
+    await expect(manager.getByRole('button', { name: 'Delete Zone rectangle' })).toBeEnabled();
+
+    // Hiding removes the ink from the chart while keeping the object listed.
+    await manager.getByRole('button', { name: 'Hide Zone rectangle' }).click();
+    await expect(manager.getByRole('button', { name: 'Show Zone rectangle' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(manager.getByText('1 object · 1 hidden', { exact: true })).toBeVisible();
+    await expect.poll(() => hasInk(page, { x: 238, y: 98, width: 196, height: 96 })).toBe(false);
+    await expect.poll(async () => (await readDrawings(page))[0]?.visible).toBe(false);
+
+    await manager.getByRole('button', { name: 'Show Zone rectangle' }).click();
+    await expect.poll(() => hasInk(page, { x: 238, y: 98, width: 196, height: 96 })).toBe(true);
+    await expect.poll(async () => (await readDrawings(page))[0]?.visible).toBe(true);
+
+    // Locking is enforced by the manager and by the Delete shortcut.
+    await manager.getByRole('button', { name: 'Lock Zone rectangle' }).click();
+    await expect(manager.getByRole('button', { name: 'Unlock Zone rectangle' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(manager.getByRole('button', { name: 'Delete Zone rectangle' })).toBeDisabled();
+    await expect(deleteSelected).toBeDisabled();
+    await expect(manager.getByLabel('Line width')).toBeDisabled();
+    await page.keyboard.press('Delete');
+    await expect.poll(async () => (await readDrawings(page)).length).toBe(1);
+
+    await manager.getByRole('button', { name: 'Unlock Zone rectangle' }).click();
+    await expect(manager.getByLabel('Line width')).toBeEnabled();
+    await expect(deleteSelected).toBeEnabled();
+    await manager.getByRole('button', { name: 'Delete Zone rectangle' }).click();
+    await expect(manager.getByText('No objects', { exact: true })).toBeVisible();
+    await expect.poll(async () => (await readDrawings(page)).length).toBe(0);
+
+    // Escape closes the floating object list and returns focus to its toggle.
+    await page.keyboard.press('Escape');
+    await expect(manager).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Drawing objects' })).toBeFocused();
+  });
+
+  test('edits drawing style and text, undoes it, and keeps it after a reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Zone rectangle' }).click();
+    await stage.click({ position: { x: 240, y: 100 } });
+    await stage.click({ position: { x: 430, y: 190 } });
+
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    const rectangleRow = manager.getByRole('button', { name: 'Select Zone rectangle' });
+    await expect(rectangleRow).toHaveAttribute('aria-current', 'true');
+
+    // Double-clicking a row is the observed TradingView path into settings; here
+    // it focuses the same inspector that single selection reveals.
+    await rectangleRow.dblclick();
+    await expect(manager.getByRole('button', { name: 'Color #3fb8a3' })).toBeFocused();
+
+    await manager.getByRole('button', { name: 'Color #ef6f6c' }).click();
+    await manager.getByLabel('Line width').selectOption('3');
+    await manager.getByLabel('Line style').selectOption('dashed');
+    await manager.getByLabel('Fill opacity').selectOption('0.25');
+
+    await expect
+      .poll(async () => (await readDrawings(page))[0])
+      .toMatchObject({
+        type: 'rectangle',
+        visible: true,
+        locked: false,
+        style: { color: '#ef6f6c', lineWidth: 3, lineStyle: 'dashed', fillOpacity: 0.25 },
+      });
+
+    // The style inspector only offers properties the renderer uses. Text has
+    // its own size and copy controls.
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+    await page.getByRole('button', { name: 'Text label' }).click();
+    await stage.click({ position: { x: 300, y: 130 } });
+    const editor = page.getByRole('textbox', { name: 'Drawing label' });
+    await editor.fill('Breakout');
+    await editor.press('Enter');
+    await expect(editor).toBeHidden();
+
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const textManager = page.getByRole('region', { name: 'Drawing objects' });
+    await expect(textManager.getByRole('button', { name: 'Select Breakout' })).toHaveAttribute('aria-current', 'true');
+    await textManager.getByRole('button', { name: 'Color #4f8cff' }).click();
+    await textManager.getByLabel('Font size').selectOption('20');
+
+    const text = textManager.getByRole('textbox', { name: 'Text' });
+    await text.fill('Breakdown');
+    await text.press('Enter');
+    await expect(textManager.getByRole('button', { name: 'Select Breakdown' })).toHaveAttribute('aria-current', 'true');
+
+    await expect
+      .poll(async () => (await readDrawings(page))[1])
+      .toMatchObject({
+        type: 'text',
+        text: 'Breakdown',
+        visible: true,
+        locked: false,
+        style: { color: '#4f8cff', fontSize: 20 },
+      });
+
+    // Text edits are ordinary history steps.
+    await page.getByRole('button', { name: 'Undo drawing' }).click();
+    await expect(textManager.getByRole('button', { name: 'Select Breakout' })).toHaveAttribute('aria-current', 'true');
+    await expect(textManager.getByRole('textbox', { name: 'Text' })).toHaveValue('Breakout');
+    await page.getByRole('button', { name: 'Redo drawing' }).click();
+    await expect(textManager.getByRole('button', { name: 'Select Breakdown' })).toHaveAttribute('aria-current', 'true');
+
+    // Everything survives a reload because the drawing record is persisted.
+    await page.reload();
+    await waitForChart(page);
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const reloaded = page.getByRole('region', { name: 'Drawing objects' });
+
+    await reloaded.getByRole('button', { name: 'Select Zone rectangle' }).click();
+    await expect(reloaded.getByRole('button', { name: 'Color #ef6f6c' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(reloaded.getByLabel('Line width')).toHaveValue('3');
+    await expect(reloaded.getByLabel('Line style')).toHaveValue('dashed');
+    await expect(reloaded.getByLabel('Fill opacity')).toHaveValue('0.25');
+
+    await reloaded.getByRole('button', { name: 'Select Breakdown' }).click();
+    await expect(reloaded.getByRole('button', { name: 'Color #4f8cff' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(reloaded.getByLabel('Font size')).toHaveValue('20');
+    await expect(reloaded.getByRole('textbox', { name: 'Text' })).toHaveValue('Breakdown');
+  });
+
+  test('keeps the drawing object list inside a narrow viewport in both themes', async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 800 });
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await stage.click({ position: { x: 220, y: 140 } });
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await expect(manager).toBeVisible();
+    const box = await manager.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(721);
+
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect(manager).toBeVisible();
+    await expect(manager.getByRole('button', { name: 'Select Horizontal level' })).toBeVisible();
   });
 
   test('keeps drawing shortcuts working after undo, redo and a disabled button', async ({ page }) => {

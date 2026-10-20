@@ -142,6 +142,7 @@ export function TextInput({
   ariaInvalid,
   ariaDescribedBy,
   onKeyDown,
+  onBlur,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -158,6 +159,7 @@ export function TextInput({
   /** Id of the error text rendered by `Field`. */
   ariaDescribedBy?: string;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+  onBlur?: () => void;
 }) {
   return (
     <input
@@ -175,6 +177,7 @@ export function TextInput({
       placeholder={placeholder}
       onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
+      onBlur={onBlur}
     />
   );
 }
