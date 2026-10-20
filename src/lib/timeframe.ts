@@ -42,7 +42,7 @@ export function aggregateBars(bars: readonly Bar[], timeframe: Timeframe): Bar[]
   }
 
   const result: Bar[] = [];
-  for (const bucket of buckets.values()) {
+  for (const [key, bucket] of buckets.entries()) {
     if (bucket.length === 0) continue;
     const first = bucket[0] as Bar;
     const last = bucket[bucket.length - 1] as Bar;
@@ -63,6 +63,7 @@ export function aggregateBars(bars: readonly Bar[], timeframe: Timeframe): Bar[]
       low,
       close: last.close,
       volume: volumeComplete ? volume : null,
+      bucket: key,
     });
   }
   return result;

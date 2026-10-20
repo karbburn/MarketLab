@@ -41,6 +41,12 @@ export interface Bar {
   close: number;
   /** `null` means the source did not provide volume; it is never invented. */
   volume: number | null;
+  /**
+   * Aggregation bucket identity (`2024-W01`, `2024-08`) for bars produced by
+   * `aggregateBars`. Never stored; it lets weekly/monthly comparisons align on
+   * the period even when two markets closed the period on different sessions.
+   */
+  bucket?: string;
 }
 
 /**
@@ -284,6 +290,8 @@ export interface ScreenerDefinition {
   filters: ScreenerFilter[];
   cutoff: DateString | null;
   sortBy: string;
+  /** Sessions used to compute the sort field; independent of any filter window. */
+  sortWindow: number;
   sortDirection: 'asc' | 'desc';
   createdAt: string;
   updatedAt: string;

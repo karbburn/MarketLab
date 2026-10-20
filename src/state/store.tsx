@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   BacktestConfig,
   Bar,
@@ -9,13 +9,15 @@ import type {
   Watchlist,
   Workspace,
 } from '../domain/types';
-import { createPersistence, type PersistenceAdapter, type StoreName } from '../lib/persistence/db';
+import { createPersistence, type PersistenceAdapter, type PersistenceTransaction, type StoreName } from '../lib/persistence/db';
 import { describeCleanup, removeSyntheticData, type SyntheticCleanupResult } from '../lib/migration/remove-synthetic';
 import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
 import { createId } from '../lib/id';
 import { mergeBackup, isEmptyReplaceRestore, type BackupBundle } from '../lib/export/backup';
 import { normaliseCompareSelections } from '../lib/workspace/compare-selections';
+import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
+import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 
@@ -102,6 +104,121 @@ const EMPTY_STATE: AppState = {
   toasts: [],
 };
 
+const LOAD_STORES: StoreName[] = [
+  'instruments',
+  'datasets',
+  'bars',
+  'workspaces',
+  'watchlists',
+  'screeners',
+  'backtests',
+  'preferences',
+  'settings',
+];
+
+interface LoadedSnapshot {
+  instruments: Instrument[];
+  datasets: Dataset[];
+  barsByDataset: Record<string, Bar[]>;
+  workspaces: Workspace[];
+  activeWorkspaceId: string | null;
+  watchlists: Watchlist[];
+  preferences: UserPreferences;
+  screeners: ScreenerDefinition[];
+  backtests: BacktestConfig[];
+}
+
+/**
+ * Reads one consistent snapshot and applies the same clean-up/migration rules
+ * on first load and after a cross-tab change. The read is a single read-only
+ * transaction so another tab cannot commit between stores and produce a mix.
+ */
+async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
+  const { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings } =
+    await adapter.transaction(
+      LOAD_STORES,
+      async (tx) => {
+        const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings] = await Promise.all([
+          tx.list<Instrument>('instruments'),
+          tx.list<Dataset>('datasets'),
+          tx.list<BarsRecord>('bars'),
+          tx.list<Workspace>('workspaces'),
+          tx.list<Watchlist>('watchlists'),
+          tx.list<ScreenerDefinition>('screeners'),
+          tx.list<BacktestConfig>('backtests'),
+          tx.list<PreferencesRecord>('preferences'),
+          tx.list<SettingsRecord>('settings'),
+        ]);
+        return { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings };
+      },
+      { mode: 'readonly', notify: false },
+    );
+
+  const barsByDataset: Record<string, Bar[]> = {};
+  for (const record of barRecords) barsByDataset[record.id] = record.bars;
+
+  let preferences = preferencesRecords[0] ? stripPreferenceId(preferencesRecords[0]) : DEFAULT_PREFERENCES;
+
+  // Remove the bundled demo series, if an earlier build left them behind.
+  const cleanup = removeSyntheticData({ instruments, datasets, workspaces, watchlists, screeners, backtests });
+  if (cleanup.changed) {
+    if (preferences.defaultWorkspaceId && cleanup.removedWorkspaceIds.includes(preferences.defaultWorkspaceId)) {
+      preferences = { ...preferences, defaultWorkspaceId: null };
+      await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
+    }
+    await persistCleanup(adapter, cleanup);
+    await adapter.put<SettingsRecord>('settings', {
+      id: 'app',
+      schemaVersion: APP_SCHEMA_VERSION,
+      installedAt: installedAt(settings),
+      syntheticDataRemovedAt: new Date().toISOString(),
+    });
+  } else if (!settings.some((record) => record.id === 'app')) {
+    await adapter.put<SettingsRecord>('settings', {
+      id: 'app',
+      schemaVersion: APP_SCHEMA_VERSION,
+      installedAt: new Date().toISOString(),
+      syntheticDataRemovedAt: null,
+    });
+  }
+
+  const nextInstruments = cleanup.changed ? cleanup.instruments : instruments;
+  const nextDatasets = cleanup.changed ? cleanup.datasets : datasets;
+  const nextWorkspaces = cleanup.changed ? cleanup.workspaces : workspaces;
+  const nextWatchlists = cleanup.changed ? cleanup.watchlists : watchlists;
+  const nextScreeners = (cleanup.changed ? cleanup.screeners : screeners).map((screener) => ({
+    ...screener,
+    sortWindow: resolveSortWindow(screener.sortBy, screener.sortWindow),
+  }));
+  const nextBacktests = cleanup.changed ? cleanup.backtests : backtests;
+
+  // Comparison overlays reference datasets by id, so drop any selection
+  // whose dataset no longer exists before the first render.
+  const comparisons = normaliseCompareSelections(nextWorkspaces, new Set(nextDatasets.map((dataset) => dataset.id)));
+  const sanitisedWorkspaces = comparisons.workspaces;
+  if (comparisons.changed) {
+    await adapter.transaction(['workspaces'], (tx) => tx.putMany('workspaces', sanitisedWorkspaces), { notify: false });
+  }
+
+  // Set the attribute before the first child render so the charts read the
+  // persisted palette on mount.
+  applyThemeAttribute(preferences.theme);
+  return {
+    snapshot: {
+      instruments: nextInstruments,
+      datasets: nextDatasets,
+      barsByDataset: cleanup.changed ? keepBars(barsByDataset, cleanup.removedDatasetIds) : barsByDataset,
+      workspaces: sanitisedWorkspaces,
+      activeWorkspaceId: resolveActiveWorkspaceId(sanitisedWorkspaces, preferences),
+      watchlists: nextWatchlists,
+      preferences,
+      screeners: nextScreeners,
+      backtests: nextBacktests,
+    },
+    notice: cleanup.changed ? describeCleanup(cleanup) : null,
+  };
+}
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const adapter = useAdapter();
@@ -146,97 +263,72 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!adapter) return;
     let cancelled = false;
-    (async () => {
-      const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings] = await Promise.all([
-        adapter.list<Instrument>('instruments'),
-        adapter.list<Dataset>('datasets'),
-        adapter.list<BarsRecord>('bars'),
-        adapter.list<Workspace>('workspaces'),
-        adapter.list<Watchlist>('watchlists'),
-        adapter.list<ScreenerDefinition>('screeners'),
-        adapter.list<BacktestConfig>('backtests'),
-        adapter.list<PreferencesRecord>('preferences'),
-        adapter.list<SettingsRecord>('settings'),
-      ]);
-      if (cancelled) return;
-
-      const barsByDataset: Record<string, Bar[]> = {};
-      for (const record of barRecords) barsByDataset[record.id] = record.bars;
-
-      let preferences = preferencesRecords[0]
-        ? stripPreferenceId(preferencesRecords[0])
-        : DEFAULT_PREFERENCES;
-
-      // Remove the bundled demo series, if an earlier build left them behind.
-      const cleanup = removeSyntheticData({ instruments, datasets, workspaces, watchlists, screeners, backtests });
-      if (cleanup.changed) {
-        if (preferences.defaultWorkspaceId && cleanup.removedWorkspaceIds.includes(preferences.defaultWorkspaceId)) {
-          preferences = { ...preferences, defaultWorkspaceId: null };
-          await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
-        }
-        await persistCleanup(adapter, cleanup);
-        await adapter.put<SettingsRecord>('settings', {
-          id: 'app',
-          schemaVersion: APP_SCHEMA_VERSION,
-          installedAt: installedAt(settings),
-          syntheticDataRemovedAt: new Date().toISOString(),
-        });
-      } else if (!settings.some((record) => record.id === 'app')) {
-        await adapter.put<SettingsRecord>('settings', {
-          id: 'app',
-          schemaVersion: APP_SCHEMA_VERSION,
-          installedAt: new Date().toISOString(),
-          syntheticDataRemovedAt: null,
-        });
-      }
-      if (cancelled) return;
-
-      const nextInstruments = cleanup.changed ? cleanup.instruments : instruments;
-      const nextDatasets = cleanup.changed ? cleanup.datasets : datasets;
-      const nextWorkspaces = cleanup.changed ? cleanup.workspaces : workspaces;
-      const nextWatchlists = cleanup.changed ? cleanup.watchlists : watchlists;
-      const nextScreeners = cleanup.changed ? cleanup.screeners : screeners;
-      const nextBacktests = cleanup.changed ? cleanup.backtests : backtests;
-
-      // Comparison overlays reference datasets by id, so drop any selection
-      // whose dataset no longer exists before the first render.
-      const comparisons = normaliseCompareSelections(nextWorkspaces, new Set(nextDatasets.map((dataset) => dataset.id)));
-      const sanitisedWorkspaces = comparisons.workspaces;
-      if (comparisons.changed) await adapter.putMany('workspaces', sanitisedWorkspaces);
-
-      // Set the attribute before the first child render so the charts read
-      // the persisted palette on mount.
-      applyThemeAttribute(preferences.theme);
-      setState((previous) => ({
-        ...previous,
-        status: 'ready',
-        adapterKind: adapter.kind,
-        instruments: nextInstruments,
-        datasets: nextDatasets,
-        barsByDataset: cleanup.changed ? keepBars(barsByDataset, cleanup.removedDatasetIds) : barsByDataset,
-        workspaces: sanitisedWorkspaces,
-        activeWorkspaceId: resolveActiveWorkspaceId(sanitisedWorkspaces, preferences),
-        watchlists: nextWatchlists,
-        preferences,
-        screeners: nextScreeners,
-        backtests: nextBacktests,
-        loadError: null,
-      }));
-      if (cleanup.changed) notify('info', describeCleanup(cleanup));
-    })().catch((error: unknown) => {
-      if (cancelled) return;
-      // Keep the app usable, but never present a failed read as an empty library.
-      const message = error instanceof Error ? error.message : 'Local storage could not be read.';
-      setState((previous) => ({
-        ...previous,
-        status: 'ready',
-        loadError: `Local data could not be read: ${message}`,
-      }));
-    });
+    loadState(adapter)
+      .then(({ snapshot, notice }) => {
+        if (cancelled) return;
+        setState((previous) => ({
+          ...previous,
+          ...snapshot,
+          status: 'ready',
+          adapterKind: adapter.kind,
+          loadError: null,
+        }));
+        if (notice) notify('info', notice);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        // Keep the app usable, but never present a failed read as an empty library.
+        const message = error instanceof Error ? error.message : 'Local storage could not be read.';
+        setState((previous) => ({
+          ...previous,
+          status: 'ready',
+          loadError: `Local data could not be read: ${message}`,
+        }));
+      });
     return () => {
       cancelled = true;
     };
   }, [adapter]);
+
+  /**
+   * Re-reads the committed library, used after a failed write and when another
+   * tab reports a change. Pending local writes settle first so their result is
+   * part of the snapshot rather than being undone by it.
+   */
+  const refreshFromStorage = useCallback(async () => {
+    if (!adapter) return;
+    await Promise.allSettled([...writeQueues.current.values()]);
+    try {
+      const { snapshot } = await loadState(adapter);
+      setState((previous) => ({
+        ...previous,
+        ...snapshot,
+        status: 'ready',
+        adapterKind: adapter.kind,
+        loadError: null,
+      }));
+    } catch {
+      // Keep the current view; a transient read failure must not look like an
+      // empty library. The next write/notification retries the read.
+    }
+  }, [adapter]);
+
+  useEffect(() => {
+    if (!adapter?.subscribe) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = adapter.subscribe(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void refreshFromStorage();
+      }, 150);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [adapter, refreshFromStorage]);
+
 
   // Apply the theme to the document element.
   useEffect(() => {
@@ -246,14 +338,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const actions: StoreActions = {
     async importDataset(bundle, options) {
       if (!adapter) return;
-      await adapter.put('instruments', bundle.instrument);
-      await adapter.put('datasets', bundle.dataset);
-      await adapter.put<BarsRecord>('bars', { id: bundle.dataset.id, bars: bundle.bars });
+      const problem = describeDatasetBundleProblem(bundle);
+      if (problem) throw new Error(problem);
 
       // The library starts empty, so the first real dataset gets a workspace
       // of its own; otherwise the chart page would have nothing to render.
       let nextActiveWorkspaceId = stateRef.current.activeWorkspaceId;
       let nextWorkspaces = workspacesRef.current;
+      let createdWorkspace: Workspace | null = null;
       if (nextWorkspaces.length === 0) {
         const preferences = preferencesRef.current;
         const workspace = createWorkspace({
@@ -267,12 +359,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             timeframe: preferences.defaultTimeframe,
           },
         });
-        await adapter.put('workspaces', workspace);
+        createdWorkspace = workspace;
         nextWorkspaces = [workspace];
-        workspacesRef.current = nextWorkspaces;
         nextActiveWorkspaceId = workspace.id;
       }
 
+      // Instrument, dataset, bars and the optional first workspace form one
+      // unit: a quota failure cannot leave a dataset pointing at missing bars.
+      await adapter.transaction(['instruments', 'datasets', 'bars', 'workspaces'], async (tx) => {
+        await tx.put('instruments', bundle.instrument);
+        await tx.put('datasets', bundle.dataset);
+        await tx.put<BarsRecord>('bars', { id: bundle.dataset.id, bars: bundle.bars });
+        if (createdWorkspace) await tx.put('workspaces', createdWorkspace);
+      });
+
+      if (createdWorkspace) workspacesRef.current = nextWorkspaces;
       setState((previous) => {
         const instruments = upsertById(previous.instruments, bundle.instrument);
         const datasets = upsertById(previous.datasets, bundle.dataset);
@@ -316,20 +417,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const barsByDataset = { ...latest.barsByDataset };
       delete barsByDataset[datasetId];
 
-      await adapter.remove('datasets', datasetId);
-      await adapter.remove('bars', datasetId);
-      if (removedInstrumentId) await adapter.remove('instruments', removedInstrumentId);
-
-      // Persist the cleanup, not only the React state: otherwise the next load
-      // resurrects panels, screens, strategies and watchlist rows that point at
-      // the removed dataset.
-      for (const workspaceId of plan.removedWorkspaceIds) await adapter.remove('workspaces', workspaceId);
-      for (const watchlistId of plan.removedWatchlistIds) await adapter.remove('watchlists', watchlistId);
-      for (const backtestId of plan.removedBacktestIds) await adapter.remove('backtests', backtestId);
-      await adapter.putMany('workspaces', plan.workspaces);
-      await adapter.putMany('watchlists', plan.watchlists);
-      await adapter.putMany('screeners', plan.screeners);
+      // Set the in-memory workspace view before touching storage so a queued
+      // chart write sees the cleaned plan and cannot resurrect a removed panel.
+      await Promise.allSettled([...writeQueues.current.values()]);
       workspacesRef.current = plan.workspaces;
+
+      try {
+        await adapter.transaction(
+          ['datasets', 'bars', 'instruments', 'workspaces', 'watchlists', 'backtests', 'screeners'],
+          async (tx) => {
+            await tx.remove('datasets', datasetId);
+            await tx.remove('bars', datasetId);
+            if (removedInstrumentId) await tx.remove('instruments', removedInstrumentId);
+
+            // Persist the cleanup, not only the React state: otherwise the next
+            // load resurrects panels, screens, strategies and watchlist rows
+            // that point at the removed dataset.
+            for (const workspaceId of plan.removedWorkspaceIds) await tx.remove('workspaces', workspaceId);
+            for (const watchlistId of plan.removedWatchlistIds) await tx.remove('watchlists', watchlistId);
+            for (const backtestId of plan.removedBacktestIds) await tx.remove('backtests', backtestId);
+            await tx.putMany('workspaces', plan.workspaces);
+            await tx.putMany('watchlists', plan.watchlists);
+            await tx.putMany('screeners', plan.screeners);
+          },
+        );
+      } catch (error) {
+        notify('error', `Could not remove the dataset: ${errorMessage(error)}`);
+        await refreshFromStorage();
+        return;
+      }
 
       setState((previous) => ({
         ...previous,
@@ -379,13 +495,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workspacesRef.current = upsertById(workspacesRef.current, updated);
       setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
       try {
-        await enqueue(`workspace:${updated.id}`, async () => {
+        const saved = await enqueue(`workspace:${updated.id}`, async () => {
           // Persist the current record, so a save queued behind an edit does not
           // write the stale snapshot it was called with.
           const current = workspacesRef.current.find((entry) => entry.id === updated.id);
-          if (!current) return;
-          await adapter.put('workspaces', current);
+          if (!current) return true;
+          return persistWorkspaceIfNewer(adapter, current);
         });
+        if (!saved) {
+          notify('warning', 'That workspace changed in another tab. Showing the saved version.');
+          await refreshFromStorage();
+        }
       } catch (error) {
         notify('error', `Could not save the workspace: ${errorMessage(error)}`);
       }
@@ -403,14 +523,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workspacesRef.current = upsertById(workspacesRef.current, updated);
       setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
       try {
-        await enqueue(`workspace:${workspaceId}`, async () => {
+        const saved = await enqueue(`workspace:${workspaceId}`, async () => {
           // Persist whatever the workspace holds when the write runs, so queued
           // edits compose instead of replacing each other with stale snapshots.
           // A delete queued behind this write wins: do not re-insert the record.
           const current = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
-          if (!current) return;
-          await adapter.put('workspaces', current);
+          if (!current) return true;
+          return persistWorkspaceIfNewer(adapter, current);
         });
+        if (!saved) {
+          // The other tab has a newer revision. Keep the optimistic view only
+          // until the re-read lands, then show what is actually stored.
+          notify('warning', 'That workspace changed in another tab. Showing the saved version.');
+          await refreshFromStorage();
+        }
       } catch (error) {
         // The optimistic edit stays on screen; say that it was not persisted
         // rather than leaving an unhandled rejection behind every call site.
@@ -540,49 +666,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       const barRecords = Object.entries(merged.barsByDataset).map(([id, bars]) => ({ id, bars }));
+      // A queued workspace write must build from the restored set before the
+      // transaction commits, otherwise it could re-insert a pruned record.
+      await Promise.allSettled([...writeQueues.current.values()]);
+      workspacesRef.current = merged.workspaces;
+      const nextPreferences = bundle.preferences ?? preferencesRef.current;
+      preferencesRef.current = nextPreferences;
       try {
-        // Bars are keyed by dataset id, so the datasets stored before the
-        // restore identify the series to prune afterwards. Listing the bars
-        // store instead would copy every series into memory a second time.
-        const previousDatasetIds = mode === 'replace'
-          ? (await adapter.list<{ id: string }>('datasets')).map((record) => record.id)
-          : [];
-        // Write the restored records first, then delete only what the backup
-        // does not contain. A failure therefore leaves the previous library
-        // readable instead of erasing it before anything new was written.
-        await adapter.putMany('instruments', merged.instruments);
-        await adapter.putMany('datasets', merged.datasets);
-        await adapter.putMany<BarsRecord>('bars', barRecords);
-        await adapter.putMany('workspaces', merged.workspaces);
-        await adapter.putMany('watchlists', merged.watchlists);
-        await adapter.putMany('screeners', merged.screeners);
-        await adapter.putMany('backtests', merged.backtests);
-        if (mode === 'replace') {
-          await removeRecordsNotIn(adapter, 'instruments', merged.instruments);
-          await removeRecordsNotIn(adapter, 'datasets', merged.datasets);
-          const keptBarIds = new Set(barRecords.map((record) => record.id));
-          for (const id of previousDatasetIds) {
-            if (!keptBarIds.has(id)) await adapter.remove('bars', id);
-          }
-          await removeRecordsNotIn(adapter, 'workspaces', merged.workspaces);
-          await removeRecordsNotIn(adapter, 'watchlists', merged.watchlists);
-          await removeRecordsNotIn(adapter, 'screeners', merged.screeners);
-          await removeRecordsNotIn(adapter, 'backtests', merged.backtests);
-        }
-        if (bundle.preferences) {
-          await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
-        }
+        // One transaction across every store: either the whole restore lands or
+        // none of it does. Pruning happens inside it, so a quota failure cannot
+        // erase the previous library before the replacement is written.
+        await adapter.transaction(
+          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'preferences'],
+          async (tx) => {
+            const previousDatasetIds = mode === 'replace'
+              ? (await tx.list<{ id: string }>('datasets')).map((record) => record.id)
+              : [];
+            await tx.putMany('instruments', merged.instruments);
+            await tx.putMany('datasets', merged.datasets);
+            await tx.putMany<BarsRecord>('bars', barRecords);
+            await tx.putMany('workspaces', merged.workspaces);
+            await tx.putMany('watchlists', merged.watchlists);
+            await tx.putMany('screeners', merged.screeners);
+            await tx.putMany('backtests', merged.backtests);
+            if (mode === 'replace') {
+              await removeRecordsNotIn(tx, 'instruments', merged.instruments);
+              await removeRecordsNotIn(tx, 'datasets', merged.datasets);
+              const keptBarIds = new Set(barRecords.map((record) => record.id));
+              for (const id of previousDatasetIds) {
+                if (!keptBarIds.has(id)) await tx.remove('bars', id);
+              }
+              await removeRecordsNotIn(tx, 'workspaces', merged.workspaces);
+              await removeRecordsNotIn(tx, 'watchlists', merged.watchlists);
+              await removeRecordsNotIn(tx, 'screeners', merged.screeners);
+              await removeRecordsNotIn(tx, 'backtests', merged.backtests);
+            }
+            if (bundle.preferences) {
+              await tx.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
+            }
+          },
+        );
       } catch (error) {
-        // Do not update memory or claim success: the library on disk is the only
-        // source of truth after a failed write, and reloading re-reads it.
+        // Do not update memory or claim success: re-read the committed library so
+        // the refs and the screen cannot keep a restore that was rolled back.
         notify('error', `The backup could not be restored: ${errorMessage(error)}`);
+        await refreshFromStorage();
         return;
       }
       if (bundle.preferences) applyThemeAttribute(bundle.preferences.theme);
 
-      const nextPreferences = bundle.preferences ?? preferencesRef.current;
-      workspacesRef.current = merged.workspaces;
-      preferencesRef.current = nextPreferences;
       setState((previous) => ({
         ...previous,
         status: 'ready',
@@ -613,16 +745,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async resetAll() {
       if (!adapter) return;
-      for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'] as StoreName[]) {
-        await adapter.clear(store);
-      }
-      await adapter.put<SettingsRecord>('settings', {
-        id: 'app',
-        schemaVersion: APP_SCHEMA_VERSION,
-        installedAt: new Date().toISOString(),
-        syntheticDataRemovedAt: null,
-      });
+      // Make queued workspace writes see an empty library, then let them settle
+      // before clearing, so a write that started earlier cannot re-insert a
+      // workspace after the reset.
       workspacesRef.current = [];
+      await Promise.allSettled([...writeQueues.current.values()]);
+      try {
+        await adapter.transaction(
+          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'],
+          async (tx) => {
+            for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'] as StoreName[]) {
+              await tx.clear(store);
+            }
+            await tx.put<SettingsRecord>('settings', {
+              id: 'app',
+              schemaVersion: APP_SCHEMA_VERSION,
+              installedAt: new Date().toISOString(),
+              syntheticDataRemovedAt: null,
+            });
+          },
+        );
+      } catch (error) {
+        notify('error', `Local data could not be reset: ${errorMessage(error)}`);
+        await refreshFromStorage();
+        return;
+      }
       setState((previous) => ({
         ...EMPTY_STATE,
         status: 'ready',
@@ -703,6 +850,19 @@ function installedAt(settings: readonly SettingsRecord[]): string {
   return value ?? new Date().toISOString();
 }
 
+/**
+ * Writes a workspace only when its timestamp is at least as new as the stored
+ * revision. Returns false when another tab already committed a newer edit.
+ */
+async function persistWorkspaceIfNewer(adapter: PersistenceAdapter, workspace: Workspace): Promise<boolean> {
+  return adapter.transaction(['workspaces'], async (tx) => {
+    const stored = await tx.get<Workspace>('workspaces', workspace.id);
+    if (stored && stored.updatedAt > workspace.updatedAt) return false;
+    await tx.put('workspaces', workspace);
+    return true;
+  });
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'the local store rejected the write';
 }
@@ -710,18 +870,18 @@ function errorMessage(error: unknown): string {
 /**
  * Removes every record in `store` whose id is not in `keep`.
  *
- * Used by a replace-mode restore after the backup has been written, so the
- * previous library is only pruned once its replacement is safely stored.
+ * Used by a replace-mode restore inside the same transaction that wrote the
+ * backup, so a failure rolls the pruning back with the writes.
  */
 async function removeRecordsNotIn<T extends { id: string }>(
-  adapter: PersistenceAdapter,
+  tx: PersistenceTransaction,
   store: StoreName,
   keep: readonly T[],
 ): Promise<void> {
   const keepIds = new Set(keep.map((entry) => entry.id));
-  const stored = await adapter.list<{ id: string }>(store);
+  const stored = await tx.list<{ id: string }>(store);
   for (const record of stored) {
-    if (!keepIds.has(record.id)) await adapter.remove(store, record.id);
+    if (!keepIds.has(record.id)) await tx.remove(store, record.id);
   }
 }
 

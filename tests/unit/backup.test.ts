@@ -80,6 +80,7 @@ function screener(id: string, universeDatasetIds: string[]): ScreenerDefinition 
     filters: [],
     cutoff: null,
     sortBy: 'symbol',
+    sortWindow: 20,
     sortDirection: 'asc',
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
@@ -190,6 +191,37 @@ describe('mergeBackup', () => {
     const distinct = result.workspaces.find((entry) => entry.id === 'ws-other');
     expect(distinct?.charts[0]?.datasetId).toBe('d-other');
     expect(result.instruments.map((entry) => entry.id).sort()).toEqual(['i-new', 'i-old']);
+  });
+
+  it('keeps identical bars under a different symbol instead of treating them as one series', () => {
+    // Same OHLCV, different instrument: content alone is not identity.
+    const base = {
+      ...emptyBase,
+      instruments: [instrument('i-aaa', 'AAA')],
+      datasets: [dataset('d-aaa', 'i-aaa', 'hash-1')],
+      barsByDataset: { 'd-aaa': bars },
+    };
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i-bbb', 'BBB')],
+      datasets: [dataset('d-bbb', 'i-bbb', 'hash-1')],
+      bars: [{ id: 'd-bbb', bars }],
+      workspaces: [workspace('ws-bbb', 'd-bbb', 'i-bbb')],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(base, bundle);
+
+    expect(result.duplicateDatasets).toBe(0);
+    expect(result.datasets.map((entry) => entry.id).sort()).toEqual(['d-aaa', 'd-bbb']);
+    expect(result.workspaces[0]?.charts[0]?.datasetId).toBe('d-bbb');
+    expect(result.workspaces[0]?.charts[0]?.instrumentId).toBe('i-bbb');
+    expect(result.instruments.map((entry) => entry.id).sort()).toEqual(['i-aaa', 'i-bbb']);
   });
 
   it('remaps comparison overlays through the same duplicate-series resolution', () => {
@@ -353,6 +385,7 @@ describe('parseBackup validation', () => {
       filters: [],
       cutoff: null,
       sortBy: 'symbol',
+      sortWindow: 20,
       sortDirection: 'asc',
       createdAt: '2024-01-01T00:00:00.000Z',
       updatedAt: '2024-01-01T00:00:00.000Z',
@@ -362,6 +395,16 @@ describe('parseBackup validation', () => {
     if (!result.ok) return;
     expect(result.value.screeners).toEqual([]);
     expect(result.skipped).toContain('screeners:s1');
+  });
+
+  it('fills a missing sort window from the sort field when importing older backups', () => {
+    const legacy = { ...screener('s1', ['d1']), sortBy: 'rsi' } as Record<string, unknown>;
+    delete legacy.sortWindow;
+    const result = parseBackup(backupInput({ screeners: [legacy] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.screeners[0]?.sortBy).toBe('rsi');
+    expect(result.value.screeners[0]?.sortWindow).toBe(14);
   });
 
   it('rejects backtests that do not satisfy the backtest schema', () => {

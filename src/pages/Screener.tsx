@@ -5,6 +5,7 @@ import type { ScreenerDefinition, ScreenerField, ScreenerFilter, ScreenerOperato
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { evaluateScreener } from '../lib/screener/evaluate';
+import { defaultFieldWindow, resolveSortWindow } from '../lib/screener/fields';
 import { createScreenerDefinition } from '../state/defaults';
 import { createId } from '../lib/id';
 import { planDatasetActivation } from '../lib/workspace/dataset-activation';
@@ -240,7 +241,16 @@ export function ScreenerPage() {
               <Field label="Sort by">
                 <Select
                   value={definition.sortBy}
-                  onChange={(value) => updateDraft((current) => ({ ...current, sortBy: value }))}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sortBy: value,
+                      sortWindow:
+                        value === 'symbol'
+                          ? current.sortWindow
+                          : defaultFieldWindow(value as ScreenerField),
+                    }))
+                  }
                   options={[
                     { value: 'symbol', label: 'Symbol' },
                     ...FIELD_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
@@ -255,6 +265,21 @@ export function ScreenerPage() {
                     { value: 'desc', label: 'Descending' },
                     { value: 'asc', label: 'Ascending' },
                   ]}
+                />
+              </Field>
+              <Field label="Sort window" hint="Sessions used for the sort value. Filters keep their own windows.">
+                <NumberInput
+                  value={resolveSortWindow(definition.sortBy, definition.sortWindow)}
+                  min={1}
+                  max={500}
+                  step={1}
+                  disabled={!draft || definition.sortBy === 'symbol'}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sortWindow: Number.isFinite(value) ? Math.min(500, Math.max(1, Math.round(value))) : 20,
+                    }))
+                  }
                 />
               </Field>
             </div>
@@ -385,7 +410,13 @@ export function ScreenerPage() {
       {definition && result && (
         <Panel
           title="Results"
-          subtitle={`${result.matchedCount} of ${result.evaluatedCount} series matched`}
+          subtitle={`${result.matchedCount} of ${result.evaluatedCount} series matched · ${
+            definition.sortBy === 'symbol'
+              ? `sorted by symbol (${definition.sortDirection === 'asc' ? 'ascending' : 'descending'})`
+              : `sorted by ${fieldLabel(definition.sortBy as ScreenerField)} (${resolveSortWindow(definition.sortBy, definition.sortWindow)} sessions, ${
+                  definition.sortDirection === 'asc' ? 'ascending' : 'descending'
+                })`
+          }`}
           flush
         >
           {result.rows.length === 0 ? (
@@ -441,7 +472,7 @@ export function ScreenerPage() {
           <li>Return over window: percent change between the close `window` sessions back and the cutoff close.</li>
           <li>Price vs SMA/EMA: percent distance of the close from a moving average of the given period.</li>
           <li>RSI: Wilder's relative strength index on closes over the given period; 0 to 100.</li>
-          <li>Annualised volatility: sample standard deviation of daily returns in the window, times the square root of 252.</li>
+          <li>Annualised volatility: sample standard deviation of session returns in the window, annualised at the dataset frequency (square root of 252 daily, 52 weekly or 12 monthly sessions per year).</li>
           <li>Max drawdown in window: worst close-to-close drawdown inside the window only.</li>
           <li>Relative volume: volume divided by the average volume of the window. Unavailable when the series has no volume.</li>
           <li>&quot;Crossed above&quot; and &quot;crossed below&quot; compare the value now against the threshold and the previous session, so a single touch does not qualify.</li>

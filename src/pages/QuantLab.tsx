@@ -36,7 +36,7 @@ export function QuantLabPage() {
 
   const metrics = useMemo(() => {
     if (!primary) return null;
-    const summary = summarise(primary.bars);
+    const summary = summarise(primary.bars, primary.dataset.frequency);
     const returns = simpleReturns(primary.bars.map((bar) => bar.close));
     let beta: ReturnType<typeof betaAlpha> | null = null;
     if (benchmark) {
@@ -44,25 +44,27 @@ export function QuantLabPage() {
       if (aligned.closes.length === 2) {
         const assetReturns = simpleReturns(aligned.closes[0] as number[]);
         const benchmarkReturns = simpleReturns(aligned.closes[1] as number[]);
-        beta = betaAlpha(assetReturns, benchmarkReturns);
+        beta = betaAlpha(assetReturns, benchmarkReturns, primary.dataset.frequency);
       }
     }
     return { summary, returns, beta };
   }, [primary, benchmark]);
 
   const performance = useMemo(() => {
-    if (!primary) return { series: [] as ChartSeries[], dates: [] as string[] };
+    const empty = { series: [] as ChartSeries[], dates: [] as string[], unavailable: false };
+    if (!primary) return empty;
     const sources = benchmark ? [primary.bars, benchmark.bars] : [primary.bars];
     const aligned = alignOnCommonDates(sources);
     if (aligned.dates.length === 0) {
       // A selected benchmark with no shared sessions is reported explicitly;
       // plotting the primary series alone would silently drop the benchmark.
-      if (benchmark) return { series: [] as ChartSeries[], dates: [] as string[] };
+      if (benchmark) return empty;
       const dates = primary.bars.map((bar) => bar.date);
       const normalised = normalisedPerformance(
         dates,
         primary.bars.map((bar) => bar.close),
       );
+      if (normalised.values.length === 0) return { ...empty, unavailable: true };
       return {
         series: [
           {
@@ -73,22 +75,27 @@ export function QuantLabPage() {
           },
         ],
         dates,
+        unavailable: false,
       };
     }
+    const normalised = aligned.closes.map((closes) => normalisedPerformance(aligned.dates, closes));
+    // A non-positive first shared close makes the whole index meaningless, so it
+    // is reported as unavailable instead of drawing an empty line.
+    if (normalised.some((entry) => entry.values.length === 0)) return { ...empty, unavailable: true };
     return {
-      series: aligned.closes.map((closes, index) => {
-        const normalised = normalisedPerformance(aligned.dates, closes);
+      series: normalised.map((entry, index) => {
         const source = index === 0 ? primary : benchmark;
         return {
           id: source?.dataset.id ?? `series-${index}`,
           label: source?.instrument?.symbol ?? source?.dataset.name ?? `series ${index + 1}`,
           color: PALETTE[index % PALETTE.length] as string,
-          points: normalised.values.map((value, pointIndex) => ({ x: pointIndex, y: value })),
+          points: entry.values.map((value, pointIndex) => ({ x: pointIndex, y: value })),
         };
       }),
       // The labels come from the plotted sessions, not from the primary
       // series, which can be longer than the shared window.
       dates: aligned.dates,
+      unavailable: false,
     };
   }, [primary, benchmark]);
 
@@ -96,7 +103,7 @@ export function QuantLabPage() {
     if (!primary || primary.bars.length < window + 2) return [] as ChartSeries[];
     const dates = primary.bars.map((bar) => bar.date);
     const closes = primary.bars.map((bar) => bar.close);
-    const points = rollingVolatilityPct(dates, closes, window)
+    const points = rollingVolatilityPct(dates, closes, window, primary.dataset.frequency)
       .map((point, index) => ({ x: index, y: point.value }))
       .filter((point): point is { x: number; y: number } => point.y !== null);
     return [
@@ -193,7 +200,7 @@ export function QuantLabPage() {
             <div className="grid-4">
               <Metric label="Total return" value={metrics.summary.totalReturnPct === null ? '--' : formatPercent(metrics.summary.totalReturnPct)} tone={metrics.summary.totalReturnPct !== null && metrics.summary.totalReturnPct >= 0 ? 'up' : 'down'} />
               <Metric label="CAGR" value={metrics.summary.cagrPct === null ? '--' : formatPercent(metrics.summary.cagrPct)} />
-              <Metric label="Volatility" value={metrics.summary.annualisedVolatilityPct === null ? '--' : formatPercent(metrics.summary.annualisedVolatilityPct)} note="Annualised, sample standard deviation" />
+              <Metric label="Volatility" value={metrics.summary.annualisedVolatilityPct === null ? '--' : formatPercent(metrics.summary.annualisedVolatilityPct)} note={`Annualised at the ${primary.dataset.frequency} frequency`} />
               <Metric label="Sharpe" value={metrics.summary.sharpe === null ? '--' : metrics.summary.sharpe.toFixed(2)} note="Risk-free rate assumed at zero" />
               <Metric label="Sortino" value={metrics.summary.sortino === null ? '--' : metrics.summary.sortino.toFixed(2)} note="Downside deviation only" />
               <Metric label="Max drawdown" value={metrics.summary.maxDrawdownPct === null ? '--' : formatPercent(metrics.summary.maxDrawdownPct)} tone="down" />
@@ -203,8 +210,8 @@ export function QuantLabPage() {
               <Metric label="CVaR 95" value={metrics.summary.cvar95Pct === null ? '--' : formatPercent(metrics.summary.cvar95Pct)} note="Expected shortfall beyond VaR" />
               <Metric label="Best session" value={metrics.summary.bestDayPct === null ? '--' : formatPercent(metrics.summary.bestDayPct)} tone="up" />
               <Metric label="Worst session" value={metrics.summary.worstDayPct === null ? '--' : formatPercent(metrics.summary.worstDayPct)} tone="down" />
-              <Metric label="Up-day rate" value={metrics.summary.positiveDayRatePct === null ? '--' : formatPercent(metrics.summary.positiveDayRatePct)} />
-              <Metric label="Skewness" value={metrics.summary.skewness === null ? '--' : metrics.summary.skewness.toFixed(2)} note="Sample skew of daily returns" />
+              <Metric label="Up-session rate" value={metrics.summary.positiveDayRatePct === null ? '--' : formatPercent(metrics.summary.positiveDayRatePct)} />
+              <Metric label="Skewness" value={metrics.summary.skewness === null ? '--' : metrics.summary.skewness.toFixed(2)} note="Sample skew of session returns" />
               <Metric label="Excess kurtosis" value={metrics.summary.excessKurtosis === null ? '--' : metrics.summary.excessKurtosis.toFixed(2)} note="Tail thickness versus normal" />
               <Metric
                 label={benchmark ? `Beta vs ${benchmark.instrument?.symbol ?? ''}` : 'Beta'}
@@ -226,12 +233,19 @@ export function QuantLabPage() {
             <Panel
               title="Normalised performance"
               subtitle={
-                benchmark && performance.series.length === 0
-                  ? `No overlapping sessions with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
-                  : 'Percent change from the first common session'
+                performance.unavailable
+                  ? 'Baseline unavailable'
+                  : benchmark && performance.series.length === 0
+                    ? `No overlapping sessions with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
+                    : 'Percent change from the first common session'
               }
             >
-              {benchmark && performance.series.length === 0 ? (
+              {performance.unavailable ? (
+                <EmptyState
+                  title="Baseline unavailable"
+                  body="The first shared close is not a usable positive price, so this series cannot be indexed to 0 without inventing a value."
+                />
+              ) : benchmark && performance.series.length === 0 ? (
                 <EmptyState
                   title="No overlapping sessions"
                   body={`${symbols} and ${benchmark.instrument?.symbol ?? benchmark.dataset.name} share no sessions, so there is nothing to compare.`}
@@ -356,7 +370,7 @@ export function QuantLabPage() {
             </thead>
             <tbody>
               {views.map((view) => {
-                const summary = summarise(view.bars);
+                const summary = summarise(view.bars, view.dataset.frequency);
                 const returns = simpleReturns(view.bars.map((bar) => bar.close));
                 const last = view.bars[view.bars.length - 1];
                 return (
@@ -383,15 +397,15 @@ export function QuantLabPage() {
         <Panel title="Method notes">
           <ul className="list-reset stack field-hint">
             <li>Returns are simple session-over-session changes in close. No dividends, splits or fees are implied.</li>
-            <li>Annualisation uses 252 sessions. CAGR uses calendar years between the first and last session, and is withheld for spans of 30 days or less.</li>
+            <li>Annualisation uses the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year. CAGR uses calendar years between the first and last session, and is withheld for spans of 30 days or less.</li>
             <li>
               VaR and CVaR are historical (non-parametric) and need at least 20 returns.
               {historicalVarPct(metrics.returns, 0.95) === null ? ' This series is below that threshold, so both are withheld.' : ''}
             </li>
             <li>Maximum drawdown is close-to-close, not an intraday peak-to-trough measure.</li>
             <li>Multi-series comparison uses only dates present in every selected series. Nothing is forward-filled or interpolated.</li>
-            <li>Correlation is Pearson on daily simple returns, computed on the shared sessions only.</li>
-            <li>Beta and alpha use aligned daily returns with a zero risk-free rate. Beta is covariance over benchmark variance, not a regression with an intercept, and alpha is annualised.</li>
+            <li>Correlation is Pearson on session simple returns, computed on the shared sessions only. A correlation is withheld when either series is too short or has zero variance, including the diagonal.</li>
+            <li>Beta and alpha use aligned session returns with a zero risk-free rate. Beta is covariance over benchmark variance, not a regression with an intercept, and alpha is annualised at the dataset frequency.</li>
             <li>
               <Link to="/learn?section=risk">Read the full method, including when a metric is withheld</Link>
             </li>

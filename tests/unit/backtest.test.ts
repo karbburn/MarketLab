@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { BacktestConfig, Bar, StrategyRule } from '../../src/domain/types';
 import { compare } from '../../src/lib/backtest/compare';
 import { runBacktest } from '../../src/lib/backtest/engine';
-import { StrategyContext } from '../../src/lib/backtest/rules';
+import { StrategyContext, requiredWarmup } from '../../src/lib/backtest/rules';
 import { addDays } from '../../src/lib/date';
 
 function series(opens: readonly number[], closes: readonly number[]): Bar[] {
@@ -118,7 +118,7 @@ describe('runBacktest execution', () => {
     expect(trade.netPnl).toBeLessThan(trade.grossPnl);
   });
 
-  it('labels a stop-loss exit and fills it at the stop price', () => {
+  it('fills a stop gapped through at the session open, not the stop price', () => {
     const opens = [10, 11, 12, 11, 10, 11, 12, 11, 9];
     const closes = [10, 11, 12, 11, 10, 11, 12, 11, 9];
     const bars = series(opens, closes);
@@ -126,11 +126,49 @@ describe('runBacktest execution', () => {
 
     expect(result.trades).toHaveLength(1);
     const trade = result.trades[0] as (typeof result.trades)[number];
-    // Entered at bar 6 open 12; 5 percent stop = 11.4; bar 7 low is 10.5.
+    // Entered at bar 6 open 12; 5 percent stop = 11.4; bar 7 opens at 11, below
+    // the stop, so a sell stop cannot fill at 11.4.
     expect(trade.entryPrice).toBe(12);
     expect(trade.exitDate).toBe(bars[7]?.date);
     expect(trade.exitReason).toBe('stop-loss');
+    expect(trade.exitPrice).toBe(11);
+    expect(trade.exitPrice).toBeLessThanOrEqual(opens[7] as number);
+  });
+
+  it('fills a stop touched intrabar at the stop when the session opens above it', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12, 11.5, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11.5, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { stopLossPct: 5 }));
+
+    const trade = result.trades[0] as (typeof result.trades)[number];
+    // Bar 7 opens at 11.5 (above the 11.4 stop) and trades down to 11.0.
+    expect(trade.exitDate).toBe(bars[7]?.date);
+    expect(trade.exitReason).toBe('stop-loss');
     expect(trade.exitPrice).toBeCloseTo(11.4, 10);
+  });
+
+  it('treats an open exactly at the stop as a fill at the stop', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12, 11.4, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11.4, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { stopLossPct: 5 }));
+
+    const trade = result.trades[0] as (typeof result.trades)[number];
+    expect(trade.exitReason).toBe('stop-loss');
+    expect(trade.exitPrice).toBeCloseTo(11.4, 10);
+  });
+
+  it('does not stop out when the session low stays above the stop', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12, 12];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 12];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { stopLossPct: 5 }));
+
+    const trade = result.trades[0] as (typeof result.trades)[number];
+    // Bar 7 low is 11.5, above the 11.4 stop; data ends on that bar.
+    expect(trade.exitReason).toBe('end-of-data');
+    expect(trade.exitPrice).toBe(12);
   });
 
   it('labels a position still open at the final bar as end-of-data', () => {
@@ -178,6 +216,47 @@ describe('runBacktest execution', () => {
     expect(trade.costs).toBeGreaterThan(0);
     expect(trade.netPnl).toBeCloseTo(trade.grossPnl - trade.costs, 10);
   });
+
+  it('sizes a full allocation so notional plus entry commission equals the cash committed', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12.5, 11, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { commissionBps: 10 }));
+    const trade = result.trades[0] as (typeof result.trades)[number];
+
+    // 10 000 at 12.5 with a 10 bp entry commission: 10 000 / (12.5 * 1.001).
+    const quantity = 10_000 / (12.5 * 1.001);
+    expect(trade.quantity).toBeCloseTo(quantity, 10);
+    expect(trade.quantity * trade.entryPrice * (1 + 0.001)).toBeCloseTo(10_000, 8);
+    // No borrowing: after the fill cash is zero, so the entry-bar mark equals shares * close.
+    const entryPoint = result.equityCurve.find((point) => point.date === trade.entryDate);
+    expect(entryPoint?.equity).toBeCloseTo(quantity * 12, 8);
+    expect(result.equityCurve.every((point) => point.equity >= 0)).toBe(true);
+  });
+
+  it('commits only the configured fraction of cash including the entry commission', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12.5, 11, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { commissionBps: 10, positionSizePct: 50 }));
+    const trade = result.trades[0] as (typeof result.trades)[number];
+
+    const quantity = 5_000 / (12.5 * 1.001);
+    expect(trade.quantity).toBeCloseTo(quantity, 10);
+    const entryPoint = result.equityCurve.find((point) => point.date === trade.entryDate);
+    // 5 000 of cash remains plus the marked value of the shares.
+    expect(entryPoint?.equity).toBeCloseTo(5_000 + quantity * 12, 8);
+  });
+
+  it('reconciles the final equity with initial capital plus closed-trade net PnL', () => {
+    const opens = [10, 11, 12, 11, 10, 11, 12.5, 11, 10];
+    const closes = [10, 11, 12, 11, 10, 11, 12, 11, 10];
+    const bars = series(opens, closes);
+    const result = runBacktest(bars, config([entry], [exit], { commissionBps: 10, slippageBps: 10 }));
+    const netPnl = result.trades.reduce((total, trade) => total + trade.netPnl, 0);
+    const finalEquity = result.equityCurve[result.equityCurve.length - 1]?.equity;
+    expect(finalEquity).toBeCloseTo(10_000 + netPnl, 8);
+  });
 });
 
 describe('StrategyContext indicator caches', () => {
@@ -196,5 +275,79 @@ describe('StrategyContext indicator caches', () => {
     const second = context.macd(5, 10, 3);
     expect(second.macd).not.toBe(first.macd);
     expect(second.macd.some((value, index) => value !== first.macd[index])).toBe(true);
+  });
+});
+
+describe('requiredWarmup', () => {
+  it('matches the first index the evaluator can actually compute for each field', () => {
+    expect(requiredWarmup([])).toBe(1);
+    expect(requiredWarmup([rule('price-vs-sma', 'gt', 0, 50)])).toBe(50);
+    expect(requiredWarmup([rule('rsi', 'lt', 30, 14)])).toBe(15);
+    expect(requiredWarmup([rule('breakout-high', 'gt', 0, 20)])).toBe(21);
+    expect(requiredWarmup([{ ...rule('sma-cross', 'gt', 0, 10), secondaryWindow: 30 }])).toBe(30);
+    expect(requiredWarmup([rule('sma-cross', 'gt', 0, 10)])).toBe(20);
+    expect(requiredWarmup([rule('macd-cross', 'gt', 0, 12)])).toBe(34);
+    expect(requiredWarmup([{ ...rule('macd-cross', 'gt', 0, 12), secondaryWindow: 5 }])).toBe(30);
+    expect(requiredWarmup([rule('rsi', 'lt', 30, 14), rule('breakout-low', 'lt', 0, 30)])).toBe(31);
+  });
+
+  it('agrees with the indicator series the evaluator reads', () => {
+    const bars = series(
+      Array.from({ length: 120 }, () => 10),
+      Array.from({ length: 120 }, (_, index) => 10 + index * 0.5),
+    );
+    const context = new StrategyContext(bars);
+
+    const fast = context.sma(10);
+    const slow = context.sma(30);
+    expect(slow[29]).not.toBeNull();
+    expect(slow[28]).toBeNull();
+    expect(fast[29]).not.toBeNull();
+
+    const rsiSeries = context.rsi(14);
+    expect(rsiSeries[14]).not.toBeNull();
+    expect(rsiSeries[13]).toBeNull();
+
+    const highest = context.highestHigh(20);
+    expect(highest[19]).not.toBeNull();
+    expect(highest[18]).toBeNull();
+
+    const { signal } = context.macd(12, 26, 9);
+    expect(signal[33]).not.toBeNull();
+    expect(signal[32]).toBeNull();
+  });
+});
+
+describe('backtest metric frequency', () => {
+  const bars = series(
+    [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+    [100, 102, 101, 104, 103, 106, 105, 108, 107, 110],
+  );
+  const base = config(
+    [rule('price-vs-sma', 'gt', 0, 2)],
+    [rule('price-vs-sma', 'lt', 0, 2)],
+    { commissionBps: 0 },
+  );
+
+  it('annualises reported risk metrics with the requested frequency', () => {
+    const daily = runBacktest(bars, base, 'daily');
+    const weekly = runBacktest(bars, base, 'weekly');
+    const monthly = runBacktest(bars, base, 'monthly');
+    expect(daily.metrics.annualisedVolatilityPct).not.toBeNull();
+    expect(weekly.metrics.annualisedVolatilityPct as number).toBeCloseTo(
+      (daily.metrics.annualisedVolatilityPct as number) * Math.sqrt(52 / 252),
+      8,
+    );
+    expect(monthly.metrics.annualisedVolatilityPct as number).toBeCloseTo(
+      (daily.metrics.annualisedVolatilityPct as number) * Math.sqrt(12 / 252),
+      8,
+    );
+  });
+
+  it('keeps the default daily behaviour when no frequency is supplied', () => {
+    expect(runBacktest(bars, base).metrics.annualisedVolatilityPct).toBeCloseTo(
+      runBacktest(bars, base, 'daily').metrics.annualisedVolatilityPct as number,
+      12,
+    );
   });
 });

@@ -1,7 +1,7 @@
 import type { Bar, Dataset, Instrument, ScreenerDefinition, ScreenerField } from '../../domain/types';
 import { compare } from '../backtest/compare';
 import { compareDates } from '../date';
-import { computeField } from './fields';
+import { computeField, resolveSortWindow } from './fields';
 
 export interface ScreenerInput {
   dataset: Dataset;
@@ -18,6 +18,8 @@ export interface ScreenerRow {
   assetType: Instrument['assetType'];
   asOf: string | null;
   values: Partial<Record<ScreenerField, number | null>>;
+  /** Value used for ordering, computed with the definition's sort window. */
+  sortValue?: number | null;
   passed: boolean;
 }
 
@@ -50,20 +52,23 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
     const filterResults: boolean[] = [];
 
     for (const filter of definition.filters) {
-      const reading = computeField(filter.field, filter.window, bars);
+      const reading = computeField(filter.field, filter.window, bars, input.dataset.frequency);
       values[filter.field] = reading.current;
       filterResults.push(compare(filter.operator, reading.current, reading.previous, filter.value));
     }
 
     // The Sort-by control offers fields independently of the filter list, so the
-    // sort field must be computed even when no filter uses it.
-    if (definition.sortBy !== 'symbol') {
-      const field = definition.sortBy as ScreenerField;
-      if (!(field in values)) {
-        const window = definition.filters.find((filter) => filter.field === field)?.window ?? definition.filters[0]?.window ?? 20;
-        values[field] = computeField(field, window, bars).current;
-      }
-    }
+    // sort field is always computed even when a filter uses the same field. The
+    // persisted sort window controls ordering; filter windows never leak into it.
+    const sortField = definition.sortBy === 'symbol' ? null : (definition.sortBy as ScreenerField);
+    const sortWindow = sortField ? resolveSortWindow(sortField, definition.sortWindow) : 0;
+    const sortValue = sortField
+      ? computeField(sortField, sortWindow, bars, input.dataset.frequency).current
+      : null;
+    // Keep the historical row shape: a sort-only field is also exposed in
+    // `values`, but ordering always uses `sortValue` so a same-field filter's
+    // window cannot leak into it.
+    if (sortField && !(sortField in values)) values[sortField] = sortValue;
 
     rows.push({
       datasetId: input.dataset.id,
@@ -74,6 +79,7 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
       assetType: input.instrument.assetType,
       asOf,
       values,
+      sortValue,
       passed: combine(filterResults, definition.combinators),
     });
   }
@@ -100,8 +106,8 @@ function combine(results: readonly boolean[], combinators: ReadonlyArray<'AND' |
 
 function compareRows(a: ScreenerRow, b: ScreenerRow, sortBy: string, direction: 'asc' | 'desc'): number {
   if (sortBy === 'symbol') return direction === 'asc' ? a.symbol.localeCompare(b.symbol) : b.symbol.localeCompare(a.symbol);
-  const left = a.values[sortBy as ScreenerField];
-  const right = b.values[sortBy as ScreenerField];
+  const left = a.sortValue;
+  const right = b.sortValue;
   const leftMissing = left == null;
   const rightMissing = right == null;
   if (leftMissing && rightMissing) return a.symbol.localeCompare(b.symbol);

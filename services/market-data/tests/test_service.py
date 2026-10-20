@@ -413,3 +413,43 @@ def test_empty_frame_with_broken_metadata_maps_to_nodata_404(client: TestClient,
     response = client.get("/api/history", params={"symbol": "QWERTY123XYZ", "start": "2024-01-01", "end": "2024-02-01"})
     assert response.status_code == 404
     assert "No data found" in response.json()["detail"] or "no sessions" in response.json()["detail"].lower()
+
+
+def test_provider_receives_an_exclusive_end_for_an_inclusive_api_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The API promises an inclusive end; yfinance excludes it."""
+    seen: dict[str, str] = {}
+    frame = history_frame(
+        [{"date": "2024-01-10", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000}]
+    )
+
+    class FakeTicker:
+        history_metadata: dict = {}
+
+        def history(self, start: str, end: str, interval: str, auto_adjust: bool, actions: bool) -> pd.DataFrame:
+            seen["start"] = start
+            seen["end"] = end
+            return frame
+
+    monkeypatch.setattr(service.yf, "Ticker", lambda symbol: FakeTicker())
+    fetched, *_ = service.fetch_history("AAPL", "2024-01-01", "2024-01-10")
+    assert not fetched.empty
+    assert seen == {"start": "2024-01-01", "end": "2024-01-11"}
+
+
+def test_provider_end_rolls_over_month_and_year_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    ends: list[str] = []
+    frame = history_frame(
+        [{"date": "2024-12-31", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000}]
+    )
+
+    class FakeTicker:
+        history_metadata: dict = {}
+
+        def history(self, start: str, end: str, interval: str, auto_adjust: bool, actions: bool) -> pd.DataFrame:
+            ends.append(end)
+            return frame
+
+    monkeypatch.setattr(service.yf, "Ticker", lambda symbol: FakeTicker())
+    service.fetch_history("AAPL", "2024-12-01", "2024-12-31")
+    service.fetch_history("AAPL", "2024-12-01", "2025-02-28")
+    assert ends == ["2025-01-01", "2025-03-01"]

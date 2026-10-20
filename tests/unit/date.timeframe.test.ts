@@ -130,13 +130,13 @@ describe('aggregateBars weekly OHLCV invariants', () => {
 
   it('takes open from the first bar, high/low extremes, close from the last and sums volume', () => {
     const weekly = aggregateBars(daily, '1W');
-    expect(weekly[0]).toEqual({ date: '2024-01-05', open: 10, high: 16, low: 9, close: 15, volume: 1500 });
-    expect(weekly[1]).toEqual({ date: '2024-01-09', open: 15, high: 18, low: 14, close: 17, volume: 1300 });
+    expect(weekly[0]).toEqual({ date: '2024-01-05', open: 10, high: 16, low: 9, close: 15, volume: 1500, bucket: '2024-W01' });
+    expect(weekly[1]).toEqual({ date: '2024-01-09', open: 15, high: 18, low: 14, close: 17, volume: 1300, bucket: '2024-W02' });
   });
 
   it('nulls the bucket volume when any input volume is null', () => {
     const weekly = aggregateBars(daily, '1W');
-    expect(weekly[2]).toEqual({ date: '2024-01-16', open: 17, high: 20, low: 16, close: 19, volume: null });
+    expect(weekly[2]).toEqual({ date: '2024-01-16', open: 17, high: 20, low: 16, close: 19, volume: null, bucket: '2024-W03' });
   });
 
   it('returns a copy untouched for the daily timeframe', () => {
@@ -150,7 +150,7 @@ describe('aggregateBars weekly OHLCV invariants', () => {
     const shuffled = [daily[4] as Bar, daily[0] as Bar, daily[2] as Bar, daily[1] as Bar, daily[3] as Bar, daily[8] as Bar, daily[5] as Bar, daily[6] as Bar, daily[7] as Bar];
     const weekly = aggregateBars(shuffled, '1W');
     expect(weekly.map((entry) => entry.date)).toEqual(['2024-01-05', '2024-01-09', '2024-01-16']);
-    expect(weekly[0]).toEqual({ date: '2024-01-05', open: 10, high: 16, low: 9, close: 15, volume: 1500 });
+    expect(weekly[0]).toEqual({ date: '2024-01-05', open: 10, high: 16, low: 9, close: 15, volume: 1500, bucket: '2024-W01' });
   });
 });
 

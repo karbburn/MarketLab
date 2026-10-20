@@ -51,6 +51,7 @@ function screener(id: string, universeDatasetIds: string[]): ScreenerDefinition 
     filters: [],
     cutoff: null,
     sortBy: 'symbol',
+    sortWindow: 20,
     sortDirection: 'asc',
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',

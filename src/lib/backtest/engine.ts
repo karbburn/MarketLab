@@ -4,8 +4,9 @@ import type {
   BacktestTrade,
   Bar,
   DateString,
+  Frequency,
 } from '../../domain/types';
-import { maxDrawdownPct, TRADING_DAYS_PER_YEAR } from '../quant/metrics';
+import { maxDrawdownPct, periodsPerYear } from '../quant/metrics';
 import { sampleStdDev, mean } from '../stats';
 import { compareDates, yearsBetween } from '../date';
 import { evaluateRules, requiredWarmup, StrategyContext } from './rules';
@@ -19,12 +20,16 @@ import { evaluateRules, requiredWarmup, StrategyContext } from './rules';
  *    less. `slippageBps` is charged on entry and again on exit.
  * 3. Commission is charged on the traded notional at entry and at exit.
  * 4. Size is a fixed percentage of *current* equity, re-evaluated at entry, and
- *    the resulting share count is fractional (no lot-size rounding).
+ *    the resulting share count is fractional (no lot-size rounding). The share
+ *    count is reduced so that the traded notional plus the entry commission
+ *    exactly equals the allocated cash; the account never borrows to pay costs.
  * 5. If a bar's range touches both the stop and the target, the stop is assumed
  *    to fill first. This is the conservative assumption and is documented
  *    wherever the result is shown.
- * 6. Stop/target fills are approximated at the stop/target price (plus adverse
- *    slippage), not at the bar's open.
+ * 6. A long stop is a sell stop: when the session opens at or below the stop the
+ *    order fills at the open (a gap cannot fill at a better price), otherwise it
+ *    fills at the stop. The target is booked at the target price even when the
+ *    session gaps above it, which is deliberately optimistic on that side.
  * 7. A position still open at the final bar is closed at the last close and
  *    labelled `end-of-data`. No forward return is invented.
  * 8. The benchmark is a buy-and-hold of the same instrument over the same
@@ -45,7 +50,7 @@ interface OpenPosition {
   entryCosts: number;
 }
 
-export function runBacktest(bars: readonly Bar[], config: BacktestConfig): BacktestResult {
+export function runBacktest(bars: readonly Bar[], config: BacktestConfig, frequency: Frequency = 'daily'): BacktestResult {
   const windowBars = sliceWindow(bars, config.startDate, config.endDate);
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestResult['equityCurve'] = [];
@@ -89,7 +94,9 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig): Backt
     if (position === null && pendingEntryIndex === i) {
       const entryPrice = bar.open * (1 + slippageRate);
       const equity = cash;
-      const quantity = (equity * positionFraction) / entryPrice;
+      // Deduct the entry commission from the allocation so cash never goes
+      // negative at 100 % size: notional + commission === cash * fraction.
+      const quantity = (equity * positionFraction) / (entryPrice * (1 + commissionRate));
       if (quantity > 0) {
         const notional = quantity * entryPrice;
         const entryCommission = notional * commissionRate;
@@ -116,7 +123,10 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig): Backt
       const stop = position.stopPrice;
       const target = position.targetPrice;
       if (stop !== null && bar.low <= stop) {
-        cash = closePosition(position, stop, 'stop-loss', commissionRate, slippageRate, trades, cash, i, bar.date);
+        // Sell stop: a session that opens through the stop fills at the open,
+        // never at the better stop price. Equality fills at the stop.
+        const stopFill = Math.min(stop, bar.open);
+        cash = closePosition(position, stopFill, 'stop-loss', commissionRate, slippageRate, trades, cash, i, bar.date);
         position = null;
         pendingExitIndex = -1;
       } else if (target !== null && bar.high >= target) {
@@ -169,6 +179,7 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig): Backt
       totalBars: equityCurve.length,
       firstDate: firstEquityDate,
       lastDate: lastBar.date,
+      frequency,
     }),
   };
 }
@@ -237,10 +248,12 @@ interface MetricInput {
   totalBars: number;
   firstDate: DateString;
   lastDate: DateString;
+  frequency: Frequency;
 }
 
 function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   const { trades, equityCurve, initialCapital } = input;
+  const periods = periodsPerYear(input.frequency);
   const finalEquity = equityCurve[equityCurve.length - 1]?.equity ?? initialCapital;
   const totalReturnPct = (finalEquity / initialCapital - 1) * 100;
 
@@ -252,9 +265,9 @@ function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   }
 
   const sd = sampleStdDev(dailyReturns);
-  const annualisedVolatilityPct = sd === null ? 0 : sd * Math.sqrt(TRADING_DAYS_PER_YEAR) * 100;
+  const annualisedVolatilityPct = sd === null ? 0 : sd * Math.sqrt(periods) * 100;
   const meanReturn = mean(dailyReturns);
-  const annualisedReturnPct = meanReturn === null ? null : meanReturn * TRADING_DAYS_PER_YEAR * 100;
+  const annualisedReturnPct = meanReturn === null ? null : meanReturn * periods * 100;
   const sharpe =
     annualisedReturnPct === null || annualisedVolatilityPct === 0
       ? null
