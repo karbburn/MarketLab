@@ -7,6 +7,7 @@ import {
   Cursor,
   FrameCorners,
   ListBullets,
+  Magnet,
   Minus,
   Plus,
   Ruler,
@@ -21,7 +22,14 @@ import type { ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, Price
 import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
-import { anchorsRequired, isDrawingComplete, priceRangeInfo } from '../../lib/drawings/geometry';
+import {
+  anchorsRequired,
+  hitTestDrawingAnchor,
+  isDrawingComplete,
+  priceRangeInfo,
+  replaceDrawingAnchor,
+  snapPriceToBar,
+} from '../../lib/drawings/geometry';
 import { removeDrawing } from '../../lib/drawings/management';
 import { createId } from '../../lib/id';
 import { useStore } from '../../state/store';
@@ -90,13 +98,21 @@ export function ChartPanel({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<ChartController | null>(null);
-  const dragRef = useRef<{ id: string; startPrice: number; startDate: string; latest: Drawing[] } | null>(null);
+  const dragRef = useRef<
+    | { kind: 'move'; id: string; startPrice: number; startDate: string; latest: Drawing[] }
+    | { kind: 'anchor'; id: string; anchorIndex: number; latest: Drawing[] }
+    | null
+  >(null);
   const historyRef = useRef<{ past: Drawing[][]; future: Drawing[][] }>({ past: [], future: [] });
   // History lives in a ref so pointer handlers stay synchronous; the lengths are
   // mirrored into state to drive the disabled state of the undo/redo controls.
   const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 
   const [tool, setTool] = useState<DrawingType | 'cursor'>('cursor');
+  // Magnet mode is a transient drawing preference, like an active tool. It
+  // affects creation and anchor dragging but is deliberately not persisted into
+  // the workspace or backup schema.
+  const [magnet, setMagnet] = useState(false);
   const [pendingAnchors, setPendingAnchors] = useState<DrawingAnchor[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
@@ -342,12 +358,17 @@ export function ChartPanel({
         context.fillText(drawing.text, anchor.x + 6, anchor.y - 4);
       }
 
-      if (selected) {
+      // A locked drawing is still highlighted when selected, but its endpoints
+      // are not interactive handles.
+      if (selected && !drawing.locked) {
         for (const point of resolved) {
-          context.fillStyle = labelColor;
           context.beginPath();
-          context.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
+          context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          context.fillStyle = labelColor;
           context.fill();
+          context.lineWidth = 1.5;
+          context.strokeStyle = drawing.style.color;
+          context.stroke();
         }
       }
     }
@@ -456,15 +477,21 @@ export function ChartPanel({
       .then(() => setDraftDrawings((current) => (current === next ? null : current)));
   }, [actions, chart.id, syncHistory, workspaceId]);
 
+  /**
+   * Screen positions aligned with the anchor array. A null entry means that
+   * anchor is outside the current viewport; keeping the hole preserves the
+   * index the pointer handler needs in order to move one endpoint.
+   */
+  const anchorScreenPoints = (drawing: Drawing, controller: ChartController): Array<{ x: number; y: number } | null> =>
+    drawing.anchors.map((entry) => {
+      const x = controller.timeToX(entry.date);
+      const y = controller.priceToY(entry.price);
+      return x === null || y === null ? null : { x, y };
+    });
+
   /** Screen positions of a drawing's anchors, dropping any that do not resolve. */
   const screenPoints = (drawing: Drawing, controller: ChartController): Array<{ x: number; y: number }> =>
-    drawing.anchors
-      .map((entry) => {
-        const x = controller.timeToX(entry.date);
-        const y = controller.priceToY(entry.price);
-        return x === null || y === null ? null : { x, y };
-      })
-      .filter((entry): entry is { x: number; y: number } => entry !== null);
+    anchorScreenPoints(drawing, controller).filter((entry): entry is { x: number; y: number } => entry !== null);
 
   const pointForAnchor = (anchor: DrawingAnchor): { x: number; y: number } | null => {
     const controller = controllerRef.current;
@@ -474,7 +501,7 @@ export function ChartPanel({
     return x === null || y === null ? null : { x, y };
   };
 
-  const pointerToAnchor = (event: React.MouseEvent<HTMLDivElement>): DrawingAnchor | null => {
+  const pointerToAnchor = (event: React.MouseEvent<HTMLDivElement>, magnetEnabled = false): DrawingAnchor | null => {
     const controller = controllerRef.current;
     if (!controller) return null;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -482,30 +509,56 @@ export function ChartPanel({
     const y = event.clientY - rect.top;
     const rawDate = controller.xToDate(x);
     const date = rawDate ? controller.nearestDate(rawDate) : null;
-    const price = controller.yToPrice(y);
-    if (!date || price === null) return null;
-    return { date, price };
+    const rawPrice = controller.yToPrice(y);
+    if (!date || rawPrice === null) return null;
+    if (!magnetEnabled) return { date, price: rawPrice };
+    const bar = rendered.find((entry) => entry.date === date);
+    if (!bar) return { date, price: rawPrice };
+    return { date, price: snapPriceToBar(rawPrice, bar, (value) => controller.priceToY(value)) };
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     onFocus();
     // The shortcuts belong to this panel, so the pointer click takes focus.
     stageRef.current?.focus({ preventScroll: true });
-    const anchor = pointerToAnchor(event);
-    if (!anchor) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
 
     if (tool === 'cursor') {
       const controller = controllerRef.current;
       if (!controller) return;
+      // Handles take precedence over the drawing body, otherwise grabbing an
+      // endpoint would move the whole object.
+      if (selectedDrawing && !selectedDrawing.locked) {
+        const anchorIndex = hitTestDrawingAnchor(anchorScreenPoints(selectedDrawing, controller), point);
+        if (anchorIndex !== null) {
+          setSelectedId(selectedDrawing.id);
+          dragRef.current = {
+            kind: 'anchor',
+            id: selectedDrawing.id,
+            anchorIndex,
+            latest: localDrawingsRef.current,
+          };
+          controller.setDragToPan(false);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          return;
+        }
+      }
       const hit = [...localDrawings].reverse().find((drawing) => {
         if (drawing.locked) return false;
         return drawingHit(drawing, screenPoints(drawing, controller), point);
       });
       setSelectedId(hit ? hit.id : null);
       if (hit) {
-        dragRef.current = { id: hit.id, startPrice: anchor.price, startDate: anchor.date, latest: localDrawingsRef.current };
+        const anchor = pointerToAnchor(event);
+        if (!anchor) return;
+        dragRef.current = {
+          kind: 'move',
+          id: hit.id,
+          startPrice: anchor.price,
+          startDate: anchor.date,
+          latest: localDrawingsRef.current,
+        };
         // Stop the chart from panning underneath the drawing drag.
         controller.setDragToPan(false);
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -513,6 +566,8 @@ export function ChartPanel({
       return;
     }
 
+    const anchor = pointerToAnchor(event, magnet);
+    if (!anchor) return;
     const first = pendingAnchors[0];
     if (!first) {
       // Single-anchor tools complete on the first click.
@@ -540,12 +595,16 @@ export function ChartPanel({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const anchor = pointerToAnchor(event);
+    const drag = dragRef.current;
+    // Magnet only applies to anchors the user is placing or reshaping, never to
+    // a whole-object move where it would pull individual endpoints apart.
+    const snapping = tool !== 'cursor' ? magnet : drag?.kind === 'anchor' && magnet;
+    const anchor = pointerToAnchor(event, snapping);
     // The overlay covers the pane while a tool is active, so the chart
     // crosshair no longer fires. The readout and the preview follow the
     // pointer event instead. With the pointer tool the chart owns the
     // crosshair, so this path stays out of the way and cannot double-render.
-    if (anchor && tool !== 'cursor') {
+    if (anchor && (tool !== 'cursor' || drag?.kind === 'anchor')) {
       setReadout((current) => {
         if (current.date === anchor.date && current.price === anchor.price) return current;
         const index = rendered.findIndex((bar) => bar.date === anchor.date);
@@ -553,11 +612,22 @@ export function ChartPanel({
       });
     }
 
-    const drag = dragRef.current;
     if (!drag || event.buttons === 0) return;
     if (!anchor) return;
     const controller = controllerRef.current;
     if (!controller) return;
+
+    if (drag.kind === 'anchor') {
+      const drawing = drag.latest.find((entry) => entry.id === drag.id);
+      if (!drawing) return;
+      const anchors = replaceDrawingAnchor(drawing.anchors, drag.anchorIndex, anchor);
+      if (anchors === drawing.anchors) return;
+      const next = drag.latest.map((entry) => (entry.id === drag.id ? { ...entry, anchors } : entry));
+      localDrawingsRef.current = next;
+      setDraftDrawings(next);
+      return;
+    }
+
     const priceDelta = anchor.price - drag.startPrice;
     const indexDelta = indexDistance(controller, drag.startDate, anchor.date);
     if (indexDelta === null) return;
@@ -823,6 +893,16 @@ export function ChartPanel({
               <entry.icon size={15} weight={tool === entry.id ? 'bold' : 'regular'} />
             </button>
           ))}
+          <button
+            type="button"
+            className="tool-button"
+            aria-label="Magnet snap"
+            aria-pressed={magnet}
+            title="Magnet snap: place drawing anchors on the closest OHLC value"
+            onClick={() => setMagnet((enabled) => !enabled)}
+          >
+            <Magnet size={15} weight={magnet ? 'fill' : 'regular'} />
+          </button>
           <button
             type="button"
             className="tool-button"

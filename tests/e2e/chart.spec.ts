@@ -68,6 +68,44 @@ async function waitForChart(page: Page): Promise<void> {
     .toBeGreaterThan(100);
 }
 
+/**
+ * Finds the topmost candle pixel in a viewport column. The fixture chart uses
+ * the theme's up/down colours, so a saturated green or red pixel is a candle,
+ * not grid, text or the transparent drawing overlay.
+ */
+async function topmostCandleY(page: Page, viewportX: number): Promise<number | null> {
+  return page.evaluate((targetX) => {
+    const host = document.querySelector('.chart-canvas-host');
+    if (!host) return null;
+    let best: number | null = null;
+    for (const canvas of Array.from(host.querySelectorAll('canvas'))) {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      const devicePixelRatio = canvas.width / rect.width;
+      const pixelX = Math.round((targetX - rect.left) * devicePixelRatio);
+      if (pixelX < 0 || pixelX >= canvas.width) continue;
+      const data = context.getImageData(pixelX, 0, 1, canvas.height).data;
+      for (let y = 0; y < canvas.height; y += 1) {
+        const index = y * 4;
+        const red = data[index] ?? 0;
+        const green = data[index + 1] ?? 0;
+        const blue = data[index + 2] ?? 0;
+        const alpha = data[index + 3] ?? 0;
+        const isUp = alpha > 80 && green > 120 && red < 120;
+        const isDown = alpha > 80 && red > 150 && green < 120 && blue < 150;
+        if (isUp || isDown) {
+          const viewportY = rect.top + y / devicePixelRatio;
+          if (best === null || viewportY < best) best = viewportY;
+          break;
+        }
+      }
+    }
+    return best;
+  }, viewportX);
+}
+
 /** Waits until every visible panel has a rendered, sized drawing overlay. */
 async function waitForPanels(page: Page, count: number): Promise<void> {
   await expect
@@ -402,6 +440,123 @@ test.describe('chart workspace', () => {
     const edited = await readDrawings(page);
     expect(edited).toHaveLength(1);
     expect(edited[0]).toMatchObject({ type: 'text', text: 'Breakdown' });
+  });
+
+  test('drags one anchor of a selected drawing and keeps the edit after reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Trend line' }).click();
+    await stage.click({ position: { x: 260, y: 160 } });
+    await stage.click({ position: { x: 460, y: 90 } });
+    await expect(deleteSelected).toBeEnabled();
+
+    const before = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(before).toHaveLength(2);
+    const fixedAnchor = before[1]!;
+    const firstAnchor = before[0]!;
+
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    // The first handle is where the first anchor was placed. Grab it, not the
+    // middle of the line, and move it independently of the second endpoint.
+    await page.mouse.move(box!.x + 260, box!.y + 160);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 320, box!.y + 130, { steps: 8 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0]?.price)
+      .not.toBe(firstAnchor.price);
+
+    const moved = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(moved[1]).toEqual(fixedAnchor);
+    expect(moved[0]?.date).not.toBe(firstAnchor.date);
+
+    // Reshaping an endpoint is one ordinary undo step.
+    await page.getByRole('button', { name: 'Undo drawing' }).click();
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0])
+      .toEqual(firstAnchor);
+
+    await page.getByRole('button', { name: 'Redo drawing' }).click();
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0])
+      .toEqual(moved[0]);
+
+    // The moved endpoint is stored, not just drawn locally.
+    await page.reload();
+    await waitForChart(page);
+    const reloaded = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(reloaded[0]).toEqual(moved[0]);
+    expect(reloaded[1]).toEqual(fixedAnchor);
+  });
+
+  test('does not reshape a locked drawing', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Trend line' }).click();
+    await stage.click({ position: { x: 260, y: 160 } });
+    await stage.click({ position: { x: 460, y: 90 } });
+
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await manager.getByRole('button', { name: 'Lock Trend line' }).click();
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+
+    const before = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + 260, box!.y + 160);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 320, box!.y + 130, { steps: 8 });
+    await page.mouse.up();
+
+    const after = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(after).toEqual(before);
+  });
+
+  test('magnet mode snaps a new anchor to the nearest candle OHLC', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const magnet = page.getByRole('button', { name: 'Magnet snap' });
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await expect(magnet).toHaveAttribute('aria-pressed', 'false');
+
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    let target: { x: number; y: number } | null = null;
+    for (let x = 300; x <= 340 && target === null; x += 4) {
+      const y = await topmostCandleY(page, box!.x + x);
+      if (y !== null) target = { x, y };
+    }
+    expect(target, 'the fixture chart should have a rendered candle in the scan range').not.toBeNull();
+
+    // The same pointer position with magnet off stores the raw chart price.
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await page.mouse.click(box!.x + target!.x, target!.y + 4);
+    await expect(deleteSelected).toBeEnabled();
+    const raw = ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0]!;
+    await deleteSelected.click();
+    await expect(deleteSelected).toBeDisabled();
+
+    await magnet.click();
+    await expect(magnet).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await page.mouse.click(box!.x + target!.x, target!.y + 4);
+    await expect(deleteSelected).toBeEnabled();
+
+    const snapped = ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0]!;
+    const bar = buildFixtureBars(1013, 100).find((entry) => entry.date === snapped.date);
+    expect(bar, 'the snapped date should belong to the fixture series').toBeDefined();
+    expect([bar!.open, bar!.high, bar!.low, bar!.close]).toContain(snapped.price);
+    expect(snapped.price).not.toBe(raw.price);
   });
 
   test('manages drawing visibility, locking and deletion from the object list', async ({ page }) => {
