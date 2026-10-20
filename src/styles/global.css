@@ -1256,11 +1256,15 @@ table.data tr.dim td {
 .chart-canvas-host {
   position: absolute;
   inset: 0;
+  /* Keep the chart library's own layered canvases inside this stacking
+     context so the floating object list always paints above them. */
+  z-index: 0;
 }
 
 .chart-overlay {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -1449,6 +1453,245 @@ table.data tr.dim td {
 .drawing-text-editor::placeholder {
   color: var(--text-muted);
   opacity: 1;
+}
+
+/* Object list and style inspector. It floats over the chart so opening it
+   cannot collapse a multi-panel layout or resize the plot area. */
+.drawing-manager {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  bottom: 6px;
+  z-index: 3;
+  width: min(320px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.drawing-manager:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.drawing-manager-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.drawing-manager-heading {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.drawing-manager-heading .panel-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-manager-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.drawing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.drawing-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--radius);
+}
+
+.drawing-row:hover {
+  background: var(--surface-hover);
+}
+
+.drawing-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.drawing-row.hidden .drawing-row-swatch {
+  opacity: 0.35;
+}
+
+.drawing-row.hidden .drawing-row-title {
+  color: var(--text-muted);
+}
+
+.drawing-row-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawing-row-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+}
+
+.drawing-row-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.drawing-row-title {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-row-meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.drawing-row-actions .tool-button {
+  width: 24px;
+  height: 26px;
+}
+
+.drawing-row-actions .tool-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.drawing-manager-empty {
+  display: grid;
+  gap: 4px;
+  padding: 10px 8px;
+}
+
+.drawing-inspector {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.drawing-inspector-empty {
+  padding: 10px 8px;
+}
+
+.drawing-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawing-style-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.drawing-style-fields:disabled {
+  opacity: 0.55;
+}
+
+.drawing-style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.drawing-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawing-swatch-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+}
+
+.drawing-swatch-button[aria-pressed='true'] {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.drawing-swatch-button:disabled,
+.drawing-color-input:disabled {
+  cursor: not-allowed;
+}
+
+.drawing-color-input {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .drawing-manager {
+    left: 6px;
+    right: 6px;
+    width: auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .drawing-style-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .chart-layout {
