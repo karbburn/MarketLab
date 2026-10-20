@@ -438,9 +438,9 @@ export function BacktestPage() {
         <ul className="list-reset stack field-hint">
           <li>Signals are evaluated on a session's close. Orders fill at the next session's open. There is no same-bar fill and no look-ahead.</li>
           <li>Slippage is applied adversely on entry and again on exit. Commission is charged on the traded notional at entry and at exit.</li>
-          <li>Position size is a fixed percentage of the equity at entry, and the resulting share count is fractional. No lot rounding, no margin, no leverage beyond that percentage.</li>
+          <li>Position size is a fixed percentage of the equity at entry, and the resulting share count is fractional. The entry commission is paid out of that percentage. No lot rounding, no margin, no leverage beyond that percentage.</li>
           <li>If a session's range touches both the stop and the target, the stop is assumed to fill first. That is the conservative choice.</li>
-          <li>Stop and target fills are approximated at the stop or target price plus adverse slippage, not at the session open.</li>
+          <li>A stop is a sell stop: it fills at the stop price, except when the session opens through it, in which case it fills at the open. The target is booked at the target price even if the session gaps above it. Adverse slippage applies to both.</li>
           <li>A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.</li>
           <li>The buy-and-hold benchmark uses the same initial capital over the same window with no costs.</li>
           <li>Only long positions are simulated. Short selling is not modelled.</li>

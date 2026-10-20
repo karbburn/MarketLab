@@ -372,7 +372,7 @@ export const LEARN_EXECUTION_STEPS: readonly LearnExecutionStep[] = [
     id: 'protect',
     label: 'Stop and target',
     title: 'The stop wins a tie',
-    body: 'If a session range touches both the stop and the target, the stop is assumed to fill first. Stop and target fills use that price, not the session open.',
+    body: 'If a session range touches both the stop and the target, the stop is assumed to fill first. A stop fills at the stop price unless the session opens through it, in which case it fills at the open. The target fills at the target price.',
     rule: 'The conservative choice is the stated one.',
   },
   {
@@ -508,7 +508,7 @@ export const LEARN_CASES: readonly LearnCase[] = [
     ],
     answerId: 'stop',
     explanation:
-      'MarketLab resolves the ambiguity against the strategy: the stop fills first at the stop price, then adverse slippage is applied to the sale.',
+      'MarketLab resolves the ambiguity against the strategy: the stop fills first. It fills at the stop price, or at the open when the session gaps through the stop, then adverse slippage is applied to the sale.',
   },
   {
     id: 'twelve-returns',
