@@ -41,6 +41,12 @@ export interface Bar {
   close: number;
   /** `null` means the source did not provide volume; it is never invented. */
   volume: number | null;
+  /**
+   * Aggregation bucket identity (`2024-W01`, `2024-08`) for bars produced by
+   * `aggregateBars`. Never stored; it lets weekly/monthly comparisons align on
+   * the period even when two markets closed the period on different sessions.
+   */
+  bucket?: string;
 }
 
 /**

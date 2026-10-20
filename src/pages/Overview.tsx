@@ -19,7 +19,7 @@ export function OverviewPage() {
         const bars = view.bars;
         const last = bars[bars.length - 1];
         const previous = bars[bars.length - 2];
-        const summary = summarise(bars);
+        const summary = summarise(bars, view.dataset.frequency);
         const dayChange = last && previous && previous.close !== 0 ? ((last.close - previous.close) / previous.close) * 100 : null;
         return { view, summary, last, dayChange };
       }),

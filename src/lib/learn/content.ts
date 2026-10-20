@@ -90,12 +90,12 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     id: 'volatility',
     group: 'risk',
     name: 'Annualised volatility',
-    question: 'How wide are the daily moves, scaled to a year?',
-    formula: 'annualisedVolatilityPct = sampleStdDev(dailyReturns) * sqrt(252) * 100',
-    inputs: 'Simple close-to-close daily returns.',
+    question: 'How wide are the session moves, scaled to a year?',
+    formula: 'annualisedVolatilityPct = sampleStdDev(sessionReturns) * sqrt(P) * 100\nP = 252 daily, 52 weekly, 12 monthly',
+    inputs: 'Simple close-to-close session returns at the dataset frequency.',
     conventions: [
       'Sample standard deviation, with n - 1 in the denominator.',
-      '252 sessions per year, regardless of the calendar span.',
+      'P observations per year for the dataset frequency: 252 daily, 52 weekly, 12 monthly.',
       'Up and down moves count as risk in the same way.',
     ],
     withheld: 'Fewer than two returns.',
@@ -111,8 +111,8 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     group: 'risk',
     name: 'Sharpe ratio',
     question: 'How much return is there per unit of volatility?',
-    formula: 'Sharpe = (mean(dailyReturns) * 252) / (sampleStdDev(dailyReturns) * sqrt(252))',
-    inputs: 'Daily simple returns.',
+    formula: 'Sharpe = (mean(sessionReturns) * P) / (sampleStdDev(sessionReturns) * sqrt(P))',
+    inputs: 'Simple session returns at the dataset frequency, with P periods per year.',
     conventions: [
       'The risk-free rate is fixed at zero.',
       'Uses arithmetic annualised return, not CAGR.',
@@ -130,8 +130,8 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     name: 'Sortino ratio',
     question: 'How much return is there per unit of downside?',
     formula:
-      'Sortino = (mean(dailyReturns) * 252) / downsideDeviation\ndownsideDeviation = sqrt(sum(min(r, 0)^2) / n) * sqrt(252)',
-    inputs: 'Daily simple returns.',
+      'Sortino = (mean(sessionReturns) * P) / downsideDeviation\ndownsideDeviation = sqrt(sum(min(r, 0)^2) / n) * sqrt(P)',
+    inputs: 'Simple session returns at the dataset frequency.',
     conventions: [
       'The target return is fixed at zero.',
       'Shortfalls are squared over all observations, not only losing days.',
@@ -196,7 +196,7 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     name: 'VaR 95',
     question: 'What one-session loss was exceeded in only 5% of observed sessions?',
     formula: 'VaR95 = max(0, -quantile(dailyReturns, 0.05)) * 100',
-    inputs: 'Daily simple returns.',
+    inputs: 'Simple session returns at the dataset frequency.',
     conventions: [
       'Historical, not normal-distribution VaR.',
       'A one-session horizon.',
@@ -212,7 +212,7 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     name: 'CVaR 95',
     question: 'When the 5% tail happened, how bad was it on average?',
     formula: 'CVaR95 = max(0, -mean(returns <= VaR threshold)) * 100',
-    inputs: 'Daily simple returns and the historical VaR threshold.',
+    inputs: 'Simple session returns and the historical VaR threshold.',
     conventions: [
       'Historical expected shortfall, not a fitted model.',
       'The mean of observed tail returns, not an extrapolation.',
@@ -258,7 +258,7 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     name: 'Beta',
     question: 'How much did the series move when the benchmark moved?',
     formula: 'beta = covariance(assetReturns, benchmarkReturns) / variance(benchmarkReturns)',
-    inputs: 'Daily simple returns on shared sessions.',
+    inputs: 'Simple session returns on shared sessions.',
     conventions: [
       'Pearson covariance, not a regression with an intercept.',
       'Only dates present in both series are used.',
@@ -272,8 +272,8 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     group: 'comparison',
     name: 'Alpha',
     question: 'What return is left after accounting for benchmark exposure?',
-    formula: 'alphaPct = (mean(assetReturns) - beta * mean(benchmarkReturns)) * 252 * 100',
-    inputs: 'Aligned daily returns and the computed beta.',
+    formula: 'alphaPct = (mean(assetReturns) - beta * mean(benchmarkReturns)) * P * 100',
+    inputs: 'Aligned session returns, the dataset frequency and the computed beta.',
     conventions: [
       'Annualised arithmetic alpha.',
       'The risk-free rate is fixed at zero.',
@@ -289,7 +289,7 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     name: 'Correlation',
     question: 'Did the two series move together on the sessions they share?',
     formula: 'rho = pearsonCorrelation(assetReturns, benchmarkReturns)',
-    inputs: 'Daily simple returns on shared sessions.',
+    inputs: 'Simple session returns on shared sessions.',
     conventions: [
       'Pearson correlation, from -1 to 1.',
       'Needs three shared returns, which means four shared sessions.',
@@ -317,8 +317,8 @@ export const LEARN_SECTIONS: ReadonlyArray<{ id: string; title: string }> = [
 
 export const LEARN_FACTS: readonly LearnFact[] = [
   {
-    value: '252',
-    label: 'sessions used to annualise volatility',
+    value: '252 / 52 / 12',
+    label: 'sessions per year used to annualise volatility, by dataset frequency',
     section: 'returns',
   },
   {
@@ -432,7 +432,7 @@ export const LEARN_INDICATORS: ReadonlyArray<{ name: string; note: string }> = [
 
 export const LEARN_WITHHELD: ReadonlyArray<{ condition: string; result: string }> = [
   {
-    condition: 'Fewer than 20 daily returns',
+    condition: 'Fewer than 20 session returns',
     result: 'VaR 95 and CVaR 95 show --.',
   },
   {
@@ -551,3 +551,4 @@ export const LEARN_ROUTE: ReadonlyArray<{ label: string; to: string; body: strin
     body: 'Run once with 0 bps costs and once with 20 bps. The difference is cost drag, not a better signal.',
   },
 ];
+

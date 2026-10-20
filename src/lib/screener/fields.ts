@@ -1,4 +1,4 @@
-import type { Bar, ScreenerField } from '../../domain/types';
+import type { Bar, Frequency, ScreenerField } from '../../domain/types';
 import { closes, ema, sma } from '../indicators/core';
 import { rsi } from '../indicators/momentum';
 import { volumeSma } from '../indicators/volume';
@@ -27,11 +27,11 @@ function distancePct(closes: readonly number[], level: readonly (number | null)[
   return ((close - reference) / reference) * 100;
 }
 
-function volatilityAt(bars: readonly Bar[], endIndex: number, window: number): number | null {
+function volatilityAt(bars: readonly Bar[], endIndex: number, window: number, frequency: Frequency): number | null {
   const start = endIndex - window;
   if (start < 0) return null;
   const slice = bars.slice(start, endIndex + 1).map((bar) => bar.close);
-  return annualisedVolatilityPct(simpleReturns(slice));
+  return annualisedVolatilityPct(simpleReturns(slice), frequency);
 }
 
 function drawdownAt(bars: readonly Bar[], endIndex: number, window: number): number | null {
@@ -54,7 +54,12 @@ function relativeVolumeAt(bars: readonly Bar[], endIndex: number, window: number
  * always derived from the bars in the window; nothing is extrapolated beyond the
  * supplied data, and `null` propagates instead of being replaced by zero.
  */
-export function computeField(field: ScreenerField, window: number, bars: readonly Bar[]): FieldReading {
+export function computeField(
+  field: ScreenerField,
+  window: number,
+  bars: readonly Bar[],
+  frequency: Frequency = 'daily',
+): FieldReading {
   const last = bars.length - 1;
   if (last < 1) return { current: null, previous: null };
   const closeValues = closes(bars);
@@ -72,7 +77,7 @@ export function computeField(field: ScreenerField, window: number, bars: readonl
       case 'rsi':
         return rsi(closeValues, window)[endIndex] ?? null;
       case 'volatility':
-        return volatilityAt(bars, endIndex, window);
+        return volatilityAt(bars, endIndex, window, frequency);
       case 'max-drawdown':
         return drawdownAt(bars, endIndex, window);
       case 'relative-volume':

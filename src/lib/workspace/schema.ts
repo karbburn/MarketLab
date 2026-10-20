@@ -130,6 +130,7 @@ export const barSchema = z.object({
   low: z.number().finite(),
   close: z.number().finite(),
   volume: z.number().finite().nullable(),
+  bucket: z.string().optional(),
 });
 
 const corporateActionSchema = z.object({

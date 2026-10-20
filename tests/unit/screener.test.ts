@@ -25,14 +25,14 @@ function instrument(id: string, symbol: string): Instrument {
   return { id, symbol, displayName: symbol, assetType: 'equity', currency: 'USD' };
 }
 
-function dataset(id: string, instrumentId: string): Dataset {
+function dataset(id: string, instrumentId: string, frequency: Dataset['frequency'] = 'daily'): Dataset {
   return {
     id,
     instrumentId,
     name: id,
     sourceKind: 'user-csv',
     sourceDescription: 'test fixture',
-    frequency: 'daily',
+    frequency,
     timezone: 'UTC',
     firstDate: '2024-01-01',
     lastDate: '2024-01-06',
@@ -194,5 +194,30 @@ describe('evaluateScreener sorting', () => {
     expect(result.rows[0]?.symbol).toBe('AAA');
     expect(result.rows[0]?.values.return).not.toBeUndefined();
     expect(result.rows[1]?.values.return).not.toBeUndefined();
+  });
+});
+
+describe('screener frequency handling', () => {
+  const bars = barsFromCloses([100, 110, 99, 108.9]);
+
+  it('annualises the volatility field with the dataset frequency', () => {
+    const daily = computeField('volatility', 2, bars, 'daily').current as number;
+    const weekly = computeField('volatility', 2, bars, 'weekly').current as number;
+    // Window closes [110, 99, 108.9] -> returns [-0.1, 0.1] -> sd sqrt(0.02).
+    expect(daily).toBeCloseTo(Math.sqrt(0.02 * 252) * 100, 8);
+    expect(weekly).toBeCloseTo(Math.sqrt(0.02 * 52) * 100, 8);
+    expect(weekly).toBeCloseTo(daily * Math.sqrt(52 / 252), 8);
+  });
+
+  it('passes the dataset frequency into filter evaluation', () => {
+    const weekly = dataset('ds-weekly', 'i1', 'weekly');
+    const daily = dataset('ds-daily', 'i1', 'daily');
+    const def = definition({
+      universeDatasetIds: ['ds-weekly'],
+      filters: [filter({ field: 'volatility', operator: 'lt', value: 150, window: 2 })],
+    });
+    const instrumentOne = instrument('i1', 'AAA');
+    expect(evaluateScreener(def, [{ dataset: weekly, instrument: instrumentOne, bars }]).rows[0]?.passed).toBe(true);
+    expect(evaluateScreener(def, [{ dataset: daily, instrument: instrumentOne, bars }]).rows[0]?.passed).toBe(false);
   });
 });

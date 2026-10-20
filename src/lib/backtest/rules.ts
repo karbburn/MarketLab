@@ -116,14 +116,43 @@ export class StrategyContext {
   }
 }
 
-/** The warm-up index before which no rule can evaluate (largest window in use). */
+/**
+ * The warm-up index before which no rule can evaluate: the first index at which
+ * the evaluator can produce a non-null current *and* previous value, computed
+ * with the same defaults the evaluator uses (notably the derived slow period of
+ * `sma-cross` and the derived slow/signal periods of `macd-cross`).
+ */
 export function requiredWarmup(rules: readonly StrategyRule[]): number {
   let max = 1;
-  for (const rule of rules) {
-    max = Math.max(max, rule.window, rule.secondaryWindow ?? 0);
+  for (const rule of rules) max = Math.max(max, ruleWarmup(rule));
+  return max;
+}
+
+function ruleWarmup(rule: StrategyRule): number {
+  const window = Math.max(1, rule.window);
+  switch (rule.field) {
+    case 'price-vs-sma':
+    case 'price-vs-ema':
+      // Series first has a value at `window - 1`; the evaluator also reads the
+      // previous bar, so the first fully computable index is `window`.
+      return window;
+    case 'rsi':
+      return window + 1;
+    case 'sma-cross': {
+      const slow = Math.max(window, rule.secondaryWindow ?? window * 2);
+      return slow;
+    }
+    case 'macd-cross': {
+      // slow EMA = window * 2 + 2, signal EMA seed of `secondaryWindow ?? 9`.
+      const slow = window * 2 + 2;
+      const signal = Math.max(1, rule.secondaryWindow ?? 9);
+      return slow + signal - 1;
+    }
+    case 'breakout-high':
+    case 'breakout-low':
+      // Needs the rolling extreme at `index - 1` and at `index - 2`.
+      return window + 1;
   }
-  // Rules that cross two moving averages need one extra bar for the previous value.
-  return max + 1;
 }
 
 /**

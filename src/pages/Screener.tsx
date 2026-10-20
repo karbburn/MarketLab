@@ -441,7 +441,7 @@ export function ScreenerPage() {
           <li>Return over window: percent change between the close `window` sessions back and the cutoff close.</li>
           <li>Price vs SMA/EMA: percent distance of the close from a moving average of the given period.</li>
           <li>RSI: Wilder's relative strength index on closes over the given period; 0 to 100.</li>
-          <li>Annualised volatility: sample standard deviation of daily returns in the window, times the square root of 252.</li>
+          <li>Annualised volatility: sample standard deviation of session returns in the window, annualised at the dataset frequency (square root of 252 daily, 52 weekly or 12 monthly sessions per year).</li>
           <li>Max drawdown in window: worst close-to-close drawdown inside the window only.</li>
           <li>Relative volume: volume divided by the average volume of the window. Unavailable when the series has no volume.</li>
           <li>&quot;Crossed above&quot; and &quot;crossed below&quot; compare the value now against the threshold and the previous session, so a single touch does not qualify.</li>

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { BacktestConfig, Bar, StrategyRule } from '../../src/domain/types';
 import { compare } from '../../src/lib/backtest/compare';
 import { runBacktest } from '../../src/lib/backtest/engine';
-import { StrategyContext } from '../../src/lib/backtest/rules';
+import { StrategyContext, requiredWarmup } from '../../src/lib/backtest/rules';
 import { addDays } from '../../src/lib/date';
 
 function series(opens: readonly number[], closes: readonly number[]): Bar[] {
@@ -275,5 +275,79 @@ describe('StrategyContext indicator caches', () => {
     const second = context.macd(5, 10, 3);
     expect(second.macd).not.toBe(first.macd);
     expect(second.macd.some((value, index) => value !== first.macd[index])).toBe(true);
+  });
+});
+
+describe('requiredWarmup', () => {
+  it('matches the first index the evaluator can actually compute for each field', () => {
+    expect(requiredWarmup([])).toBe(1);
+    expect(requiredWarmup([rule('price-vs-sma', 'gt', 0, 50)])).toBe(50);
+    expect(requiredWarmup([rule('rsi', 'lt', 30, 14)])).toBe(15);
+    expect(requiredWarmup([rule('breakout-high', 'gt', 0, 20)])).toBe(21);
+    expect(requiredWarmup([{ ...rule('sma-cross', 'gt', 0, 10), secondaryWindow: 30 }])).toBe(30);
+    expect(requiredWarmup([rule('sma-cross', 'gt', 0, 10)])).toBe(20);
+    expect(requiredWarmup([rule('macd-cross', 'gt', 0, 12)])).toBe(34);
+    expect(requiredWarmup([{ ...rule('macd-cross', 'gt', 0, 12), secondaryWindow: 5 }])).toBe(30);
+    expect(requiredWarmup([rule('rsi', 'lt', 30, 14), rule('breakout-low', 'lt', 0, 30)])).toBe(31);
+  });
+
+  it('agrees with the indicator series the evaluator reads', () => {
+    const bars = series(
+      Array.from({ length: 120 }, () => 10),
+      Array.from({ length: 120 }, (_, index) => 10 + index * 0.5),
+    );
+    const context = new StrategyContext(bars);
+
+    const fast = context.sma(10);
+    const slow = context.sma(30);
+    expect(slow[29]).not.toBeNull();
+    expect(slow[28]).toBeNull();
+    expect(fast[29]).not.toBeNull();
+
+    const rsiSeries = context.rsi(14);
+    expect(rsiSeries[14]).not.toBeNull();
+    expect(rsiSeries[13]).toBeNull();
+
+    const highest = context.highestHigh(20);
+    expect(highest[19]).not.toBeNull();
+    expect(highest[18]).toBeNull();
+
+    const { signal } = context.macd(12, 26, 9);
+    expect(signal[33]).not.toBeNull();
+    expect(signal[32]).toBeNull();
+  });
+});
+
+describe('backtest metric frequency', () => {
+  const bars = series(
+    [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+    [100, 102, 101, 104, 103, 106, 105, 108, 107, 110],
+  );
+  const base = config(
+    [rule('price-vs-sma', 'gt', 0, 2)],
+    [rule('price-vs-sma', 'lt', 0, 2)],
+    { commissionBps: 0 },
+  );
+
+  it('annualises reported risk metrics with the requested frequency', () => {
+    const daily = runBacktest(bars, base, 'daily');
+    const weekly = runBacktest(bars, base, 'weekly');
+    const monthly = runBacktest(bars, base, 'monthly');
+    expect(daily.metrics.annualisedVolatilityPct).not.toBeNull();
+    expect(weekly.metrics.annualisedVolatilityPct as number).toBeCloseTo(
+      (daily.metrics.annualisedVolatilityPct as number) * Math.sqrt(52 / 252),
+      8,
+    );
+    expect(monthly.metrics.annualisedVolatilityPct as number).toBeCloseTo(
+      (daily.metrics.annualisedVolatilityPct as number) * Math.sqrt(12 / 252),
+      8,
+    );
+  });
+
+  it('keeps the default daily behaviour when no frequency is supplied', () => {
+    expect(runBacktest(bars, base).metrics.annualisedVolatilityPct).toBeCloseTo(
+      runBacktest(bars, base, 'daily').metrics.annualisedVolatilityPct as number,
+      12,
+    );
   });
 });

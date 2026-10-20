@@ -43,6 +43,10 @@ export function BacktestPage() {
 
   const datasetId = draft?.datasetId ?? null;
   const bars = useMemo(() => views.find((view) => view.dataset.id === datasetId)?.bars ?? [], [views, datasetId]);
+  const frequency = useMemo(
+    () => views.find((view) => view.dataset.id === datasetId)?.dataset.frequency ?? 'daily',
+    [views, datasetId],
+  );
   const signature = draft ? JSON.stringify(draft) : '';
   const runSignature = runRequest ? JSON.stringify(runRequest.config) : null;
 
@@ -50,8 +54,8 @@ export function BacktestPage() {
   // never on every keystroke in the rule editor.
   const result = useMemo<BacktestResult | null>(() => {
     if (!runRequest || bars.length < 3) return null;
-    return runBacktest(bars, runRequest.config);
-  }, [runRequest, bars]);
+    return runBacktest(bars, runRequest.config, frequency);
+  }, [runRequest, bars, frequency]);
 
   const requestRun = useCallback((config: BacktestConfig | null) => {
     if (!config) return;
@@ -360,7 +364,7 @@ export function BacktestPage() {
               <Metric label="Total return" value={formatPercent(result.metrics.totalReturnPct)} tone={result.metrics.totalReturnPct >= 0 ? 'up' : 'down'} note={`Buy and hold ${formatPercent(result.metrics.benchmarkTotalReturnPct)}`} />
               <Metric label="CAGR" value={result.metrics.cagrPct === null ? '--' : formatPercent(result.metrics.cagrPct)} />
               <Metric label="Max drawdown" value={formatPercent(result.metrics.maxDrawdownPct)} tone="down" />
-              <Metric label="Volatility" value={formatPercent(result.metrics.annualisedVolatilityPct)} note="Annualised from the equity curve" />
+              <Metric label="Volatility" value={formatPercent(result.metrics.annualisedVolatilityPct)} note="Annualised from the equity curve at the dataset frequency" />
               <Metric label="Sharpe" value={result.metrics.sharpe === null ? '--' : result.metrics.sharpe.toFixed(2)} />
               <Metric label="Trades" value={String(result.metrics.tradeCount)} />
               <Metric label="Win rate" value={result.metrics.winRatePct === null ? '--' : formatPercent(result.metrics.winRatePct)} />
@@ -442,6 +446,7 @@ export function BacktestPage() {
           <li>If a session's range touches both the stop and the target, the stop is assumed to fill first. That is the conservative choice.</li>
           <li>A stop is a sell stop: it fills at the stop price, except when the session opens through it, in which case it fills at the open. The target is booked at the target price even if the session gaps above it. Adverse slippage applies to both.</li>
           <li>A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.</li>
+          <li>Volatility, the Sharpe ratio and exposure are annualised at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year.</li>
           <li>The buy-and-hold benchmark uses the same initial capital over the same window with no costs.</li>
           <li>Only long positions are simulated. Short selling is not modelled.</li>
           <li>

@@ -50,18 +50,19 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
     const filterResults: boolean[] = [];
 
     for (const filter of definition.filters) {
-      const reading = computeField(filter.field, filter.window, bars);
+      const reading = computeField(filter.field, filter.window, bars, input.dataset.frequency);
       values[filter.field] = reading.current;
       filterResults.push(compare(filter.operator, reading.current, reading.previous, filter.value));
     }
 
     // The Sort-by control offers fields independently of the filter list, so the
-    // sort field must be computed even when no filter uses it.
+    // sort field must be computed even when no filter uses it, using its own
+    // window rather than borrowing an unrelated filter's period.
     if (definition.sortBy !== 'symbol') {
       const field = definition.sortBy as ScreenerField;
       if (!(field in values)) {
         const window = definition.filters.find((filter) => filter.field === field)?.window ?? definition.filters[0]?.window ?? 20;
-        values[field] = computeField(field, window, bars).current;
+        values[field] = computeField(field, window, bars, input.dataset.frequency).current;
       }
     }
 

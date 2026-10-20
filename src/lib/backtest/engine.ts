@@ -4,8 +4,9 @@ import type {
   BacktestTrade,
   Bar,
   DateString,
+  Frequency,
 } from '../../domain/types';
-import { maxDrawdownPct, TRADING_DAYS_PER_YEAR } from '../quant/metrics';
+import { maxDrawdownPct, periodsPerYear } from '../quant/metrics';
 import { sampleStdDev, mean } from '../stats';
 import { compareDates, yearsBetween } from '../date';
 import { evaluateRules, requiredWarmup, StrategyContext } from './rules';
@@ -49,7 +50,7 @@ interface OpenPosition {
   entryCosts: number;
 }
 
-export function runBacktest(bars: readonly Bar[], config: BacktestConfig): BacktestResult {
+export function runBacktest(bars: readonly Bar[], config: BacktestConfig, frequency: Frequency = 'daily'): BacktestResult {
   const windowBars = sliceWindow(bars, config.startDate, config.endDate);
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestResult['equityCurve'] = [];
@@ -178,6 +179,7 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig): Backt
       totalBars: equityCurve.length,
       firstDate: firstEquityDate,
       lastDate: lastBar.date,
+      frequency,
     }),
   };
 }
@@ -246,10 +248,12 @@ interface MetricInput {
   totalBars: number;
   firstDate: DateString;
   lastDate: DateString;
+  frequency: Frequency;
 }
 
 function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   const { trades, equityCurve, initialCapital } = input;
+  const periods = periodsPerYear(input.frequency);
   const finalEquity = equityCurve[equityCurve.length - 1]?.equity ?? initialCapital;
   const totalReturnPct = (finalEquity / initialCapital - 1) * 100;
 
@@ -261,9 +265,9 @@ function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   }
 
   const sd = sampleStdDev(dailyReturns);
-  const annualisedVolatilityPct = sd === null ? 0 : sd * Math.sqrt(TRADING_DAYS_PER_YEAR) * 100;
+  const annualisedVolatilityPct = sd === null ? 0 : sd * Math.sqrt(periods) * 100;
   const meanReturn = mean(dailyReturns);
-  const annualisedReturnPct = meanReturn === null ? null : meanReturn * TRADING_DAYS_PER_YEAR * 100;
+  const annualisedReturnPct = meanReturn === null ? null : meanReturn * periods * 100;
   const sharpe =
     annualisedReturnPct === null || annualisedVolatilityPct === 0
       ? null
