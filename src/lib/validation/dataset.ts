@@ -103,9 +103,15 @@ export function parseNumericCell(input: string | undefined): number | null {
   value = value.replace(/[\s$€£₹%]/g, '');
   if (value === '') return null;
   if (value.startsWith('-')) {
-    negative = !negative;
+    // "(-5)" and "(- 5)" apply the sign twice: the parentheses already mean
+    // "negative", and toggling would silently turn the cell positive. Reject
+    // the ambiguity instead of guessing which sign the file meant.
+    if (negative) return null;
+    negative = true;
     value = value.slice(1);
   } else if (value.startsWith('+')) {
+    // "(+5)" contradicts the accounting-parens convention for the same reason.
+    if (negative) return null;
     value = value.slice(1);
   }
   if (!value) return null;

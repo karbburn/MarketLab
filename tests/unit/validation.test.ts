@@ -47,6 +47,18 @@ describe('parseNumericCell', () => {
     expect(parseNumericCell('1,2,3')).toBeNull();
   });
 
+  it('rejects a sign that is applied twice inside accounting parentheses', () => {
+    // Parentheses already mean "negative"; a second sign is ambiguous and must
+    // not flip the value back to positive.
+    expect(parseNumericCell('(-5)')).toBeNull();
+    expect(parseNumericCell('(- 5)')).toBeNull();
+    expect(parseNumericCell('-(5)')).toBeNull();
+    // A single sign is still read exactly once.
+    expect(parseNumericCell('-5')).toBe(-5);
+    expect(parseNumericCell('(5)')).toBe(-5);
+    expect(parseNumericCell('(+5)')).toBeNull();
+  });
+
   it('treats blanks and sentinel values as missing', () => {
     expect(parseNumericCell('')).toBeNull();
     expect(parseNumericCell('-')).toBeNull();

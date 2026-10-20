@@ -31,6 +31,7 @@ test.describe('shell, navigation and theme', () => {
       { link: 'Screener', title: 'Historical screener' },
       { link: 'Backtest', title: 'Rule-based backtest' },
       { link: 'Data', title: 'Data library' },
+      { link: 'How it works', title: 'How MarketLab works' },
       { link: 'Workspaces', title: 'Workspaces and settings' },
       { link: 'Overview', title: 'Overview' },
     ];
@@ -126,5 +127,41 @@ test.describe('shell, navigation and theme', () => {
     await expect(page.locator('.shell-nav')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('.shell-nav')).not.toBeVisible();
+  });
+
+  test('moves focus into the drawer, makes the page inert and restores focus', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+
+    const nav = page.locator('.shell-nav');
+    await expect(nav).toBeVisible();
+    // The first link, not the rest of the page, receives focus.
+    await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toBeFocused();
+    expect(await page.locator('.shell-main').evaluate((element) => (element as HTMLElement).inert)).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(nav).not.toBeVisible();
+    // Closing returns focus to the control that opened the drawer.
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused();
+    expect(await page.locator('.shell-main').evaluate((element) => (element as HTMLElement).inert)).toBe(false);
+  });
+
+  test('closes the drawer when the viewport leaves the narrow layout', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await expect(page.locator('.shell-nav')).toBeVisible();
+
+    // Widening docks the sidebar; the drawer state must not stay open.
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await expect(page.locator('.shell-nav')).not.toHaveClass(/\bopen\b/);
+    await expect(page.locator('.shell-nav')).toBeVisible();
+
+    // Coming back does not re-open a drawer the user did not ask for.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('.shell-nav')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveAttribute('aria-expanded', 'false');
   });
 });

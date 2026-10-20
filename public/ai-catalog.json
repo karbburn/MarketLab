@@ -9,7 +9,7 @@
       "representativeQueries": [
         "What is MarketLab and what can it do?",
         "How do I import my own OHLCV data into MarketLab?",
-        "Is the bundled sample data real market data?",
+        "Does MarketLab ship any sample market data?",
         "How do I download real historical market data in MarketLab?",
         "Which indicators and backtest rules does MarketLab support?"
       ]

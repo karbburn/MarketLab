@@ -318,12 +318,16 @@ button {
     box-shadow: var(--shadow-panel);
     visibility: hidden;
     transform: translateX(-100%);
-    transition: transform var(--duration) ease, visibility var(--duration) ease;
+    /* Visibility flips immediately when the drawer opens so focus can move into
+     * it, and only after the slide-out when it closes so the transition is
+     * still visible. */
+    transition: transform var(--duration) ease, visibility 0s linear var(--duration);
   }
 
   .shell-nav.open {
     visibility: visible;
     transform: translateX(0);
+    transition: transform var(--duration) ease, visibility 0s;
   }
 
   .shell-scrim {
@@ -1596,7 +1600,11 @@ table.data tr.dim td {
 
 .rule-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) minmax(96px, 1fr) minmax(70px, 0.7fr) minmax(70px, 0.7fr) auto;
+  /* Rule, operator, threshold, window, slow window (or an empty cell) and the
+   * remove button. Six tracks keep the button on the row instead of wrapping it
+   * under the first select. */
+  grid-template-columns:
+    minmax(120px, 1.4fr) minmax(96px, 1fr) minmax(70px, 0.7fr) minmax(70px, 0.7fr) minmax(70px, 0.7fr) auto;
   gap: 6px;
   align-items: end;
 }
@@ -1604,5 +1612,1002 @@ table.data tr.dim td {
 @media (max-width: 900px) {
   .rule-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Learning page ----------
+ * An in-app field guide, not a marketing page. It uses the same cold neutrals,
+ * one teal accent, 4px corners and restrained motion as the terminal. The
+ * reading column is deliberately narrower than the full page so the sticky
+ * contents rail has somewhere to sit on wide screens.
+ */
+
+.learn-page {
+  max-width: 1160px;
+  gap: 0;
+  padding-bottom: 56px;
+}
+
+.learn-hero {
+  display: grid;
+  gap: 24px;
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.learn-hero-copy {
+  display: grid;
+  gap: 10px;
+  max-width: 760px;
+}
+
+.learn-hero h1 {
+  font-size: clamp(30px, 3.6vw, 42px);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  max-width: 24ch;
+}
+
+.learn-lede {
+  max-width: 64ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.learn-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-fact {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  color: inherit;
+  text-decoration: none;
+}
+
+.learn-fact:hover {
+  text-decoration: none;
+}
+
+.learn-fact:hover .learn-fact-value {
+  color: var(--accent);
+}
+
+.learn-fact:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.learn-fact-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: color var(--duration) ease;
+}
+
+.learn-fact-label {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* The rail comes first in the DOM so keyboard and screen-reader order match the
+ * narrow layout. Grid areas keep it on the right at desktop widths. */
+.learn-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  grid-template-areas: 'content rail';
+  gap: 48px;
+  align-items: start;
+  padding-top: 8px;
+}
+
+.learn-content {
+  grid-area: content;
+  min-width: 0;
+}
+
+.learn-rail {
+  grid-area: rail;
+  position: sticky;
+  top: calc(var(--shell-topbar) + 18px);
+  display: grid;
+  gap: 2px;
+  padding-top: 28px;
+}
+
+.learn-rail-title {
+  padding-bottom: 6px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-rail a {
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.learn-rail a:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.learn-rail a[aria-current='location'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.learn-section {
+  display: grid;
+  gap: 14px;
+  padding: 30px 0;
+  border-top: 1px solid var(--border-subtle);
+  scroll-margin-top: calc(var(--shell-topbar) + 20px);
+}
+
+.learn-section:first-child {
+  padding-top: 26px;
+  border-top: 0;
+}
+
+.learn-section h2 {
+  width: fit-content;
+  max-width: 100%;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.learn-section h2:focus-visible {
+  outline-offset: 4px;
+}
+
+.learn-prose {
+  display: grid;
+  gap: 11px;
+  max-width: 72ch;
+}
+
+.learn-prose p {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.learn-prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.learn-formula-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.learn-formula {
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.learn-copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--duration) ease, border-color var(--duration) ease, color var(--duration) ease;
+}
+
+.learn-copy:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.learn-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.learn-copy[data-state='error'] {
+  border-color: color-mix(in srgb, var(--down) 55%, transparent);
+  color: var(--down);
+}
+
+.learn-copy-status {
+  margin-top: -2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--down);
+}
+
+.learn-formula code {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.learn-callout {
+  display: grid;
+  gap: 4px;
+  max-width: 72ch;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.learn-callout-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.learn-callout p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.learn-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12.5px;
+}
+
+.learn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 28px;
+}
+
+.learn-item {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-item strong {
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.learn-item span {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.learn-grid-compact {
+  gap: 12px 28px;
+}
+
+.learn-grid-compact .learn-item {
+  padding-top: 8px;
+}
+
+/* CAGR example: inputs on the left, the arithmetic on the right. It starts
+ * empty on purpose so the page never displays invented market data. */
+.learn-calc {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+.learn-calc-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+.learn-calc-out {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 11px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.learn-calc-heading {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-calc-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.learn-calc-row:last-of-type {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.learn-calc-row strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.learn-calc-note,
+.learn-calc-foot {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.learn-calc-error {
+  font-size: 11.5px;
+  color: var(--down);
+}
+
+/* Screener cutoff drill. Sessions are drawn as ticks, never as prices. The
+ * only variable is the cutoff, so the warm-up rule is the whole lesson. */
+.learn-drill {
+  display: grid;
+  gap: 12px;
+  max-width: 72ch;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+.learn-drill-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 14px;
+}
+
+.learn-drill-kicker {
+  display: block;
+  padding-bottom: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-drill-head h3 {
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+
+.learn-drill-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.learn-drill-track {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 54px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.learn-drill-session {
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.learn-drill-tick {
+  width: 100%;
+  height: 18px;
+  border: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--surface-raised);
+}
+
+.learn-drill-session[data-state='used'] .learn-drill-tick {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-raised));
+}
+
+.learn-drill-session[data-state='cutoff'] .learn-drill-tick {
+  height: 38px;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.learn-drill-session[data-state='future'] .learn-drill-tick {
+  height: 10px;
+  opacity: 0.45;
+}
+
+.learn-drill-label {
+  min-height: 12px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.learn-drill-control {
+  display: grid;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.learn-drill-control input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.learn-drill-out {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.learn-drill-stat {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-drill-stat span {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.learn-drill-stat strong {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.learn-drill-stat strong[data-state='ok'] {
+  color: var(--up);
+}
+
+.learn-drill-stat strong[data-state='waiting'] {
+  color: var(--text-muted);
+}
+
+.learn-drill-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Rule check. One case at a time keeps the feedback close to the choice and
+ * avoids a wall of quiz cards. */
+.learn-check {
+  display: grid;
+  gap: 12px;
+  max-width: 72ch;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+.learn-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.learn-check-count {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-check-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.learn-check-dots span {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.learn-check-dots span[data-active='true'] {
+  background: var(--accent);
+}
+
+.learn-check-body {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.learn-check-prompt {
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.learn-check-options {
+  display: grid;
+  gap: 6px;
+}
+
+.learn-check-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration) ease, border-color var(--duration) ease, color var(--duration) ease;
+}
+
+.learn-check-option:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.learn-check-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Answered means locked. The result colours below still apply, so the first
+ * answer stays readable and hover cannot imply that a second is possible. */
+.learn-check-option:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.learn-check-option:disabled:hover {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+.learn-check-option[data-result='correct']:disabled:hover {
+  background: color-mix(in srgb, var(--up) 10%, var(--surface-raised));
+  color: var(--up);
+}
+
+.learn-check-option[data-result='wrong']:disabled:hover {
+  background: color-mix(in srgb, var(--down) 10%, var(--surface-raised));
+  color: var(--down);
+}
+
+.learn-check-option[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.learn-check-option[data-result='correct'] {
+  border-color: color-mix(in srgb, var(--up) 60%, transparent);
+  background: color-mix(in srgb, var(--up) 10%, var(--surface-raised));
+  color: var(--up);
+}
+
+.learn-check-option[data-result='wrong'] {
+  border-color: color-mix(in srgb, var(--down) 60%, transparent);
+  background: color-mix(in srgb, var(--down) 10%, var(--surface-raised));
+  color: var(--down);
+}
+
+.learn-check-feedback {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-check-feedback strong {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.learn-check-feedback[data-correct='true'] strong {
+  color: var(--up);
+}
+
+.learn-check-feedback[data-correct='false'] strong {
+  color: var(--down);
+}
+
+.learn-check-feedback p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.learn-check-feedback .button {
+  justify-self: start;
+}
+
+/* Metric explorer. Group tabs choose a section, chips choose a metric, and the
+ * detail region holds the formula and the failure cases. */
+.learn-explorer {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+.learn-explorer-groups,
+.learn-metric-chips,
+.learn-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.learn-explorer-groups {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.learn-tab,
+.learn-chip,
+.learn-step {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration) ease, border-color var(--duration) ease, color var(--duration) ease;
+}
+
+.learn-tab {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.learn-chip,
+.learn-step {
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+
+.learn-tab:hover,
+.learn-chip:hover,
+.learn-step:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.learn-tab[aria-pressed='true'],
+.learn-chip[aria-pressed='true'],
+.learn-step[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.learn-metric-detail {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-metric-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.learn-metric-head h3 {
+  font-size: 16px;
+  letter-spacing: -0.015em;
+}
+
+.learn-group-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-metric-question {
+  max-width: 72ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.learn-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+
+.learn-meta {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.learn-meta-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.learn-meta p,
+.learn-list li {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.learn-list {
+  display: grid;
+  gap: 3px;
+}
+
+.learn-meta-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+/* Execution walkthrough. The buttons are the timeline; the detail panel is
+ * the current stage. No fake price chart is needed to explain the order. */
+.learn-execution {
+  display: grid;
+  gap: 10px;
+  max-width: 72ch;
+}
+
+.learn-step-body {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.learn-step-body h3 {
+  font-size: 14px;
+}
+
+.learn-step-body p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.learn-step-body .learn-rule {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.learn-rule span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.learn-route {
+  display: grid;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.learn-route a {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.learn-route a:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+.learn-route a:hover .learn-route-label {
+  color: var(--accent);
+}
+
+.learn-route-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.learn-route-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.learn-route svg {
+  color: var(--text-muted);
+}
+
+@media (max-width: 1080px) {
+  .learn-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'rail' 'content';
+    gap: 0;
+  }
+
+  .learn-rail {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .learn-rail-title {
+    width: 100%;
+    padding-bottom: 2px;
+  }
+}
+
+@media (max-width: 900px) {
+  .learn-page {
+    padding: 12px;
+  }
+
+  .learn-hero {
+    gap: 18px;
+    padding-top: 10px;
+  }
+
+  .learn-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .learn-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-calc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-calc-inputs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .learn-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-route a {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 12px;
+  }
+
+  .learn-route-label {
+    grid-column: 1;
+  }
+
+  .learn-route-body {
+    grid-column: 1;
+  }
+
+  .learn-route svg {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    align-self: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .learn-hero h1 {
+    font-size: 30px;
+  }
+
+  .learn-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learn-calc-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-drill-out {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-section {
+    padding: 24px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .learn-tab,
+  .learn-chip,
+  .learn-step,
+  .learn-copy,
+  .learn-check-option,
+  .learn-fact-value {
+    transition: none;
   }
 }

@@ -20,8 +20,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // The market-data service allows only these exact origins. Failing instead of
+    // moving to the next free port keeps the browser origin and the CORS
+    // allow-list in step; a shifted port would surface as an unexplained
+    // "service not reachable" error.
+    strictPort: true,
   },
   preview: {
     port: 4173,
+    strictPort: true,
   },
 });

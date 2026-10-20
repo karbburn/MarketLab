@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createBackup, mergeBackup, parseBackup, type BackupBundle } from '../../src/lib/export/backup';
-import type { BacktestConfig, Bar, Dataset, Instrument, ScreenerDefinition, Watchlist, Workspace } from '../../src/domain/types';
+import { createBackup, isEmptyReplaceRestore, mergeBackup, parseBackup, type BackupBundle } from '../../src/lib/export/backup';
+import type { BacktestConfig, Bar, Dataset, Instrument, ScreenerDefinition, UserPreferences, Watchlist, Workspace } from '../../src/domain/types';
 
 function instrument(id: string, symbol: string): Instrument {
   return { id, symbol, displayName: symbol, assetType: 'equity', currency: 'USD' };
@@ -382,5 +382,95 @@ describe('parseBackup validation', () => {
     if (!result.ok) return;
     expect(result.value.screeners).toHaveLength(1);
     expect(result.value.backtests).toHaveLength(1);
+  });
+
+  it('rejects a dataset that does not satisfy the dataset schema', () => {
+    // Plausible-looking but incomplete: no validation summary, source kind,
+    // dates or content hash. Rendering this record throws in the data page.
+    const incomplete = { id: 'd1', instrumentId: 'i1', rowCount: 2 };
+    const result = parseBackup(backupInput({ datasets: [incomplete] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datasets).toEqual([]);
+    expect(result.value.bars).toEqual([]);
+    expect(result.skipped).toContain('datasets:d1');
+  });
+
+  it('rejects an instrument that does not satisfy the instrument schema', () => {
+    const incomplete = { id: 'i1', symbol: 'AAA', assetType: 'equity', currency: 'USD' };
+    const result = parseBackup(backupInput({ instruments: [incomplete] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.instruments).toEqual([]);
+    expect(result.skipped).toContain('instruments:i1');
+    // The dataset loses its instrument and is dropped with it.
+    expect(result.value.datasets).toEqual([]);
+  });
+
+  it('rejects invalid preferences and reports them', () => {
+    const result = parseBackup(backupInput({ preferences: { theme: 'neon' } }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.preferences).toBeNull();
+    expect(result.skipped).toContain('preferences');
+  });
+
+  it('accepts preferences that satisfy the preferences schema', () => {
+    const preferences: UserPreferences = {
+      theme: 'light',
+      defaultWorkspaceId: null,
+      showVolumeByDefault: false,
+      defaultChartType: 'line',
+      defaultTimeframe: '1W',
+    };
+    const result = parseBackup(backupInput({ preferences }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.preferences).toEqual(preferences);
+    expect(result.skipped).not.toContain('preferences');
+  });
+});
+
+describe('isEmptyReplaceRestore', () => {
+  it('refuses an empty backup over a non-empty library', () => {
+    expect(
+      isEmptyReplaceRestore({
+        local: { datasets: [dataset('d1', 'i1', 'hash-1')], workspaces: [] },
+        merged: { datasets: [], workspaces: [] },
+      }),
+    ).toBe(true);
+  });
+
+  it('allows an empty backup when the library is already empty', () => {
+    expect(
+      isEmptyReplaceRestore({
+        local: { datasets: [], workspaces: [] },
+        merged: { datasets: [], workspaces: [] },
+      }),
+    ).toBe(false);
+  });
+
+  it('allows a backup that carries a dataset or workspace', () => {
+    expect(
+      isEmptyReplaceRestore({
+        local: { datasets: [dataset('d1', 'i1', 'hash-1')], workspaces: [] },
+        merged: { datasets: [dataset('d2', 'i2', 'hash-2')], workspaces: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isEmptyReplaceRestore({
+        local: { datasets: [dataset('d1', 'i1', 'hash-1')], workspaces: [] },
+        merged: { datasets: [], workspaces: [workspace('ws1', 'd1', 'i1')] },
+      }),
+    ).toBe(false);
+  });
+
+  it('refuses when the library only holds workspaces', () => {
+    expect(
+      isEmptyReplaceRestore({
+        local: { datasets: [], workspaces: [workspace('ws1', 'd1', 'i1')] },
+        merged: { datasets: [], workspaces: [] },
+      }),
+    ).toBe(true);
   });
 });

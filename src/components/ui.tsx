@@ -58,35 +58,60 @@ export function Field({
   htmlFor?: string;
 }) {
   const generated = useId();
+  const errorId = `${generated}-error`;
   const childId = isValidElement(children) ? (children.props as { id?: string }).id : undefined;
   const controlId = htmlFor ?? childId ?? generated;
   // Only elements that accept an `id` and are labelable receive `htmlFor`.
   // Groups (Segmented, plain layout divs) are labelled with the field label
   // through `aria-labelledby` so the association is still announced.
   const childType = isValidElement(children) ? children.type : undefined;
+  // The input primitives forward ARIA props through their own aliases, so an
+  // error reaches them by name instead of as a dropped DOM attribute.
+  const primitive =
+    childType === TextInput || childType === TextArea || childType === NumberInput || childType === Select;
   const labelable =
     typeof childType === 'string'
       ? ['input', 'select', 'textarea', 'button'].includes(childType)
-      : childType === TextInput || childType === NumberInput || childType === Select || childType === Switch;
+      : primitive || childType === Switch;
 
   if (!labelable) {
     const labelId = `${generated}-label`;
     return (
-      <div className="field" role="group" aria-labelledby={labelId}>
+      <div
+        className="field"
+        role="group"
+        aria-labelledby={labelId}
+        aria-describedby={error !== undefined ? errorId : undefined}
+      >
         <span className="field-label" id={labelId}>
           {label}
         </span>
         {children}
         {hint !== undefined && error === undefined && <span className="field-hint">{hint}</span>}
-        {error !== undefined && <span className="field-error">{error}</span>}
+        {error !== undefined && (
+          <span className="field-error" id={errorId}>
+            {error}
+          </span>
+        )}
       </div>
     );
   }
 
-  const control =
-    isValidElement(children) && childId === undefined && htmlFor === undefined
-      ? cloneElement(children as ReactElement<{ id?: string }>, { id: controlId })
-      : children;
+  let control: ReactNode = children;
+  if (isValidElement(children)) {
+    const childProps = children.props as Record<string, unknown>;
+    const nextProps: Record<string, unknown> = {};
+    if (childId === undefined && htmlFor === undefined) nextProps.id = controlId;
+    if (error !== undefined) {
+      const descriptionKey = primitive ? 'ariaDescribedBy' : 'aria-describedby';
+      const existing = typeof childProps[descriptionKey] === 'string' ? (childProps[descriptionKey] as string) : '';
+      nextProps[primitive ? 'ariaInvalid' : 'aria-invalid'] = true;
+      nextProps[descriptionKey] = existing ? `${existing} ${errorId}` : errorId;
+    }
+    if (Object.keys(nextProps).length > 0) {
+      control = cloneElement(children as ReactElement<Record<string, unknown>>, nextProps);
+    }
+  }
   return (
     <div className="field">
       <label className="field-label" htmlFor={controlId}>
@@ -94,7 +119,11 @@ export function Field({
       </label>
       {control}
       {hint !== undefined && error === undefined && <span className="field-hint">{hint}</span>}
-      {error !== undefined && <span className="field-error">{error}</span>}
+      {error !== undefined && (
+        <span className="field-error" id={errorId}>
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -110,6 +139,8 @@ export function TextInput({
   step,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
   onKeyDown,
 }: {
   value: string;
@@ -122,12 +153,18 @@ export function TextInput({
   step?: number | string;
   disabled?: boolean;
   ariaLabel?: string;
+  /** Set by `Field` when the control has a validation error. */
+  ariaInvalid?: boolean;
+  /** Id of the error text rendered by `Field`. */
+  ariaDescribedBy?: string;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   return (
     <input
       id={id}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid === true ? true : undefined}
+      aria-describedby={ariaDescribedBy}
       className="input"
       type={type}
       value={value}
@@ -150,6 +187,8 @@ export function TextArea({
   rows = 4,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -158,11 +197,15 @@ export function TextArea({
   rows?: number;
   disabled?: boolean;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <textarea
       id={id}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid === true ? true : undefined}
+      aria-describedby={ariaDescribedBy}
       className="input"
       rows={rows}
       value={value}
@@ -182,6 +225,8 @@ export function NumberInput({
   step = 1,
   disabled,
   placeholder,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: number;
   onChange: (value: number) => void;
@@ -191,6 +236,8 @@ export function NumberInput({
   step?: number;
   disabled?: boolean;
   placeholder?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   // The rendered text is a local draft so an empty field stays empty while the
   // operator types. Only parseable values are committed to the caller.
@@ -201,6 +248,8 @@ export function NumberInput({
       id={id}
       className="input"
       type="number"
+      aria-invalid={ariaInvalid === true ? true : undefined}
+      aria-describedby={ariaDescribedBy}
       value={shown}
       min={min}
       max={max}
@@ -226,6 +275,8 @@ export function Select<T extends string>({
   id,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: {
   value: T;
   onChange: (value: T) => void;
@@ -233,11 +284,15 @@ export function Select<T extends string>({
   id?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <select
       id={id}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid === true ? true : undefined}
+      aria-describedby={ariaDescribedBy}
       className="select"
       value={value}
       disabled={disabled}
@@ -330,6 +385,27 @@ export function Skeleton({ width = '100%', height = 14 }: { width?: string | num
   return <div className="skeleton" style={{ width, height }} aria-hidden />;
 }
 
+/**
+ * Open modals, in the order they were opened. Escape and the Tab trap belong
+ * to the topmost modal only, so a dialog opened from another dialog (for
+ * example "Compare symbols" -> "Download market data") cannot dismiss its host
+ * when the user closes the child.
+ */
+const openModalStack: string[] = [];
+
+function registerModal(id: string) {
+  if (!openModalStack.includes(id)) openModalStack.push(id);
+}
+
+function unregisterModal(id: string) {
+  const index = openModalStack.indexOf(id);
+  if (index !== -1) openModalStack.splice(index, 1);
+}
+
+function isTopmostModal(id: string) {
+  return openModalStack[openModalStack.length - 1] === id;
+}
+
 export function Modal({
   open,
   onClose,
@@ -348,6 +424,7 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const modalId = useId();
 
   // Inline arrows are common, so the listener reads the latest callback instead
   // of re-running the effect (and re-focusing) on every parent render.
@@ -358,11 +435,15 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    registerModal(modalId);
     const dialog = dialogRef.current;
     const firstField = dialog?.querySelector<HTMLElement>('.dialog-body input, .dialog-body select, .dialog-body textarea, .dialog-body button');
     const fallback = dialog?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]');
     (firstField ?? fallback ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
+      // A dialog underneath another one must not react to the keys that belong
+      // to the top layer.
+      if (!isTopmostModal(modalId)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
@@ -384,10 +465,11 @@ export function Modal({
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
+      unregisterModal(modalId);
       restoreRef.current?.focus();
       restoreRef.current = null;
     };
-  }, [open]);
+  }, [open, modalId]);
 
   if (!open) return null;
   return (

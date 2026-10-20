@@ -21,6 +21,7 @@ export const APP_ROUTES: readonly AppRoute[] = [
   { path: '/screener', label: 'Screener', title: 'Historical screener' },
   { path: '/backtest', label: 'Backtest', title: 'Rule-based backtest' },
   { path: '/data', label: 'Data', title: 'Data library' },
+  { path: '/learn', label: 'How it works', title: 'How MarketLab works' },
   { path: '/workspaces', label: 'Workspaces', title: 'Workspaces and settings' },
 ];
 
@@ -28,7 +29,7 @@ export const APP_ROUTES: readonly AppRoute[] = [
 export const NAV_GROUP_PATHS: ReadonlyArray<{ label: string; paths: readonly string[] }> = [
   { label: 'Terminal', paths: ['/', '/chart'] },
   { label: 'Research', paths: ['/quant', '/screener', '/backtest'] },
-  { label: 'Library', paths: ['/data', '/workspaces'] },
+  { label: 'Library', paths: ['/data', '/learn', '/workspaces'] },
 ];
 
 /** Top-bar heading for a route path; `fallback` for anything unmatched. */

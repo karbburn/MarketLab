@@ -16,7 +16,7 @@ import {
   WaveSine,
   X,
 } from '@phosphor-icons/react';
-import type { Bar, ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, PriceScaleMode, Timeframe } from '../../domain/types';
+import type { ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, PriceScaleMode, Timeframe } from '../../domain/types';
 import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
@@ -28,6 +28,7 @@ import { Segmented, Select, Tag } from '../ui';
 import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
 import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation, type ComparisonTarget } from '../../lib/chart/compare-overlays';
 import { planCorporateActionMarkers } from '../../lib/corporate-actions';
+import { changePercent, hoverBars } from '../../lib/chart/readout';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
@@ -688,9 +689,8 @@ export function ChartPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
 
-  const hoverBar: Bar | null = readout.index !== null ? (rendered[readout.index] ?? null) : rendered.length ? (rendered[rendered.length - 1] as Bar) : null;
-  const previousBar = readout.index !== null && readout.index > 0 ? rendered[readout.index - 1] ?? null : rendered.length > 1 ? rendered[rendered.length - 2] ?? null : null;
-  const changePct = hoverBar && previousBar && previousBar.close !== 0 ? ((hoverBar.close - previousBar.close) / previousBar.close) * 100 : null;
+  const { hoverBar, previousBar } = hoverBars(rendered, readout.index);
+  const changePct = changePercent(hoverBar, previousBar);
   const tone = changePct === null ? undefined : changePct >= 0 ? 'up' : 'down';
 
   return (
@@ -775,6 +775,8 @@ export function ChartPanel({
             className="chart-stage"
             ref={stageRef}
             tabIndex={0}
+            role="group"
+            aria-label={`Price chart, ${instrument?.symbol ?? 'no dataset selected'}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

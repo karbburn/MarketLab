@@ -188,6 +188,10 @@ test.describe('market data download', () => {
 
     await dialog.getByLabel('Symbol').fill('?? bad ??');
     await expect(dialog.getByText(/Use a provider symbol/i)).toBeVisible();
+    // The error is also the control's accessible description, not only a
+    // neighbouring line of text.
+    await expect(dialog.getByLabel('Symbol')).toHaveAttribute('aria-invalid', 'true');
+    await expect(dialog.getByLabel('Symbol')).toHaveAccessibleDescription(/Use a provider symbol/i);
     await expect(dialog.getByRole('button', { name: 'Download' })).toBeDisabled();
   });
 
@@ -202,6 +206,26 @@ test.describe('market data download', () => {
 
     await dialog.getByRole('button', { name: 'MSFT', exact: true }).click();
     await expect(dialog.getByLabel('Symbol')).toHaveValue('MSFT');
+  });
+
+  test('presents symbol suggestions as a plain list of buttons', async ({ page }) => {
+    const queries = await stubSearch(page);
+    await page.goto('/#/data');
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Download market data' });
+
+    await dialog.getByLabel('Symbol').fill('google');
+    await expect.poll(() => queries.length, { message: 'the dialog should ask the provider' }).toBeGreaterThan(0);
+
+    const suggestions = dialog.locator('.suggestion-list');
+    await expect(suggestions).toBeVisible();
+    // A list of independent buttons, not a listbox that claims arrow-key
+    // navigation it does not implement.
+    await expect(suggestions.getByRole('listbox')).toHaveCount(0);
+    await expect(suggestions.getByRole('option')).toHaveCount(0);
+
+    await suggestions.getByRole('button', { name: /GOOGL/ }).click();
+    await expect(dialog.getByLabel('Symbol')).toHaveValue('GOOGL');
   });
 
   test('stores a downloaded series with its provider and provenance', async ({ page }) => {
@@ -238,6 +262,68 @@ test.describe('market data download', () => {
     await expect(dialog.getByText(/No data is available for this symbol and range/i)).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save dataset' })).toBeHidden();
     await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
+  });
+
+  test('returns to the download form when reopened after a successful save', async ({ page }) => {
+    await stubService(page, PROVIDER_PAYLOAD);
+    await page.goto('/#/data');
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Download market data' });
+
+    await dialog.getByLabel('Symbol').fill('AAPL');
+    await dialog.getByRole('button', { name: 'Download' }).click();
+    await dialog.getByRole('button', { name: 'Save dataset' }).click();
+    await expect(dialog).toBeHidden();
+
+    // Reopening starts a new download instead of restoring the saved review.
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    await expect(dialog.getByLabel('Symbol')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+    await expect(dialog.getByRole('button', { name: 'Save dataset' })).toHaveCount(0);
+    await expect(dialog.getByText('Yahoo Finance download', { exact: true })).toHaveCount(0);
+  });
+
+  test('ignores an abandoned download when a newer one is started', async ({ page }) => {
+    await page.route('**/api/history*', async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: CORS_HEADERS });
+        return;
+      }
+      const symbol = new URL(route.request().url()).searchParams.get('symbol') ?? 'AAPL';
+      if (symbol === 'SLOW') await new Promise((resolve) => setTimeout(resolve, 1200));
+      try {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify(symbolPayload(symbol)),
+        });
+      } catch {
+        // The dialog aborted this request; a late body has nowhere to go.
+      }
+    });
+
+    await page.goto('/#/data');
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Download market data' });
+
+    await dialog.getByLabel('Symbol').fill('SLOW');
+    await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+    await expect(dialog.getByText(/Requesting daily history for SLOW/i)).toBeVisible();
+
+    // Abandon the slow request, then ask for a different series.
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    await dialog.getByLabel('Symbol').fill('FAST');
+    await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+
+    await expect(dialog.getByText('FAST - daily (Yahoo Finance download)')).toBeVisible();
+
+    // Past the slow response time the review still describes the newer request.
+    await page.waitForTimeout(1600);
+    await expect(dialog.getByText('FAST - daily (Yahoo Finance download)')).toBeVisible();
+    await expect(dialog.getByText(/SLOW - daily/)).toHaveCount(0);
   });
 });
 

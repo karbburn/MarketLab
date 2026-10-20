@@ -6,6 +6,7 @@ import { QuantLabPage } from './pages/QuantLab';
 import { ScreenerPage } from './pages/Screener';
 import { BacktestPage } from './pages/Backtest';
 import { DataPage } from './pages/DataPage';
+import { LearnPage } from './pages/Learn';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
 /**
@@ -23,6 +24,7 @@ export function App() {
           <Route path="screener" element={<ScreenerPage />} />
           <Route path="backtest" element={<BacktestPage />} />
           <Route path="data" element={<DataPage />} />
+          <Route path="learn" element={<LearnPage />} />
           <Route path="workspaces" element={<WorkspacesPage />} />
           <Route path="*" element={<OverviewPage />} />
         </Route>

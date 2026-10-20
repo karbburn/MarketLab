@@ -6,6 +6,7 @@ import {
   FunnelSimple,
   PlayCircle,
   Database,
+  BookOpen,
   Stack,
   Sun,
   Moon,
@@ -18,7 +19,7 @@ import {
 import { useStore } from '../state/store';
 import { Toaster } from './ui';
 import { datasetViews, hasSyntheticData } from '../state/selectors';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ImportDialog } from './data/ImportDialog';
 import { DownloadDialog } from './data/DownloadDialog';
 import { BulkDownloadDialog } from './data/BulkDownloadDialog';
@@ -42,6 +43,7 @@ const NAV_ICONS: Record<string, typeof ChartLineUp> = {
   '/screener': FunnelSimple,
   '/backtest': PlayCircle,
   '/data': Database,
+  '/learn': BookOpen,
   '/workspaces': Stack,
 };
 
@@ -81,6 +83,11 @@ export function AppShell() {
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const narrow = useNarrowNav();
+  const navRef = useRef<HTMLElement>(null);
+  const navToggleRef = useRef<HTMLButtonElement>(null);
+  // Whether this component opened the drawer, so closing it returns focus to
+  // the control that opened it and a breakpoint change does not steal focus.
+  const navWasOpenRef = useRef(false);
 
   const views = datasetViews(state);
   const synthetic = hasSyntheticData(state);
@@ -98,9 +105,7 @@ export function AppShell() {
     : narrow
       ? 'Open navigation'
       : 'Expand navigation';
-  const shellClassName = ['shell', navOpen ? 'nav-open' : '', navCollapsed ? 'nav-collapsed' : '']
-    .filter(Boolean)
-    .join(' ');
+  const shellClassName = navCollapsed ? 'shell nav-collapsed' : 'shell';
 
   // The pages inside the shell ask for the import and download dialogs
   // through the event bus, so the dialogs can live in one place.
@@ -126,6 +131,37 @@ export function AppShell() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navOpen]);
+
+  // The narrow drawer is a modal navigation surface: opening it moves focus to
+  // the first link, and closing it returns focus to the toggle that opened it.
+  useEffect(() => {
+    if (!narrow) return;
+    if (navOpen) {
+      navWasOpenRef.current = true;
+      const nav = navRef.current;
+      const firstLink = nav?.querySelector<HTMLElement>('.nav-item');
+      (firstLink ?? nav)?.focus();
+      return;
+    }
+    if (navWasOpenRef.current) {
+      navWasOpenRef.current = false;
+      navToggleRef.current?.focus();
+    }
+  }, [narrow, navOpen]);
+
+  // Leaving the narrow layout drops the drawer, so a resize or rotation cannot
+  // leave it open (or re-open it) without a user action. The reset lives in the
+  // media-query callback rather than the render body.
+  useEffect(() => {
+    const query = window.matchMedia(NARROW_NAV_QUERY);
+    const onChange = () => {
+      if (query.matches) return;
+      navWasOpenRef.current = false;
+      setNavOpen(false);
+    };
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
 
   // The global palette shortcut. It deliberately ignores whether the user is
   // typing somewhere: Ctrl/Cmd+K is the one binding that must always reach the
@@ -153,7 +189,13 @@ export function AppShell() {
           onClick={() => setNavOpen(false)}
         />
       )}
-      <nav id="primary-nav" className={navOpen ? 'shell-nav open' : 'shell-nav'} aria-label="Primary">
+      <nav
+        id="primary-nav"
+        className={navOpen ? 'shell-nav open' : 'shell-nav'}
+        aria-label="Primary"
+        tabIndex={-1}
+        ref={navRef}
+      >
         <div className="shell-brand">
           <span className="shell-brand-mark" aria-hidden>
             ML
@@ -197,7 +239,7 @@ export function AppShell() {
         </div>
       </nav>
 
-      <div className="shell-main">
+      <div className="shell-main" inert={narrow && navOpen}>
         <header className="topbar">
           <button
             type="button"
@@ -206,6 +248,7 @@ export function AppShell() {
             aria-expanded={navExpanded}
             aria-controls="primary-nav"
             title={navToggleLabel}
+            ref={navToggleRef}
             onClick={() => {
               if (narrow) setNavOpen((open) => !open);
               else setNavCollapsed((collapsed) => !collapsed);

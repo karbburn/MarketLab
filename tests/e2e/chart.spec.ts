@@ -94,6 +94,16 @@ test.describe('chart workspace', () => {
     await expect(legend).toContainText('Daily');
   });
 
+  test('names the chart stage for the instrument it controls', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const stage = page.getByRole('group', { name: 'Price chart, AAPL' }).first();
+    await expect(stage).toBeVisible();
+    await stage.focus();
+    await expect(stage).toBeFocused();
+  });
+
   test('expands the layout to four panels and hides panels without deleting them', async ({ page }) => {
     await page.goto('/#/chart');
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(1);

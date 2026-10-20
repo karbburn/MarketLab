@@ -18,6 +18,9 @@ export function WorkspacesPage() {
   const [pendingBackup, setPendingBackup] = useState<{ text: string; summary: string } | null>(null);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [confirmReset, setConfirmReset] = useState(false);
+  const [applying, setApplying] = useState(false);
+  // A ref guards the same tick in which the disabled state has not rendered yet.
+  const applyingRef = useRef(false);
 
   const exportBackup = () => {
     downloadBackupFile({
@@ -59,7 +62,11 @@ export function WorkspacesPage() {
   };
 
   const applyPending = async () => {
-    if (!pendingBackup) return;
+    // A restore clears and rewrites several stores; a second submission would
+    // run that destructive loop twice, so the first one owns the operation.
+    if (!pendingBackup || applyingRef.current) return;
+    applyingRef.current = true;
+    setApplying(true);
     try {
       const parsed = parseBackup(JSON.parse(pendingBackup.text));
       if (!parsed.ok) {
@@ -70,6 +77,9 @@ export function WorkspacesPage() {
       setPendingBackup(null);
     } catch (restoreError) {
       actions.notify('error', restoreError instanceof Error ? restoreError.message : 'The backup could not be restored.');
+    } finally {
+      applyingRef.current = false;
+      setApplying(false);
     }
   };
 
@@ -327,10 +337,10 @@ export function WorkspacesPage() {
                   clears local instruments, datasets, workspaces, watchlists, screens and strategies first.
                 </span>
                 <div className="row tight">
-                  <button type="button" className="button primary" onClick={() => void applyPending()}>
-                    Apply restore
+                  <button type="button" className="button primary" disabled={applying} onClick={() => void applyPending()}>
+                    {applying ? 'Applying…' : 'Apply restore'}
                   </button>
-                  <button type="button" className="button ghost" onClick={() => setPendingBackup(null)}>
+                  <button type="button" className="button ghost" disabled={applying} onClick={() => setPendingBackup(null)}>
                     Cancel
                   </button>
                 </div>

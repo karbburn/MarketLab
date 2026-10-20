@@ -78,6 +78,35 @@ test.describe('global command palette', () => {
     await expect(page.locator('.topbar-title')).toHaveText('Quant lab');
   });
 
+  test('keeps arrow navigation working after Tab moves focus to the close control', async ({ page }) => {
+    await gotoReady(page, '/');
+    await page.keyboard.press('Control+k');
+    await expect(search(page)).toBeFocused();
+
+    await page.keyboard.press('Tab');
+    const close = page.getByRole('button', { name: 'Close command palette' });
+    await expect(close).toBeFocused();
+
+    // The arrow keys move the highlight from the close control and send focus
+    // back to the field, so the advertised keyboard model keeps working.
+    await page.keyboard.press('ArrowDown');
+    await expect(search(page)).toBeFocused();
+    await expect(palette(page).getByRole('option', { selected: true })).toContainText('Chart workspace');
+
+    await page.keyboard.press('End');
+    await expect(search(page)).toBeFocused();
+    await expect(palette(page).getByRole('option', { selected: true })).toBeVisible();
+
+    await page.keyboard.press('Home');
+    await expect(palette(page).getByRole('option', { selected: true })).toContainText('Overview');
+
+    // Enter on the close control keeps its native behaviour.
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(palette(page)).toBeHidden();
+  });
+
   test('opens a stored dataset in the chart workspace without duplicating a panel', async ({ page }) => {
     await seedLibrary(page);
     await gotoReady(page, '/#/data');
