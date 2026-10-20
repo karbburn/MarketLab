@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { CloudArrowDown, GlobeSimple, Warning } from '@phosphor-icons/react';
 import type { DatasetBundle } from '../../state/store';
 import { useStore } from '../../state/store';
@@ -54,13 +54,25 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
   const [review, setReview] = useState<DatasetBundle | null>(null);
   const [busy, setBusy] = useState(false);
   const { suggestions, searching, dismiss } = useProviderSymbolSearch(symbol, open);
+  // Both the run id and the controller are bumped on close and on a new
+  // download, so a late response for an abandoned request can never replace a
+  // newer review (or write state into a dialog the user has closed).
+  const runIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancelInFlight = useCallback(() => {
+    runIdRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
 
   const reset = useCallback(() => {
+    cancelInFlight();
     setPhase('idle');
     setNotice(null);
     setReview(null);
     setBusy(false);
-  }, []);
+  }, [cancelInFlight]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -83,10 +95,17 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
       setNotice({ kind: 'error', text: rangeError ?? 'Enter a valid symbol first.' });
       return;
     }
+    // A second download supersedes the first: the abandoned request is aborted
+    // and its run id is stale, so only this one may write the review state.
+    cancelInFlight();
+    const runId = runIdRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPhase('downloading');
     setNotice({ kind: 'info', text: `Requesting daily history for ${clean} from ${PROVIDER_LABEL}…` });
     try {
-      const history = await fetchProviderHistory({ symbol: clean, start, end });
+      const history = await fetchProviderHistory({ symbol: clean, start, end }, DEFAULT_SERVICE_URL, controller.signal);
+      if (runIdRef.current !== runId) return;
       const validation = validateProviderBars(history.bars, duplicatePolicy);
       if (validation.fatalErrors.length > 0) {
         setPhase('idle');
@@ -102,8 +121,13 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
       setPhase('review');
       setNotice(null);
     } catch (error) {
+      // An aborted request is the expected result of closing the dialog or
+      // starting a newer download, not a failure to report.
+      if (runIdRef.current !== runId) return;
       setPhase('idle');
       setNotice({ kind: 'error', text: describeMarketDataFailure(error) });
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
     }
   };
 
@@ -112,7 +136,9 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
     setBusy(true);
     try {
       await actions.importDataset(review);
-      onClose();
+      // Reset before closing so reopening shows the download form rather than
+      // the review of the dataset that was just saved.
+      handleClose();
     } catch (error) {
       setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'The dataset could not be saved.' });
       setPhase('idle');
@@ -207,7 +233,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         {suggestions !== null && (
-          <ul className="suggestion-list" role="listbox" aria-label="Symbol suggestions">
+          <ul className="suggestion-list" aria-label="Symbol suggestions">
             {suggestions.length === 0 && !searching && (
               <li className="field-hint">No suggestions. Type a symbol and press Download to try it directly.</li>
             )}
@@ -216,8 +242,6 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
                 <button
                   type="button"
                   className="button ghost sm suggestion"
-                  role="option"
-                  aria-selected={symbol === suggestion.symbol}
                   onClick={() => {
                     setSymbol(suggestion.symbol);
                     dismiss(suggestion.symbol);

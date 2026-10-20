@@ -339,6 +339,32 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /**
+   * Arrow, Home and End keep working after Tab moves focus to the close
+   * control: they move the highlight and send focus back to the field. Enter is
+   * left alone there so the button keeps its native behaviour.
+   */
+  const onDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target === inputRef.current) return;
+    if (event.key === 'Enter') return;
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+    const count = plan.flat.length;
+    if (count === 0) return;
+    event.preventDefault();
+    inputRef.current?.focus();
+    if (event.key === 'ArrowDown') {
+      moveActive(safeIndex < 0 ? 0 : (safeIndex + 1) % count);
+    } else if (event.key === 'ArrowUp') {
+      moveActive(safeIndex <= 0 ? count - 1 : safeIndex - 1);
+    } else if (event.key === 'Home') {
+      moveActive(0);
+    } else {
+      moveActive(count - 1);
+    }
+  };
+
   return (
     <div
       className="palette-backdrop"
@@ -352,6 +378,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-label="Command palette"
         ref={dialogRef}
+        onKeyDown={onDialogKeyDown}
       >
         <div className="palette-search">
           <MagnifyingGlass size={15} aria-hidden />

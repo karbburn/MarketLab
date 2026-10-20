@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { DownloadSimple, FloppyDisk, Plus, Trash } from '@phosphor-icons/react';
 import type { ScreenerDefinition, ScreenerField, ScreenerFilter, ScreenerOperator } from '../domain/types';
 import { useStore } from '../state/store';
@@ -139,6 +139,7 @@ export function ScreenerPage() {
         actions={
           <div className="row tight">
             <Select
+              ariaLabel="Saved screens"
               value={selectedSavedId}
               onChange={(value) => {
                 setSelectedSavedId(value);
@@ -444,6 +445,9 @@ export function ScreenerPage() {
           <li>Max drawdown in window: worst close-to-close drawdown inside the window only.</li>
           <li>Relative volume: volume divided by the average volume of the window. Unavailable when the series has no volume.</li>
           <li>&quot;Crossed above&quot; and &quot;crossed below&quot; compare the value now against the threshold and the previous session, so a single touch does not qualify.</li>
+          <li>
+            <Link to="/learn?section=screening">Read how the cutoff and missing fields work</Link>
+          </li>
         </ul>
       </Panel>
     </div>

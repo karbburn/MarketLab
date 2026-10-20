@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { DownloadSimple, FloppyDisk, Play, Plus, Trash } from '@phosphor-icons/react';
 import type { BacktestConfig, BacktestResult, RuleField, ScreenerOperator, StrategyRule } from '../domain/types';
 import { useStore } from '../state/store';
@@ -119,6 +120,7 @@ export function BacktestPage() {
         actions={
           <div className="row tight">
             <Select
+              ariaLabel="Saved strategies"
               value={selectedSavedId}
               onChange={(value) => {
                 setSelectedSavedId(value);
@@ -442,6 +444,9 @@ export function BacktestPage() {
           <li>A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.</li>
           <li>The buy-and-hold benchmark uses the same initial capital over the same window with no costs.</li>
           <li>Only long positions are simulated. Short selling is not modelled.</li>
+          <li>
+            <Link to="/learn?section=execution">Walk through the execution model stage by stage</Link>
+          </li>
         </ul>
       </Panel>
     </div>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { DownloadSimple } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
@@ -18,6 +19,9 @@ import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 
 const PALETTE = ['#3fb8a3', '#d8a13f', '#5b9bd5', '#e2586a', '#35c48d', '#8aa0b8'];
+
+/** Pearson needs three returns, and n closes produce n - 1 returns. */
+const MIN_CORRELATION_SESSIONS = 4;
 
 export function QuantLabPage() {
   const { state } = useStore();
@@ -47,36 +51,45 @@ export function QuantLabPage() {
   }, [primary, benchmark]);
 
   const performance = useMemo(() => {
-    if (!primary) return [] as ChartSeries[];
+    if (!primary) return { series: [] as ChartSeries[], dates: [] as string[] };
     const sources = benchmark ? [primary.bars, benchmark.bars] : [primary.bars];
     const aligned = alignOnCommonDates(sources);
     if (aligned.dates.length === 0) {
       // A selected benchmark with no shared sessions is reported explicitly;
       // plotting the primary series alone would silently drop the benchmark.
-      if (benchmark) return [] as ChartSeries[];
+      if (benchmark) return { series: [] as ChartSeries[], dates: [] as string[] };
+      const dates = primary.bars.map((bar) => bar.date);
       const normalised = normalisedPerformance(
-        primary.bars.map((bar) => bar.date),
+        dates,
         primary.bars.map((bar) => bar.close),
       );
-      return [
-        {
-          id: primary.dataset.id,
-          label: primary.instrument?.symbol ?? primary.dataset.name,
-          color: PALETTE[0] as string,
-          points: normalised.values.map((value, index) => ({ x: index, y: value })),
-        },
-      ];
-    }
-    return aligned.closes.map((closes, index) => {
-      const normalised = normalisedPerformance(aligned.dates, closes);
-      const source = index === 0 ? primary : benchmark;
       return {
-        id: source?.dataset.id ?? `series-${index}`,
-        label: source?.instrument?.symbol ?? source?.dataset.name ?? `series ${index + 1}`,
-        color: PALETTE[index % PALETTE.length] as string,
-        points: normalised.values.map((value, pointIndex) => ({ x: pointIndex, y: value })),
+        series: [
+          {
+            id: primary.dataset.id,
+            label: primary.instrument?.symbol ?? primary.dataset.name,
+            color: PALETTE[0] as string,
+            points: normalised.values.map((value, index) => ({ x: index, y: value })),
+          },
+        ],
+        dates,
       };
-    });
+    }
+    return {
+      series: aligned.closes.map((closes, index) => {
+        const normalised = normalisedPerformance(aligned.dates, closes);
+        const source = index === 0 ? primary : benchmark;
+        return {
+          id: source?.dataset.id ?? `series-${index}`,
+          label: source?.instrument?.symbol ?? source?.dataset.name ?? `series ${index + 1}`,
+          color: PALETTE[index % PALETTE.length] as string,
+          points: normalised.values.map((value, pointIndex) => ({ x: pointIndex, y: value })),
+        };
+      }),
+      // The labels come from the plotted sessions, not from the primary
+      // series, which can be longer than the shared window.
+      dates: aligned.dates,
+    };
   }, [primary, benchmark]);
 
   const rollingVol = useMemo(() => {
@@ -110,10 +123,11 @@ export function QuantLabPage() {
     const selected = views.filter((view) => matrixIds.includes(view.dataset.id));
     if (selected.length < 2) return null;
     const aligned = alignOnCommonDates(selected.map((view) => view.bars));
-    if (aligned.dates.length < 3) return null;
+    if (aligned.dates.length < MIN_CORRELATION_SESSIONS) return null;
     const labels = selected.map((view) => view.instrument?.symbol ?? view.dataset.name);
     return { labels, values: correlationMatrix(labels, aligned.closes).values, sessions: aligned.dates.length };
   }, [views, matrixIds]);
+  const matrixSelectionCount = views.filter((view) => matrixIds.includes(view.dataset.id)).length;
 
   if (views.length === 0) {
     return (
@@ -196,11 +210,13 @@ export function QuantLabPage() {
                 label={benchmark ? `Beta vs ${benchmark.instrument?.symbol ?? ''}` : 'Beta'}
                 value={metrics.beta?.beta == null ? '--' : metrics.beta.beta.toFixed(2)}
                 note={
-                  metrics.beta?.rSquared == null
+                  metrics.beta?.beta == null
                     ? benchmark
-                      ? 'Not enough overlapping sessions'
+                      ? 'Beta unavailable for this overlap'
                       : 'Select a benchmark to compute'
-                    : `R squared ${metrics.beta.rSquared.toFixed(2)}`
+                    : metrics.beta.rSquared == null
+                      ? 'R squared unavailable for this overlap'
+                      : `R squared ${metrics.beta.rSquared.toFixed(2)}`
                 }
               />
             </div>
@@ -210,28 +226,28 @@ export function QuantLabPage() {
             <Panel
               title="Normalised performance"
               subtitle={
-                benchmark && performance.length === 0
+                benchmark && performance.series.length === 0
                   ? `No overlapping sessions with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
                   : 'Percent change from the first common session'
               }
             >
-              {benchmark && performance.length === 0 ? (
+              {benchmark && performance.series.length === 0 ? (
                 <EmptyState
                   title="No overlapping sessions"
                   body={`${symbols} and ${benchmark.instrument?.symbol ?? benchmark.dataset.name} share no sessions, so there is nothing to compare.`}
                 />
               ) : (
                 <LineChart
-                  series={performance}
+                  series={performance.series}
                   height={220}
                   baseline={0}
                   yFormat={(value) => `${value.toFixed(0)}%`}
                   ariaLabel={`Normalised performance of ${symbols}`}
                   xLabels={
-                    primary.bars.length > 1
+                    performance.dates.length > 1
                       ? [
-                          { x: 0, label: (primary.bars[0] as { date: string }).date },
-                          { x: 1, label: (primary.bars[primary.bars.length - 1] as { date: string }).date },
+                          { x: 0, label: performance.dates[0] as string },
+                          { x: 1, label: performance.dates[performance.dates.length - 1] as string },
                         ]
                       : []
                   }
@@ -255,7 +271,13 @@ export function QuantLabPage() {
 
       <Panel
         title="Correlation matrix"
-        subtitle={matrix ? `${matrix.sessions} shared sessions across ${matrix.labels.length} series` : 'Select two or more series'}
+        subtitle={
+          matrix
+            ? `${matrix.sessions} shared sessions across ${matrix.labels.length} series`
+            : matrixSelectionCount < 2
+              ? 'Select two or more series'
+              : 'Two or more series need three shared returns (four shared sessions)'
+        }
       >
         <div className="stack">
           <div className="row">
@@ -310,7 +332,9 @@ export function QuantLabPage() {
               </table>
             </div>
           ) : (
-            <span className="field-hint">Select at least two series with overlapping sessions to build the matrix.</span>
+            <span className="field-hint">
+              Select at least two series with four or more shared sessions to build the matrix.
+            </span>
           )}
         </div>
       </Panel>
@@ -359,7 +383,7 @@ export function QuantLabPage() {
         <Panel title="Method notes">
           <ul className="list-reset stack field-hint">
             <li>Returns are simple session-over-session changes in close. No dividends, splits or fees are implied.</li>
-            <li>Annualisation uses 252 sessions. CAGR uses calendar years between the first and last session, and is withheld for spans under 30 days.</li>
+            <li>Annualisation uses 252 sessions. CAGR uses calendar years between the first and last session, and is withheld for spans of 30 days or less.</li>
             <li>
               VaR and CVaR are historical (non-parametric) and need at least 20 returns.
               {historicalVarPct(metrics.returns, 0.95) === null ? ' This series is below that threshold, so both are withheld.' : ''}
@@ -367,7 +391,10 @@ export function QuantLabPage() {
             <li>Maximum drawdown is close-to-close, not an intraday peak-to-trough measure.</li>
             <li>Multi-series comparison uses only dates present in every selected series. Nothing is forward-filled or interpolated.</li>
             <li>Correlation is Pearson on daily simple returns, computed on the shared sessions only.</li>
-            <li>Beta and alpha are regressed on aligned daily returns with a zero risk-free rate; alpha is annualised.</li>
+            <li>Beta and alpha use aligned daily returns with a zero risk-free rate. Beta is covariance over benchmark variance, not a regression with an intercept, and alpha is annualised.</li>
+            <li>
+              <Link to="/learn?section=risk">Read the full method, including when a metric is withheld</Link>
+            </li>
           </ul>
         </Panel>
       )}

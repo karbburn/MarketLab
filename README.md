@@ -24,7 +24,7 @@ TradingView or any other commercial charting platform; it reimplements a familia
 ## Contents
 
 - [Features](#features)
-  - [Charting](#charting) · [Indicators](#indicators) · [Research](#research) · [Data](#data) · [Workspace](#workspace)
+  - [Charting](#charting) · [Indicators](#indicators) · [Research](#research) · [Data](#data) · [Workspace](#workspace) · [Navigation and reference](#navigation-and-reference)
 - [Screenshots](#screenshots)
 - [Getting started](#getting-started)
 - [Getting data](#getting-data)
@@ -110,6 +110,23 @@ shown as a percentage of the low, persisted preferences (including light and dar
 data library that shows the stored series, their source, frequency, session counts, first and last
 session and content hash — with per-series inspection, export and deletion.
 
+### Navigation and reference
+
+- **Command palette** - `Ctrl`/`Cmd`+`K` opens a keyboard-first overlay for the whole
+  application. It filters the navigation destinations, runs safe actions (import a CSV, download
+  one or many symbols, export a JSON backup, switch theme, open or create a workspace) and
+  searches the datasets already stored in the local library. Arrow keys and `Home`/`End` still
+  move the selection after `Tab` moves focus to the close button, while `Enter` keeps that
+  button's native action; recently opened datasets are remembered, and focus returns to the
+  control that opened the palette. It reads the store's in-memory state only, so
+  results always match the current library.
+- **How it works** - an in-app guide at `/#/learn` that states the conventions behind every
+  number: what a stored bar is, total return and CAGR, risk measures, comparison alignment and
+  correlation, screen cutoffs, backtest execution and the cases where MarketLab withholds a
+  result. It includes a metric reference with formulas you can copy, a CAGR calculator, a
+  screen-cutoff drill, a four-case rule check and links into the screen that applies each
+  convention.
+
 ## Screenshots
 
 All screenshots were captured from a real provider download (AAPL, MSFT, NVDA, SPY and QQQ
@@ -150,15 +167,15 @@ started. Nothing is pre-filled, and no placeholder prices are shown.
 
 | Script | Purpose |
 | --- | --- |
-| `npm run dev` | Start the Vite development server. |
+| `npm run dev` | Start the Vite development server on the fixed port 5173. |
 | `npm run build` | Type-check with `tsc -b`, then build the production bundle into `dist/`. |
-| `npm run preview` | Serve the built bundle locally. |
+| `npm run preview` | Serve the built bundle locally on the fixed port 4173. |
 | `npm run typecheck` | Type-check only. |
 | `npm run lint` | Run ESLint over the repository. |
 | `npm test` | Run the unit test suite (Vitest). |
 | `npm run test:watch` | Run unit tests in watch mode. |
-| `npm run test:e2e` | Run the Playwright end-to-end suite against a preview build. |
-| `npm run verify` | Lint, type-check, unit test and build in one pass. |
+| `npm run test:e2e` | Build the app, then run the Playwright end-to-end suite against the preview server on 127.0.0.1:4173. |
+| `npm run verify` | Lint, type-check, unit test and build in one pass. Does not run the E2E or Python service suites. |
 
 ## Getting data
 
@@ -240,16 +257,18 @@ The rules below are enforced in code, not just in the documentation:
 
 ```
 src/
-  components/     app shell, UI primitives, chart panels, chart adapter, dialogs
+  components/     app shell, command palette, UI primitives, chart panels, chart adapter, dialogs
   domain/         canonical domain types (bars, datasets, workspaces, drawings)
   lib/
     backtest/     rule definitions, comparison helpers, simulation engine
     chart/        comparison-overlay preparation and chart presentation helpers
+    command-palette/  palette planning, search, recents and shortcut labels
     corporate-actions.ts  provider-action labels and marker planning
     csv/          CSV parsing and column mapping
     drawings/     drawing geometry and hit testing
     export/       CSV writers, JSON backup and browser download helpers
     indicators/   indicator implementations and registry
+    learn/        field-guide content and the guide's example calculations
     marketdata/   provider-independent client, batch queue and response normalisation
     migration/    removal of the legacy bundled demo series
     persistence/  IndexedDB adapter with an in-memory fallback
@@ -289,23 +308,30 @@ set of design tokens, with dark and light themes.
   write queue, and falls back to in-memory storage (saying so) when IndexedDB is unavailable.
   Exports and backups exist so a durable copy is always a click away.
 - **Hash routing.** Routes are served from the fragment, so the production build is a directory
-  of static files that needs no server rewrite rules and can be hosted anywhere.
+  of static files that needs no server rewrite rules and can be hosted anywhere. Every screen
+  has a stable address (for example `/#/chart`, `/#/learn` and `/#/data`).
 
 ## Testing
 
 ```bash
 npm run verify                     # lint, type-check, unit tests, production build
-npm run test:e2e                   # Playwright against the built app on 127.0.0.1:4173
+npm run test:e2e                   # builds, then Playwright on 127.0.0.1:4173
 python -m pytest services/market-data/tests -q
 ```
 
-The suites are run for real and the numbers below are the current ones.
+`npm run verify` covers lint, type-check, the unit suite and the production build only. It does
+**not** run the browser suite or the Python service suite. E2E (`npm run test:e2e`, which builds
+first) and pytest are separate required gates: a change is verified only when all three commands
+pass.
 
-| Suite | Size | What it covers |
+Suite sizes are not hardcoded here because they change with every commit; the commands above are
+the source of truth.
+
+| Suite | Gate | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | 27 files, 293 tests | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, the symbol token handling, watchlist context maths, backup parsing, the legacy-series removal and export formatting. |
-| End-to-end (Playwright) | 61 tests | The shell and navigation, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
-| Service (pytest) | 26 tests | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation — deterministic, never touching the network. |
+| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations, and the documented route, data and build-config claims. |
+| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, the field guide, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
+| Service (pytest) | `python -m pytest services/market-data/tests -q` | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation - deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
 (`channel: 'chrome'`, no browser download) and seeds its own library, because the application
@@ -323,13 +349,14 @@ deployed origin, so a user's own local service can serve the hosted application.
 
 ## Project status
 
-**Shipped and verified.** The features above, the full local test gate and a live deployment. The
-latest state: `npm run verify` green, 293 unit tests, 61 end-to-end tests, 26 service tests.
+**Shipped and verified.** The features above, including the global command palette and the
+"How it works" field guide, plus a live deployment. Verification is the three gates listed under
+Testing - `npm run verify`, `npm run test:e2e` and the pytest command - and their suite sizes move
+with every commit, so the commands are the source of truth.
 
-**Planned, not started** — the remaining account-free items selected from an internal review of
-what a charting terminal offers, in the order they are intended:
-
-1. A global command palette (Ctrl/Cmd-K) for datasets, navigation and local symbol search.
+**Planned, not started** - none of the account-free items selected from an internal review of
+what a charting terminal offers remain outstanding. The command palette and the field guide both
+shipped; anything not listed under Features is not implemented and is not promised here.
 
 **Deliberately out of scope.** MarketLab is an analysis and research tool, not a trading
 terminal: no intraday or streaming quotes, no brokerage connectivity, no accounts or cloud sync,

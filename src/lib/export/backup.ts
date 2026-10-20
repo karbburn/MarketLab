@@ -8,8 +8,15 @@ import type {
   Watchlist,
   Workspace,
 } from '../../domain/types';
-import { isDateString } from '../date';
-import { backtestConfigSchema, parseWorkspace, screenerDefinitionSchema } from '../workspace/schema';
+import {
+  backtestConfigSchema,
+  barSchema,
+  datasetSchema,
+  instrumentSchema,
+  parseWorkspace,
+  preferencesSchema,
+  screenerDefinitionSchema,
+} from '../workspace/schema';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -66,8 +73,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Parses an imported backup defensively.
  *
  * Only the top-level shape is required; each array is filtered to entries that
- * are plausibly well-formed, and workspaces pass the full schema check. Rows that
- * fail are reported instead of being written, so a corrupt file cannot half-load.
+ * pass the same schemas the application writes, and workspaces pass the full
+ * schema check. Rows that fail are reported instead of being written, so a
+ * corrupt file cannot half-load or persist a record the UI cannot render.
  */
 export function parseBackup(
   input: unknown,
@@ -94,28 +102,24 @@ export function parseBackup(
     return kept;
   };
 
-  function isFiniteNumber(value: unknown): value is number {
-    return typeof value === 'number' && Number.isFinite(value);
-  }
-
   function isBar(value: unknown): value is Bar {
-    if (!isRecord(value)) return false;
+    const parsed = barSchema.safeParse(value);
+    if (!parsed.success) return false;
+    const bar = parsed.data;
+    // The schema checks the shape; the import path additionally refuses
+    // non-positive prices and negative volume, and restored data must not be
+    // able to bypass that rule.
     return (
-      isDateString(value.date) &&
-      isFiniteNumber(value.open) &&
-      value.open > 0 &&
-      isFiniteNumber(value.high) &&
-      value.high > 0 &&
-      isFiniteNumber(value.low) &&
-      value.low > 0 &&
-      isFiniteNumber(value.close) &&
-      value.close > 0 &&
-      (value.volume === null || (isFiniteNumber(value.volume) && value.volume >= 0))
+      bar.open > 0 &&
+      bar.high > 0 &&
+      bar.low > 0 &&
+      bar.close > 0 &&
+      (bar.volume === null || bar.volume >= 0)
     );
   }
 
-  const isInstruments = (value: unknown): value is Instrument => isRecord(value) && typeof value.id === 'string' && typeof value.symbol === 'string';
-  const isDatasets = (value: unknown): value is Dataset => isRecord(value) && typeof value.id === 'string' && typeof value.rowCount === 'number';
+  const isInstruments = (value: unknown): value is Instrument => instrumentSchema.safeParse(value).success;
+  const isDatasets = (value: unknown): value is Dataset => datasetSchema.safeParse(value).success;
   const isBars = (value: unknown): value is { id: string; bars: Bar[] } =>
     isRecord(value) &&
     typeof value.id === 'string' &&
@@ -161,6 +165,15 @@ export function parseBackup(
   const usableDatasetIds = new Set(usableDatasets.map((dataset) => dataset.id));
   const usableBars = bars.filter((entry) => usableDatasetIds.has(entry.id));
 
+  // Preferences are optional, but when present they must be a complete record:
+  // a half-written theme/chart-type pair is what makes the first render throw.
+  let preferences: UserPreferences | null = null;
+  if (input.preferences !== undefined && input.preferences !== null) {
+    const parsed = preferencesSchema.safeParse(input.preferences);
+    if (parsed.success) preferences = parsed.data;
+    else skipped.push('preferences');
+  }
+
   return {
     ok: true,
     skipped,
@@ -173,7 +186,7 @@ export function parseBackup(
       bars: usableBars,
       workspaces,
       watchlists,
-      preferences: isRecord(input.preferences) ? (input.preferences as unknown as UserPreferences) : null,
+      preferences,
       screeners,
       backtests,
     },
@@ -342,5 +355,23 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     duplicateDatasets,
     remappedPanels,
   };
+}
+
+/**
+ * True when a replace-mode restore would erase a non-empty library while the
+ * backup itself carries no restorable datasets or workspaces.
+ *
+ * A backup with no entities is a valid export, but applying it as "replace" is
+ * indistinguishable from deleting the whole library, and there is nothing in
+ * the file to show for it afterwards. The caller refuses the restore and points
+ * the user at the explicit reset action instead.
+ */
+export function isEmptyReplaceRestore(input: {
+  local: { datasets: readonly unknown[]; workspaces: readonly unknown[] };
+  merged: { datasets: readonly unknown[]; workspaces: readonly unknown[] };
+}): boolean {
+  const localHasData = input.local.datasets.length > 0 || input.local.workspaces.length > 0;
+  const mergedHasData = input.merged.datasets.length > 0 || input.merged.workspaces.length > 0;
+  return localHasData && !mergedHasData;
 }
 

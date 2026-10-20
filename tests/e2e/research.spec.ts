@@ -38,6 +38,10 @@ test.describe('historical screener', () => {
   test('creates a screen with a default filter and returns matching instruments', async ({ page }) => {
     await page.goto('/#/screener');
 
+    // The saved-screen picker is named for assistive technology, not labelled
+    // only by its first option.
+    await expect(page.getByRole('combobox', { name: 'Saved screens' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Start a new screen' }).click();
     await expect(page.getByText('of 6 series matched')).toBeVisible();
 
@@ -97,6 +101,8 @@ test.describe('rule-based backtest', () => {
   test('simulates the default strategy and states its execution assumptions', async ({ page }) => {
     await page.goto('/#/backtest');
 
+    await expect(page.getByRole('combobox', { name: 'Saved strategies' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
@@ -121,6 +127,28 @@ test.describe('rule-based backtest', () => {
     await expect(page.getByText('Stale')).toBeVisible();
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await expect(page.getByText('Stale')).toBeHidden();
+  });
+
+  test('keeps the remove control on the rule row at desktop width', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+    await page.getByRole('button', { name: 'Add entry rule' }).click();
+
+    const row = page
+      .locator('.rule-row')
+      .filter({ has: page.getByRole('button', { name: 'Remove rule' }) })
+      .first();
+    const remove = row.getByRole('button', { name: 'Remove rule' });
+    const firstSelect = row.getByRole('combobox').first();
+
+    const removeBox = await remove.boundingBox();
+    const selectBox = await firstSelect.boundingBox();
+    expect(removeBox).not.toBeNull();
+    expect(selectBox).not.toBeNull();
+
+    // On the same line as the rule, not wrapped beneath it.
+    expect(removeBox!.y).toBeLessThan(selectBox!.y + selectBox!.height);
   });
 
   test('exports the trade list as CSV', async ({ page }) => {

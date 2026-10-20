@@ -13,10 +13,12 @@
 - Backtesting: a long-only rule engine with explicit execution assumptions (signals evaluated at close, fills at the next session's open, costs and slippage, no shorting), an equity curve against buy-and-hold, and a trade log.
 - Workspaces, watchlists, preferences: per-chart configuration, saved watchlists, persisted theme and layout preferences.
 - Export and backup: dataset/quant/screener/backtest CSV exports plus a versioned JSON workspace backup that can be merged or restored.
+- Command palette (`Ctrl`/`Cmd`+`K`): filter navigation, run import/download/backup actions, and search the datasets already stored in the local library.
+- Field guide at `/#/learn`: the conventions behind stored bars, returns, risk, comparison, screening and backtest execution, with a metric reference, calculators and rule-check cases.
 
 ## Data and honesty
 
-- The bundled sample data is deterministic synthetic data, generated locally, and is labelled "not real market data" wherever it appears.
+- MarketLab ships no bundled or sample market data. The library starts empty; data comes from CSV import or the optional local provider service.
 - CSV import validates every series: prices must be positive, `low <= min(open, close) <= max(open, close) <= high`, sessions must be unique under an explicit duplicate policy, and missing sessions are reported as gaps, never invented.
 - Daily data is never interpolated into intraday bars. Only daily-to-weekly (Monday-based) and daily-to-monthly aggregation is offered, and aggregated series are labelled as such.
 - Backtest results are presented together with the execution model that produced them.
@@ -24,10 +26,10 @@
 
 ## Optional local market-data service
 
-MarketLab ships an optional, local-only service that downloads daily historical bars from Yahoo Finance without an API key. It binds to 127.0.0.1 only, requires no keys or secrets, and is not deployed anywhere — it runs on the user's own machine. Without it, the app works fully from CSV imports and the bundled samples.
+MarketLab ships an optional, local-only service that downloads daily historical bars from Yahoo Finance without an API key. It binds to 127.0.0.1 only, requires no keys or secrets, and is not deployed anywhere; it runs on the user's own machine. Without it, the app works fully from CSV imports and datasets you have already downloaded.
 
 ## Using MarketLab with an AI agent
 
-- The app is a single-page application; all routes are hash routes under `/#/` (for example `/#/chart`, `/#/screener`, `/#/backtest`, `/#/quant`, `/#/data`, `/#/workspaces`). An agent driving a browser can navigate directly to those URLs.
+- The app is a single-page application; all routes are hash routes under `/#/` (for example `/#/chart`, `/#/screener`, `/#/backtest`, `/#/quant`, `/#/data`, `/#/learn`, `/#/workspaces`). An agent driving a browser can navigate directly to those URLs.
 - All analysis is deterministic and reproducible from the stored series: the same dataset, indicator parameters, filters, or strategy always produce the same numbers.
 - Nothing in the app requires an account, a network connection, or any credential. There is nothing to purchase and no checkout.

@@ -186,6 +186,28 @@ test.describe('compare-symbol overlays', () => {
     await expect(dialog.getByRole('button', { name: 'Import a CSV file' })).toBeVisible();
   });
 
+  test('keeps the compare dialog open when Escape closes a stacked download dialog', async ({ page }) => {
+    await seedLibrary(page, buildSingleSeriesLibrary());
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const compare = await openCompareDialog(page);
+    await compare.getByRole('button', { name: 'Download real market data' }).click();
+
+    const download = page.getByRole('dialog', { name: 'Download market data' });
+    await expect(download).toBeVisible();
+    await expect(compare).toBeVisible();
+
+    // Only the top dialog reacts: one Escape must not discard the compare draft.
+    await page.keyboard.press('Escape');
+    await expect(download).toBeHidden();
+    await expect(compare).toBeVisible();
+
+    // The compare dialog is the top layer again, so its own Escape closes it.
+    await page.keyboard.press('Escape');
+    await expect(compare).toBeHidden();
+  });
+
   test('keeps the compare workflow usable at a narrow viewport', async ({ page }) => {
     await seedLibrary(page, buildFixtureLibrary());
     await page.setViewportSize({ width: 390, height: 844 });
