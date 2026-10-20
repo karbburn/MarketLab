@@ -67,6 +67,7 @@ function definition(overrides: Partial<ScreenerDefinition>): ScreenerDefinition 
     filters: [],
     cutoff: null,
     sortBy: 'symbol',
+    sortWindow: 20,
     sortDirection: 'asc',
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
@@ -160,6 +161,7 @@ describe('evaluateScreener sorting', () => {
   const def = definition({
     filters: [filter({ id: 'r', field: 'rsi', operator: 'gte', value: 0, window: 14 })],
     sortBy: 'rsi',
+    sortWindow: 14,
     sortDirection: 'asc',
   });
 
@@ -187,6 +189,7 @@ describe('evaluateScreener sorting', () => {
       definition({
         filters: [filter({ id: 'p', field: 'price-vs-sma', operator: 'gt', value: -100, window: 3 })],
         sortBy: 'return',
+        sortWindow: 5,
         sortDirection: 'desc',
       }),
       sortedInputs,
@@ -219,5 +222,42 @@ describe('screener frequency handling', () => {
     const instrumentOne = instrument('i1', 'AAA');
     expect(evaluateScreener(def, [{ dataset: weekly, instrument: instrumentOne, bars }]).rows[0]?.passed).toBe(true);
     expect(evaluateScreener(def, [{ dataset: daily, instrument: instrumentOne, bars }]).rows[0]?.passed).toBe(false);
+  });
+});
+
+describe('screener sort window', () => {
+  const inputs: ScreenerInput[] = [
+    { dataset: dataset('ds-a', 'inst-a'), instrument: instrument('inst-a', 'AAA'), bars: barsFromCloses([10, 30, 31]) },
+    { dataset: dataset('ds-b', 'inst-b'), instrument: instrument('inst-b', 'BBB'), bars: barsFromCloses([10, 12, 25]) },
+  ];
+  const base = definition({
+    filters: [filter({ field: 'price-vs-sma', operator: 'gt', value: -100, window: 2 })],
+    sortBy: 'return',
+    sortWindow: 1,
+    sortDirection: 'desc',
+  });
+
+  it('orders by the sort window rather than a same-field filter window', () => {
+    expect(evaluateScreener(base, inputs).rows.map((row) => row.symbol)).toEqual(['BBB', 'AAA']);
+    expect(evaluateScreener({ ...base, sortWindow: 2 }, inputs).rows.map((row) => row.symbol)).toEqual(['AAA', 'BBB']);
+  });
+
+  it('keeps ordering independent of filter windows', () => {
+    const wideFilter = {
+      ...base,
+      filters: [filter({ field: 'price-vs-sma', operator: 'gt', value: -100, window: 50 })],
+    };
+    expect(evaluateScreener(wideFilter, inputs).rows.map((row) => row.symbol)).toEqual(['BBB', 'AAA']);
+  });
+
+  it('keeps the sort value separate from a same-field filter value', () => {
+    const sameField = {
+      ...base,
+      filters: [filter({ field: 'return', operator: 'gt', value: -100, window: 2 })],
+    };
+    const result = evaluateScreener(sameField, inputs);
+    expect(result.rows[0]?.symbol).toBe('BBB');
+    expect(result.rows[0]?.values.return as number).toBeCloseTo(150, 5);
+    expect(result.rows[0]?.sortValue as number).toBeCloseTo(108.333333, 5);
   });
 });

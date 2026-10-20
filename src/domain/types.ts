@@ -290,6 +290,8 @@ export interface ScreenerDefinition {
   filters: ScreenerFilter[];
   cutoff: DateString | null;
   sortBy: string;
+  /** Sessions used to compute the sort field; independent of any filter window. */
+  sortWindow: number;
   sortDirection: 'asc' | 'desc';
   createdAt: string;
   updatedAt: string;

@@ -80,6 +80,7 @@ function screener(id: string, universeDatasetIds: string[]): ScreenerDefinition 
     filters: [],
     cutoff: null,
     sortBy: 'symbol',
+    sortWindow: 20,
     sortDirection: 'asc',
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
@@ -353,6 +354,7 @@ describe('parseBackup validation', () => {
       filters: [],
       cutoff: null,
       sortBy: 'symbol',
+      sortWindow: 20,
       sortDirection: 'asc',
       createdAt: '2024-01-01T00:00:00.000Z',
       updatedAt: '2024-01-01T00:00:00.000Z',
@@ -362,6 +364,16 @@ describe('parseBackup validation', () => {
     if (!result.ok) return;
     expect(result.value.screeners).toEqual([]);
     expect(result.skipped).toContain('screeners:s1');
+  });
+
+  it('fills a missing sort window from the sort field when importing older backups', () => {
+    const legacy = { ...screener('s1', ['d1']), sortBy: 'rsi' } as Record<string, unknown>;
+    delete legacy.sortWindow;
+    const result = parseBackup(backupInput({ screeners: [legacy] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.screeners[0]?.sortBy).toBe('rsi');
+    expect(result.value.screeners[0]?.sortWindow).toBe(14);
   });
 
   it('rejects backtests that do not satisfy the backtest schema', () => {

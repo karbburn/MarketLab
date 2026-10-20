@@ -208,6 +208,9 @@ export const screenerDefinitionSchema = z.object({
   ),
   cutoff: dateString.nullable(),
   sortBy: z.string(),
+  // Optional for backups written before sort windows were persisted; the import
+  // and load paths fill the field default rather than dropping the screen.
+  sortWindow: z.number().int().min(1).max(500).optional(),
   sortDirection: z.enum(['asc', 'desc']),
   createdAt: z.string(),
   updatedAt: z.string(),

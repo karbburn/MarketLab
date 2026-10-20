@@ -7,8 +7,9 @@ import type {
   Workspace,
   WorkspaceLayout,
 } from '../domain/types';
-import { createId } from '../lib/id';
 import { FIB_LEVELS } from '../lib/drawings/geometry';
+import { createId } from '../lib/id';
+import { defaultFieldWindow } from '../lib/screener/fields';
 
 export const APP_SCHEMA_VERSION = 1;
 
@@ -128,6 +129,7 @@ export function createScreenerDefinition(universeDatasetIds: string[]): Screener
     ],
     cutoff: null,
     sortBy: 'return',
+    sortWindow: defaultFieldWindow('return'),
     sortDirection: 'desc',
     createdAt: now,
     updatedAt: now,

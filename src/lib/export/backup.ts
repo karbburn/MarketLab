@@ -17,6 +17,7 @@ import {
   preferencesSchema,
   screenerDefinitionSchema,
 } from '../workspace/schema';
+import { resolveSortWindow } from '../screener/fields';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -144,7 +145,10 @@ export function parseBackup(
   const datasets = arrayOf('datasets', isDatasets);
   const bars = arrayOf('bars', isBars);
   const watchlists = arrayOf('watchlists', isWatchlists);
-  const screeners = arrayOf('screeners', isScreeners);
+  const screeners = arrayOf('screeners', isScreeners).map((screener) => ({
+    ...screener,
+    sortWindow: resolveSortWindow(screener.sortBy, screener.sortWindow),
+  }));
   const backtests = arrayOf('backtests', isBacktests);
 
   // Datasets whose bars are missing, or whose instrument is missing, are dropped

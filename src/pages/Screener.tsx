@@ -5,6 +5,7 @@ import type { ScreenerDefinition, ScreenerField, ScreenerFilter, ScreenerOperato
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { evaluateScreener } from '../lib/screener/evaluate';
+import { defaultFieldWindow, resolveSortWindow } from '../lib/screener/fields';
 import { createScreenerDefinition } from '../state/defaults';
 import { createId } from '../lib/id';
 import { planDatasetActivation } from '../lib/workspace/dataset-activation';
@@ -240,7 +241,16 @@ export function ScreenerPage() {
               <Field label="Sort by">
                 <Select
                   value={definition.sortBy}
-                  onChange={(value) => updateDraft((current) => ({ ...current, sortBy: value }))}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sortBy: value,
+                      sortWindow:
+                        value === 'symbol'
+                          ? current.sortWindow
+                          : defaultFieldWindow(value as ScreenerField),
+                    }))
+                  }
                   options={[
                     { value: 'symbol', label: 'Symbol' },
                     ...FIELD_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
@@ -255,6 +265,21 @@ export function ScreenerPage() {
                     { value: 'desc', label: 'Descending' },
                     { value: 'asc', label: 'Ascending' },
                   ]}
+                />
+              </Field>
+              <Field label="Sort window" hint="Sessions used for the sort value. Filters keep their own windows.">
+                <NumberInput
+                  value={resolveSortWindow(definition.sortBy, definition.sortWindow)}
+                  min={1}
+                  max={500}
+                  step={1}
+                  disabled={!draft || definition.sortBy === 'symbol'}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sortWindow: Number.isFinite(value) ? Math.min(500, Math.max(1, Math.round(value))) : 20,
+                    }))
+                  }
                 />
               </Field>
             </div>
@@ -385,7 +410,13 @@ export function ScreenerPage() {
       {definition && result && (
         <Panel
           title="Results"
-          subtitle={`${result.matchedCount} of ${result.evaluatedCount} series matched`}
+          subtitle={`${result.matchedCount} of ${result.evaluatedCount} series matched · ${
+            definition.sortBy === 'symbol'
+              ? `sorted by symbol (${definition.sortDirection === 'asc' ? 'ascending' : 'descending'})`
+              : `sorted by ${fieldLabel(definition.sortBy as ScreenerField)} (${resolveSortWindow(definition.sortBy, definition.sortWindow)} sessions, ${
+                  definition.sortDirection === 'asc' ? 'ascending' : 'descending'
+                })`
+          }`}
           flush
         >
           {result.rows.length === 0 ? (

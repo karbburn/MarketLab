@@ -15,6 +15,7 @@ import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspa
 import { createId } from '../lib/id';
 import { mergeBackup, isEmptyReplaceRestore, type BackupBundle } from '../lib/export/backup';
 import { normaliseCompareSelections } from '../lib/workspace/compare-selections';
+import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
@@ -195,7 +196,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const nextDatasets = cleanup.changed ? cleanup.datasets : datasets;
       const nextWorkspaces = cleanup.changed ? cleanup.workspaces : workspaces;
       const nextWatchlists = cleanup.changed ? cleanup.watchlists : watchlists;
-      const nextScreeners = cleanup.changed ? cleanup.screeners : screeners;
+      const nextScreeners = (cleanup.changed ? cleanup.screeners : screeners).map((screener) => ({
+        ...screener,
+        sortWindow: resolveSortWindow(screener.sortBy, screener.sortWindow),
+      }));
       const nextBacktests = cleanup.changed ? cleanup.backtests : backtests;
 
       // Comparison overlays reference datasets by id, so drop any selection

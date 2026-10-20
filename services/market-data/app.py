@@ -232,6 +232,11 @@ def normalise_corporate_actions(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return actions
 
 
+def _exclusive_provider_end(end: str) -> str:
+    """yfinance treats `end` as exclusive; the API contract is inclusive."""
+    return (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+
+
 def fetch_history(symbol: str, start: str, end: str) -> tuple[pd.DataFrame, str | None, str | None, str | None, str | None, str | None, str | None]:
     """Downloads daily history and returns (frame, currency, exchange, exchangeName, instrumentType, displaySymbol, exchangeTimezone)."""
     try:
@@ -242,7 +247,7 @@ def fetch_history(symbol: str, start: str, end: str) -> tuple[pd.DataFrame, str 
         # Dividends and Stock Splits columns for chart markers. The adjustment
         # policy is declared in the response metadata so two conventions are
         # never mixed silently.
-        frame = ticker.history(start=start, end=end, interval="1d", auto_adjust=False, actions=True)
+        frame = ticker.history(start=start, end=_exclusive_provider_end(end), interval="1d", auto_adjust=False, actions=True)
     except Exception as error:  # yfinance raises broad, undocumented exception types
         # Yahoo answers unknown tickers with its own 404 ("Quote not found")
         # or with a delisted notice; both mean "no data", not "service broken".
