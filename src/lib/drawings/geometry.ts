@@ -1,4 +1,4 @@
-import type { Drawing, DrawingAnchor, DrawingType } from '../../domain/types';
+import type { Bar, Drawing, DrawingAnchor, DrawingType } from '../../domain/types';
 
 export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
 
@@ -83,6 +83,86 @@ function distanceToSegment(
 export interface ScreenPoint {
   x: number;
   y: number;
+}
+
+/** Screen-pixel radius around a selected drawing's anchor handle. */
+export const ANCHOR_HIT_TOLERANCE_PX = 8;
+
+/** How close a pointer has to be to an OHLC value before magnet mode snaps. */
+export const MAGNET_SNAP_TOLERANCE_PX = 12;
+
+/**
+ * Returns the index of the closest visible anchor handle within `tolerance`.
+ * `null` entries mean an anchor could not be projected at the current zoom.
+ */
+export function hitTestDrawingAnchor(
+  screenAnchors: readonly (ScreenPoint | null)[],
+  point: ScreenPoint,
+  tolerance = ANCHOR_HIT_TOLERANCE_PX,
+): number | null {
+  let bestIndex: number | null = null;
+  let bestDistance = tolerance;
+  for (let index = 0; index < screenAnchors.length; index += 1) {
+    const anchor = screenAnchors[index];
+    if (!anchor) continue;
+    const distance = Math.hypot(point.x - anchor.x, point.y - anchor.y);
+    if (distance <= bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  }
+  return bestIndex;
+}
+
+/** Replaces one anchor while leaving the rest of the drawing untouched. */
+export function replaceDrawingAnchor(
+  anchors: DrawingAnchor[],
+  index: number,
+  next: DrawingAnchor,
+): DrawingAnchor[] {
+  const current = anchors[index];
+  if (!current) return anchors;
+  if (current.date === next.date && current.price === next.price) return anchors;
+  const updated = [...anchors];
+  updated[index] = { date: next.date, price: next.price };
+  return updated;
+}
+
+/** The open, high, low or close value closest to the pointer's raw price. */
+export function nearestOhlcPrice(
+  price: number,
+  bar: Pick<Bar, 'open' | 'high' | 'low' | 'close'>,
+): number {
+  let closest = bar.open;
+  let closestDistance = Math.abs(bar.open - price);
+  for (const candidate of [bar.high, bar.low, bar.close]) {
+    const distance = Math.abs(candidate - price);
+    if (distance < closestDistance) {
+      closest = candidate;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
+/**
+ * Snaps a raw price to the nearest OHLC value when the two are close enough on
+ * screen. The pixel check keeps the gesture usable under linear and log scales,
+ * where equal price distances do not map to equal screen distances.
+ */
+export function snapPriceToBar(
+  price: number,
+  bar: Pick<Bar, 'open' | 'high' | 'low' | 'close'>,
+  priceToY: (value: number) => number | null,
+  tolerance = MAGNET_SNAP_TOLERANCE_PX,
+): number {
+  const candidate = nearestOhlcPrice(price, bar);
+  if (candidate === price) return price;
+  const rawY = priceToY(price);
+  const candidateY = priceToY(candidate);
+  if (rawY === null || candidateY === null) return price;
+  if (Math.abs(rawY - candidateY) > tolerance) return price;
+  return candidate;
 }
 
 /**
