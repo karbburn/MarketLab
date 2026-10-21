@@ -80,7 +80,7 @@ export function TemplateDialog({
       <div className="stack">
         <span className="panel-sub">
           A template stores the chart type, price scale, volume pane, timeframe and the ordered indicator set. It never
-          stores market data, the visible range, comparisons or drawings.
+          stores the symbol or dataset, market data, the visible range, comparisons or drawings.
         </span>
 
         <div className="panel" style={{ background: 'var(--surface-inset)' }}>
@@ -150,8 +150,9 @@ export function TemplateDialog({
         </div>
 
         <span className="field-hint">
-          Applying a template replaces this panel&apos;s indicator set. Drawings on the chart are preserved, and applying
-          a template is not part of drawing undo history.
+          Applying a template keeps this panel&apos;s symbol or dataset, visible range, comparisons and drawings, but
+          adopts the template&apos;s timeframe and replaces its indicator set. Applying a template is not part of
+          drawing undo history.
         </span>
       </div>
     </Modal>

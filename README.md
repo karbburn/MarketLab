@@ -390,7 +390,7 @@ no short selling, no alerting and no replay. These are product decisions, not ga
   library: a fingerprint cannot recreate deleted data. Importing a manifest is not a signature
   check, since a hand-edited file can rewrite both the fingerprint and the outputs.
 - Re-running a saved run is deterministic for the same engine version, configuration and bars.
-  Metrics and trades are compared within a 1e-9 relative tolerance to absorb floating-point
+  Metrics and trades are compared within an absolute-or-relative 1e-9 tolerance to absorb floating-point
   differences between JavaScript runtimes.
 - State is per browser profile. Moving between browsers is done deliberately through the JSON
   backup, not through an account or a sync service.

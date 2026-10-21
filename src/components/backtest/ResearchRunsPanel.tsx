@@ -7,7 +7,6 @@ import {
   serialiseResearchRunManifest,
   sortResearchRuns,
   verifyBacktestRun,
-  VERIFICATION_TOLERANCE,
   type ResearchRunVerification,
 } from '../../lib/backtest/research-runs';
 import { downloadTextFile, readFileAsText } from '../../lib/export/download';
@@ -43,7 +42,7 @@ function statusCopy(verification: ResearchRunVerification): { tone: TagTone; lab
       return {
         tone: 'up',
         label: 'Verified',
-        body: `The rerun reproduced every metric and trade within ${VERIFICATION_TOLERANCE.relative} relative tolerance.`,
+        body: 'The rerun reproduced every metric and trade within a 1e-9 absolute or relative tolerance.',
       };
     case 'mismatch':
       return {
