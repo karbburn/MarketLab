@@ -191,6 +191,12 @@ function openDatabase(): Promise<IDBDatabase> {
       resolve(db);
     };
     open.onerror = () => reject(open.error ?? new Error('Could not open IndexedDB'));
+    // A pending schema upgrade held by another tab can otherwise leave this
+    // promise unsettled forever, freezing the loading gate with no message.
+    // Rejecting falls back to the in-memory adapter, whose banner says that
+    // changes will not persist instead of hanging silently.
+    open.onblocked = () =>
+      reject(new Error('The local database upgrade is blocked by another tab. Close it and reload.'));
   });
 }
 

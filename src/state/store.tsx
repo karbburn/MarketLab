@@ -10,7 +10,7 @@ import type {
   Workspace,
 } from '../domain/types';
 import { createPersistence, type PersistenceAdapter, type PersistenceTransaction, type StoreName } from '../lib/persistence/db';
-import { describeCleanup, removeSyntheticData, type SyntheticCleanupResult } from '../lib/migration/remove-synthetic';
+import { describeCleanup, removeSyntheticData } from '../lib/migration/remove-synthetic';
 import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
 import { createId } from '../lib/id';
 import { mergeBackup, isEmptyReplaceRestore, type BackupBundle } from '../lib/export/backup';
@@ -132,8 +132,9 @@ interface LoadedSnapshot {
  * Reads one consistent snapshot and applies the same clean-up/migration rules
  * on first load and after a cross-tab change. The read is a single read-only
  * transaction so another tab cannot commit between stores and produce a mix.
+ * Exported so the migration's atomicity can be tested with a stub adapter.
  */
-async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
+export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
   const { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings } =
     await adapter.transaction(
       LOAD_STORES,
@@ -162,16 +163,35 @@ async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: Loade
   // Remove the bundled demo series, if an earlier build left them behind.
   const cleanup = removeSyntheticData({ instruments, datasets, workspaces, watchlists, screeners, backtests });
   if (cleanup.changed) {
-    if (preferences.defaultWorkspaceId && cleanup.removedWorkspaceIds.includes(preferences.defaultWorkspaceId)) {
-      preferences = { ...preferences, defaultWorkspaceId: null };
-      await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
-    }
-    await persistCleanup(adapter, cleanup);
-    await adapter.put<SettingsRecord>('settings', {
-      id: 'app',
-      schemaVersion: APP_SCHEMA_VERSION,
-      installedAt: installedAt(settings),
-      syntheticDataRemovedAt: new Date().toISOString(),
+    const migrationPreferences =
+      preferences.defaultWorkspaceId && cleanup.removedWorkspaceIds.includes(preferences.defaultWorkspaceId)
+        ? ({ ...preferences, defaultWorkspaceId: null } as UserPreferences)
+        : null;
+    if (migrationPreferences) preferences = migrationPreferences;
+    // The whole migration is one transaction: a quota or connection failure
+    // rolls everything back instead of leaving, for example, a dataset whose
+    // bars were already removed. The next load retries the untouched migration.
+    await adapter.transaction(LOAD_STORES, async (tx) => {
+      if (migrationPreferences) {
+        await tx.put<PreferencesRecord>('preferences', { id: 'preferences', ...migrationPreferences });
+      }
+      for (const datasetId of cleanup.removedDatasetIds) {
+        await tx.remove('datasets', datasetId);
+        await tx.remove('bars', datasetId);
+      }
+      for (const instrumentId of cleanup.removedInstrumentIds) await tx.remove('instruments', instrumentId);
+      for (const workspaceId of cleanup.removedWorkspaceIds) await tx.remove('workspaces', workspaceId);
+      for (const watchlistId of cleanup.removedWatchlistIds) await tx.remove('watchlists', watchlistId);
+      for (const backtestId of cleanup.removedBacktestIds) await tx.remove('backtests', backtestId);
+      await tx.putMany('workspaces', cleanup.workspaces);
+      await tx.putMany('watchlists', cleanup.watchlists);
+      await tx.putMany('screeners', cleanup.screeners);
+      await tx.put<SettingsRecord>('settings', {
+        id: 'app',
+        schemaVersion: APP_SCHEMA_VERSION,
+        installedAt: installedAt(settings),
+        syntheticDataRemovedAt: new Date().toISOString(),
+      });
     });
   } else if (!settings.some((record) => record.id === 'app')) {
     await adapter.put<SettingsRecord>('settings', {
@@ -553,20 +573,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async deleteWorkspace(workspaceId) {
       if (!adapter) return;
-      await enqueue(`workspace:${workspaceId}`, async () => {
-        await adapter.remove('workspaces', workspaceId);
-        workspacesRef.current = workspacesRef.current.filter((workspace) => workspace.id !== workspaceId);
-        setState((previous) => {
-          const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
-          return {
-            ...previous,
-            workspaces,
-            activeWorkspaceId:
-              previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
-          };
+      try {
+        await enqueue(`workspace:${workspaceId}`, async () => {
+          await adapter.remove('workspaces', workspaceId);
+          workspacesRef.current = workspacesRef.current.filter((workspace) => workspace.id !== workspaceId);
+          setState((previous) => {
+            const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
+            return {
+              ...previous,
+              workspaces,
+              activeWorkspaceId:
+                previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
+            };
+          });
         });
-      });
-      notify('info', 'Workspace deleted.');
+        notify('info', 'Workspace deleted.');
+      } catch (error) {
+        notify('error', `Could not delete the workspace: ${errorMessage(error)}`);
+      }
     },
 
     async setActiveWorkspace(workspaceId) {
@@ -575,63 +599,99 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async saveWatchlist(watchlist) {
       if (!adapter) return;
-      const updated = { ...watchlist, updatedAt: new Date().toISOString() };
-      await adapter.put('watchlists', updated);
-      setState((previous) => ({ ...previous, watchlists: upsertById(previous.watchlists, updated) }));
+      try {
+        const updated = { ...watchlist, updatedAt: new Date().toISOString() };
+        await adapter.put('watchlists', updated);
+        setState((previous) => ({ ...previous, watchlists: upsertById(previous.watchlists, updated) }));
+      } catch (error) {
+        notify('error', `Could not save the watchlist: ${errorMessage(error)}`);
+      }
     },
 
     async createWatchlistNamed(name, instrumentIds = []) {
       if (!adapter) return '';
-      const watchlist = createWatchlist(name, instrumentIds);
-      await adapter.put('watchlists', watchlist);
-      setState((previous) => ({ ...previous, watchlists: [...previous.watchlists, watchlist] }));
-      return watchlist.id;
+      try {
+        const watchlist = createWatchlist(name, instrumentIds);
+        await adapter.put('watchlists', watchlist);
+        setState((previous) => ({ ...previous, watchlists: [...previous.watchlists, watchlist] }));
+        return watchlist.id;
+      } catch (error) {
+        notify('error', `Could not create the watchlist: ${errorMessage(error)}`);
+        return '';
+      }
     },
 
     async deleteWatchlist(watchlistId) {
       if (!adapter) return;
-      await adapter.remove('watchlists', watchlistId);
-      setState((previous) => ({ ...previous, watchlists: previous.watchlists.filter((entry) => entry.id !== watchlistId) }));
+      try {
+        await adapter.remove('watchlists', watchlistId);
+        setState((previous) => ({ ...previous, watchlists: previous.watchlists.filter((entry) => entry.id !== watchlistId) }));
+      } catch (error) {
+        notify('error', `Could not delete the watchlist: ${errorMessage(error)}`);
+      }
     },
 
     async saveScreener(definition) {
       if (!adapter) return;
-      const updated = { ...definition, updatedAt: new Date().toISOString() };
-      await adapter.put('screeners', updated);
-      setState((previous) => ({ ...previous, screeners: upsertById(previous.screeners, updated) }));
-      notify('success', `Saved screen "${updated.name}".`);
+      try {
+        const updated = { ...definition, updatedAt: new Date().toISOString() };
+        await adapter.put('screeners', updated);
+        setState((previous) => ({ ...previous, screeners: upsertById(previous.screeners, updated) }));
+        notify('success', `Saved screen "${updated.name}".`);
+      } catch (error) {
+        notify('error', `Could not save the screen: ${errorMessage(error)}`);
+      }
     },
 
     async deleteScreener(screenerId) {
       if (!adapter) return;
-      await adapter.remove('screeners', screenerId);
-      setState((previous) => ({ ...previous, screeners: previous.screeners.filter((entry) => entry.id !== screenerId) }));
+      try {
+        await adapter.remove('screeners', screenerId);
+        setState((previous) => ({ ...previous, screeners: previous.screeners.filter((entry) => entry.id !== screenerId) }));
+      } catch (error) {
+        notify('error', `Could not delete the screen: ${errorMessage(error)}`);
+      }
     },
 
     async saveBacktest(config) {
       if (!adapter) return;
-      const updated = { ...config, updatedAt: new Date().toISOString() };
-      await adapter.put('backtests', updated);
-      setState((previous) => ({ ...previous, backtests: upsertById(previous.backtests, updated) }));
-      notify('success', `Saved strategy "${updated.name}".`);
+      try {
+        const updated = { ...config, updatedAt: new Date().toISOString() };
+        await adapter.put('backtests', updated);
+        setState((previous) => ({ ...previous, backtests: upsertById(previous.backtests, updated) }));
+        notify('success', `Saved strategy "${updated.name}".`);
+      } catch (error) {
+        notify('error', `Could not save the strategy: ${errorMessage(error)}`);
+      }
     },
 
     async deleteBacktest(backtestId) {
       if (!adapter) return;
-      await adapter.remove('backtests', backtestId);
-      setState((previous) => ({ ...previous, backtests: previous.backtests.filter((entry) => entry.id !== backtestId) }));
+      try {
+        await adapter.remove('backtests', backtestId);
+        setState((previous) => ({ ...previous, backtests: previous.backtests.filter((entry) => entry.id !== backtestId) }));
+      } catch (error) {
+        notify('error', `Could not delete the strategy: ${errorMessage(error)}`);
+      }
     },
 
     async setPreferences(partial) {
       if (!adapter) return;
       // Paint the new palette before React re-renders the charts.
       applyThemeAttribute(partial.theme ?? preferencesRef.current.theme);
-      await enqueue('preferences', async () => {
-        const preferences = { ...preferencesRef.current, ...partial };
-        await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
-        preferencesRef.current = preferences;
-        setState((previous) => ({ ...previous, preferences }));
-      });
+      try {
+        await enqueue('preferences', async () => {
+          const preferences = { ...preferencesRef.current, ...partial };
+          await adapter.put<PreferencesRecord>('preferences', { id: 'preferences', ...preferences });
+          preferencesRef.current = preferences;
+          setState((previous) => ({ ...previous, preferences }));
+        });
+      } catch (error) {
+        // The write, not the preference, failed: undo the painted theme before
+        // the store's own effect re-reads the persisted value, and say so.
+        applyThemeAttribute(preferencesRef.current.theme);
+        notify('error', `Could not save the preference: ${errorMessage(error)}`);
+      }
     },
 
     async restoreBackup(bundle, mode) {
@@ -885,27 +945,9 @@ async function removeRecordsNotIn<T extends { id: string }>(
   }
 }
 
-/**
- * Writes the removal of the bundled demo series to storage. Only the records
- * that the cleanup touched are removed or rewritten; imported, downloaded and
- * user-created records are left exactly as they are.
- */
-async function persistCleanup(adapter: PersistenceAdapter, cleanup: SyntheticCleanupResult): Promise<void> {
-  for (const datasetId of cleanup.removedDatasetIds) {
-    await adapter.remove('datasets', datasetId);
-    await adapter.remove('bars', datasetId);
-  }
-  for (const instrumentId of cleanup.removedInstrumentIds) await adapter.remove('instruments', instrumentId);
-  for (const workspaceId of cleanup.removedWorkspaceIds) await adapter.remove('workspaces', workspaceId);
-  for (const watchlistId of cleanup.removedWatchlistIds) await adapter.remove('watchlists', watchlistId);
-  for (const backtestId of cleanup.removedBacktestIds) await adapter.remove('backtests', backtestId);
-  await adapter.putMany('workspaces', cleanup.workspaces);
-  await adapter.putMany('watchlists', cleanup.watchlists);
-  await adapter.putMany('screeners', cleanup.screeners);
-}
-
 export function useStore(): StoreValue {
   const context = useContext(StoreContext);
   if (!context) throw new Error('useStore must be used inside StoreProvider.');
   return context;
 }
+
