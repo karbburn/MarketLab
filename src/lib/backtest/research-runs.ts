@@ -454,6 +454,10 @@ export function planResearchRunLoad(
     config: {
       ...snapshotConfig(run.config),
       id: nextConfigId,
+      // The run's dataset identity is canonical. Older backups could carry a
+      // stale config.datasetId after a deduplicated restore; the draft must
+      // point at the series that was actually re-pointed and verified.
+      datasetId: run.dataset.datasetId,
     },
   };
 }

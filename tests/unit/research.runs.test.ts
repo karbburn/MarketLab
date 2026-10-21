@@ -379,6 +379,17 @@ describe('planResearchRunLoad', () => {
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.message).toContain('not in the library');
   });
+
+  it('points the draft at the run dataset identity, not a stale config id', async () => {
+    const run = await savedRun();
+    const stale = { ...run, config: { ...run.config, datasetId: 'ds-stale' } };
+    const plan = planResearchRunLoad(stale, ['ds-1'], 'bt-copy');
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.config.datasetId).toBe('ds-1');
+      expect(plan.config.entry).toEqual(run.config.entry);
+    }
+  });
 });
 
 describe('research runs in backups', () => {
@@ -439,6 +450,8 @@ describe('research runs in backups', () => {
     expect(merged.duplicateDatasets).toBe(1);
     expect(merged.researchRuns[0]?.dataset.datasetId).toBe('ds-new');
     expect(merged.researchRuns[0]?.dataset.instrumentId).toBe('inst-new');
+    // Reloading the run into the editor must point at the restored dataset too.
+    expect(merged.researchRuns[0]?.config.datasetId).toBe('ds-new');
   });
 
   it('skips and reports a run that fails the run schema', async () => {
