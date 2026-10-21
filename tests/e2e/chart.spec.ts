@@ -1132,4 +1132,69 @@ test.describe('chart workspace', () => {
     await expect(templates).toBeVisible();
     await expect(templates.locator('.template-row').filter({ hasText: 'Weekly review' })).toHaveCount(1);
   });
+
+  test('ignores a hidden drawing on canvas and still selects a locked one without moving it', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await stage.click({ position: { x: 300, y: 140 } });
+    await expect(deleteSelected).toBeEnabled();
+
+    // Hidden drawings are not painted, so they must not own the pointer.
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await manager.getByRole('button', { name: 'Hide Horizontal level' }).click();
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+    await stage.click({ position: { x: 320, y: 140 } });
+    await expect(deleteSelected).toBeDisabled();
+
+    // Showing it makes the same line selectable again.
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    await manager.getByRole('button', { name: 'Show Horizontal level' }).click();
+    await manager.getByRole('button', { name: 'Lock Horizontal level' }).click();
+    await expect.poll(async () => (await readDrawings(page))[0]?.locked).toBe(true);
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+
+    // Locking must not make the drawing unreachable: a body click selects it,
+    // which is what lets the manager inspect and unlock it.
+    await stage.click({ position: { x: 320, y: 140 } });
+    await expect(deleteSelected).toBeDisabled();
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    await expect(manager.getByRole('button', { name: 'Select Horizontal level' })).toHaveAttribute('aria-current', 'true');
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+
+    // A locked drawing is selectable but immovable.
+    const before = (await readDrawings(page))[0]?.anchors;
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + 320, box!.y + 140);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 420, box!.y + 170, { steps: 8 });
+    await page.mouse.up();
+    expect((await readDrawings(page))[0]?.anchors).toEqual(before);
+  });
+
+  test('selects a text label from its painted text, not only from its anchor', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const editor = page.getByRole('textbox', { name: 'Drawing label' });
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Text label' }).click();
+    await stage.click({ position: { x: 300, y: 150 } });
+    await editor.fill('Breakout label');
+    await editor.press('Enter');
+    await expect(editor).toBeHidden();
+
+    // Deselect, then click inside the painted words well to the right of the
+    // anchor. The old anchor-radius hit test could not reach this point.
+    await stage.click({ position: { x: 120, y: 230 } });
+    await expect(deleteSelected).toBeDisabled();
+    await stage.click({ position: { x: 380, y: 142 } });
+    await expect(deleteSelected).toBeEnabled();
+  });
 });

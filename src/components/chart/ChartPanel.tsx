@@ -30,12 +30,14 @@ import {
   SESSION_NUDGE_LARGE_STEP,
   anchorsRequired,
   hitTestDrawingAnchor,
+  hitTestVisibleDrawing,
   isDrawingComplete,
   nudgeDrawingAnchor,
   priceRangeInfo,
   replaceDrawingAnchor,
   snapPriceToBar,
   stackAxisTags,
+  textLabelBox,
 } from '../../lib/drawings/geometry';
 import { removeDrawing } from '../../lib/drawings/management';
 import { createId } from '../../lib/id';
@@ -576,9 +578,26 @@ export function ChartPanel({
       return x === null || y === null ? null : { x, y };
     });
 
-  /** Screen positions of a drawing's anchors, dropping any that do not resolve. */
-  const screenPoints = (drawing: Drawing, controller: ChartController): Array<{ x: number; y: number }> =>
-    anchorScreenPoints(drawing, controller).filter((entry): entry is { x: number; y: number } => entry !== null);
+  /**
+   * The painted box of a text label, measured with the same canvas font the
+   * renderer uses. The label is hit-tested against this box rather than the
+   * anchor alone, so clicking the visible text selects it.
+   */
+  const textLabelBoxFor = (drawing: Drawing, points: ReadonlyArray<{ x: number; y: number } | null>) => {
+    if (drawing.type !== 'text' || !drawing.text) return null;
+    const anchor = points[0];
+    if (!anchor) return null;
+    const size = drawing.style.fontSize ?? 12;
+    const context = canvasRef.current?.getContext('2d');
+    let width: number | undefined;
+    if (context) {
+      context.save();
+      context.font = `${size}px ${getComputedStyle(document.documentElement).getPropertyValue('--font-sans')}`;
+      width = context.measureText(drawing.text).width;
+      context.restore();
+    }
+    return textLabelBox(anchor, drawing.text, size, width);
+  };
 
   const pointForAnchor = (anchor: DrawingAnchor): { x: number; y: number } | null => {
     const controller = controllerRef.current;
@@ -635,11 +654,13 @@ export function ChartPanel({
         }
       }
       const hit = [...localDrawings].reverse().find((drawing) => {
-        if (drawing.locked) return false;
-        return drawingHit(drawing, screenPoints(drawing, controller), point);
+        const points = anchorScreenPoints(drawing, controller);
+        return hitTestVisibleDrawing(drawing, points, point, {
+          textBox: textLabelBoxFor(drawing, points),
+        });
       });
       setSelectedId(hit ? hit.id : null);
-      if (hit) {
+      if (hit && !hit.locked) {
         const anchor = pointerToAnchor(event);
         if (!anchor) return;
         dragRef.current = {
@@ -679,7 +700,13 @@ export function ChartPanel({
     const point = { x: event.clientX - rect.left - controller.paneLeft(), y: event.clientY - rect.top };
     const target = [...localDrawings]
       .reverse()
-      .find((drawing) => drawing.type === 'text' && !drawing.locked && drawingHit(drawing, screenPoints(drawing, controller), point));
+      .find((drawing) => {
+        if (drawing.type !== 'text' || drawing.locked) return false;
+        const points = anchorScreenPoints(drawing, controller);
+        return hitTestVisibleDrawing(drawing, points, point, {
+          textBox: textLabelBoxFor(drawing, points),
+        });
+      });
     if (!target) return;
     openTextEditor({ id: target.id, anchor: null, point, value: target.text ?? '', original: target.text ?? '' });
   };
@@ -1378,64 +1405,6 @@ function renderDrawingShape(
 function describeAnchor(drawing: Drawing, index: number, anchor = drawing.anchors[index]): string {
   if (!anchor) return '';
   return `Endpoint ${index + 1} of ${drawing.anchors.length}: ${anchor.date}, ${formatPrice(anchor.price)}`;
-}
-
-/**
- * Hit-tests a drawing. A label is painted from its anchor to the right, so the
- * box that selects it follows the text rather than the anchor alone.
- */
-function drawingHit(drawing: Drawing, points: Array<{ x: number; y: number }>, point: { x: number; y: number }): boolean {
-  const anchor = points[0];
-  if (drawing.type === 'text' && drawing.text && anchor) {
-    const size = drawing.style.fontSize ?? 12;
-    return (
-      point.x >= anchor.x - 4 &&
-      point.x <= anchor.x + 8 + drawing.text.length * size * 0.62 &&
-      point.y >= anchor.y - size - 2 &&
-      point.y <= anchor.y + 6
-    );
-  }
-  return hitTest(points, drawing.type, point);
-}
-
-function hitTest(
-  screenAnchors: Array<{ x: number; y: number }>,
-  type: DrawingType,
-  point: { x: number; y: number },
-): boolean {
-  if (screenAnchors.length === 0) return false;
-  const tolerance = 6;
-  const first = screenAnchors[0] as { x: number; y: number };
-  if (type === 'horizontal-line') return Math.abs(point.y - first.y) <= tolerance;
-  if (type === 'vertical-line') return Math.abs(point.x - first.x) <= tolerance;
-  if (screenAnchors.length === 1) return Math.hypot(point.x - first.x, point.y - first.y) <= tolerance * 2;
-  if (type === 'rectangle') {
-    const second = screenAnchors[1] as { x: number; y: number };
-    const minX = Math.min(first.x, second.x) - tolerance;
-    const maxX = Math.max(first.x, second.x) + tolerance;
-    const minY = Math.min(first.y, second.y) - tolerance;
-    const maxY = Math.max(first.y, second.y) + tolerance;
-    return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
-  }
-  for (let i = 0; i < screenAnchors.length - 1; i += 1) {
-    const start = screenAnchors[i] as { x: number; y: number };
-    const end = screenAnchors[i + 1] as { x: number; y: number };
-    if (distanceToSegment(point, start, end) <= tolerance) return true;
-  }
-  return false;
-}
-
-function distanceToSegment(
-  point: { x: number; y: number },
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-): number {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared === 0) return Math.hypot(point.x - start.x, point.y - start.y);
-  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
-  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
 }
 
 function indexDistance(controller: ChartController, fromDate: string, toDate: string): number | null {

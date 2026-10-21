@@ -3,12 +3,15 @@ import type { DrawingAnchor } from '../../src/domain/types';
 import {
   ANCHOR_HIT_TOLERANCE_PX,
   MAGNET_SNAP_TOLERANCE_PX,
+  hitTestDrawing,
   hitTestDrawingAnchor,
+  hitTestVisibleDrawing,
   nearestOhlcPrice,
   nudgeDrawingAnchor,
   replaceDrawingAnchor,
   snapPriceToBar,
   stackAxisTags,
+  textLabelBox,
 } from '../../src/lib/drawings/geometry';
 
 const bar = { open: 98, high: 102, low: 96, close: 100 };
@@ -57,8 +60,80 @@ describe('drawing anchor hit testing', () => {
   });
 });
 
-describe('drawing anchor replacement', () => {
-  it('moves only the addressed anchor', () => {
+describe('drawing body hit testing', () => {
+  it('never hits a hidden drawing', () => {
+    expect(
+      hitTestVisibleDrawing(
+        { visible: false, type: 'trendline' },
+        [
+          { x: 100, y: 100 },
+          { x: 200, y: 150 },
+        ],
+        { x: 150, y: 125 },
+      ),
+    ).toBe(false);
+  });
+
+  it('still selects a locked drawing, which the manager can inspect and unlock', () => {
+    expect(
+      hitTestVisibleDrawing(
+        { visible: true, type: 'trendline' },
+        [
+          { x: 100, y: 100 },
+          { x: 200, y: 150 },
+        ],
+        { x: 150, y: 125 },
+      ),
+    ).toBe(true);
+  });
+
+  it('does not hit a drawing when any anchor cannot be projected', () => {
+    // Dropping the null anchor would shrink this trend line to a point and
+    // select it from a place where nothing is painted.
+    expect(
+      hitTestVisibleDrawing(
+        { visible: true, type: 'trendline' },
+        [{ x: 100, y: 100 }, null],
+        { x: 100, y: 100 },
+      ),
+    ).toBe(false);
+  });
+
+  it('hit-tests a text label against its painted box, not its anchor radius', () => {
+    const box = textLabelBox({ x: 100, y: 100 }, 'Breakout', 20, 90);
+    expect(box).toEqual({ x: 106, y: 80, width: 90, height: 20 });
+    expect(hitTestDrawing([{ x: 100, y: 100 }], 'text', { x: 150, y: 90 }, 2, box)).toBe(true);
+    expect(hitTestDrawing([{ x: 100, y: 100 }], 'text', { x: 102, y: 70 }, 2, box)).toBe(false);
+    expect(hitTestDrawing([{ x: 100, y: 100 }], 'text', { x: 200, y: 90 }, 2, box)).toBe(false);
+  });
+
+  it('estimates text width when the renderer did not measure it', () => {
+    const box = textLabelBox({ x: 0, y: 40 }, 'abcd', 10);
+    expect(box.width).toBeCloseTo(4 * 10 * 0.62);
+    expect(box.x).toBe(6);
+    expect(box.y).toBe(28);
+  });
+
+  it('hits a single-anchor level along its whole painted length', () => {
+    expect(hitTestDrawing([{ x: 100, y: 50 }], 'horizontal-line', { x: 400, y: 52 })).toBe(true);
+    expect(hitTestDrawing([{ x: 100, y: 50 }], 'vertical-line', { x: 102, y: 400 })).toBe(true);
+  });
+
+  it('hits the filled interior of a painted rectangle', () => {
+    expect(
+      hitTestDrawing(
+        [
+          { x: 100, y: 100 },
+          { x: 300, y: 200 },
+        ],
+        'rectangle',
+        { x: 200, y: 150 },
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('drawing anchor replacement', () => {  it('moves only the addressed anchor', () => {
     const current = anchors();
     const next = replaceDrawingAnchor(current, 0, { date: '2026-01-03', price: 104 });
     expect(next).not.toBe(current);
