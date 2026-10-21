@@ -1346,6 +1346,15 @@ table.data tr.dim td {
   display: inline-block;
 }
 
+.indicator-edit {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+
 .indicator-legend-item {
   display: flex;
   align-items: center;

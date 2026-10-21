@@ -22,6 +22,7 @@ import type { ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, Price
 import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
+import { describeIndicatorInstance } from '../../lib/indicators/management';
 import {
   PRICE_NUDGE_LARGE_STEP,
   PRICE_NUDGE_STEP,
@@ -1236,12 +1237,19 @@ export function ChartPanel({
         <div className="panel-foot" style={{ borderTop: '1px solid var(--border-subtle)' }}>
           {chart.indicators.map((instance) => {
             const definition = getIndicatorDefinition(instance.type);
+            const label = describeIndicatorInstance(definition, instance);
             return (
               <span key={instance.id} className="row tight">
-                <Tag tone={instance.visible ? 'accent' : undefined}>{definition?.name ?? instance.type}</Tag>
+                <Tag tone={instance.visible ? 'accent' : undefined}>
+                  {label}
+                  <span className="panel-sub" style={{ marginLeft: 4 }}>
+                    {instance.placement === 'overlay' ? 'overlaid' : 'pane'}
+                  </span>
+                </Tag>
                 <button
                   type="button"
                   className="button ghost sm"
+                  aria-label={instance.visible ? `Hide ${label}` : `Show ${label}`}
                   onClick={() =>
                     void actions.updateChart(workspaceId, chart.id, (config) => ({
                       ...config,
@@ -1254,6 +1262,7 @@ export function ChartPanel({
                 <button
                   type="button"
                   className="button ghost sm"
+                  aria-label={`Remove ${label}`}
                   onClick={() =>
                     void actions.updateChart(workspaceId, chart.id, (config) => ({
                       ...config,
