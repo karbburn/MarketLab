@@ -6,6 +6,7 @@ import {
   createBacktestRun,
   parseResearchRunManifest,
   planResearchRunImport,
+  planResearchRunLoad,
   planResearchRunSave,
   serialiseResearchRunManifest,
   sortResearchRuns,
@@ -354,6 +355,43 @@ describe('research run storage planning', () => {
   });
 });
 
+describe('planResearchRunLoad', () => {
+  it('returns an editable copy with a fresh id and no aliased rules', async () => {
+    const run = await savedRun();
+    const plan = planResearchRunLoad(run, ['ds-1'], 'bt-copy');
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.config.id).toBe('bt-copy');
+    expect(plan.config.name).toBe(run.config.name);
+    expect(plan.config.entry).toEqual(run.config.entry);
+    expect(plan.config.entry).not.toBe(run.config.entry);
+    expect(plan.config.entry[0]).not.toBe(run.config.entry[0]);
+
+    // Mutating the draft cannot reach into the saved run.
+    plan.config.entry[0]!.window = 999;
+    expect(run.config.entry[0]!.window).toBe(2);
+  });
+
+  it('refuses to load when the run dataset is not in the library', async () => {
+    const run = await savedRun();
+    const plan = planResearchRunLoad(run, ['another-dataset'], 'bt-copy');
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.message).toContain('not in the library');
+  });
+
+  it('points the draft at the run dataset identity, not a stale config id', async () => {
+    const run = await savedRun();
+    const stale = { ...run, config: { ...run.config, datasetId: 'ds-stale' } };
+    const plan = planResearchRunLoad(stale, ['ds-1'], 'bt-copy');
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.config.datasetId).toBe('ds-1');
+      expect(plan.config.entry).toEqual(run.config.entry);
+    }
+  });
+});
+
 describe('research runs in backups', () => {
   const base = {
     instruments: [],
@@ -412,6 +450,8 @@ describe('research runs in backups', () => {
     expect(merged.duplicateDatasets).toBe(1);
     expect(merged.researchRuns[0]?.dataset.datasetId).toBe('ds-new');
     expect(merged.researchRuns[0]?.dataset.instrumentId).toBe('inst-new');
+    // Reloading the run into the editor must point at the restored dataset too.
+    expect(merged.researchRuns[0]?.config.datasetId).toBe('ds-new');
   });
 
   it('skips and reports a run that fails the run schema', async () => {

@@ -386,6 +386,10 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     const target = resolved.get(replacement);
     return {
       ...run,
+      config: {
+        ...run.config,
+        datasetId: replacement,
+      },
       dataset: {
         ...run.dataset,
         datasetId: replacement,

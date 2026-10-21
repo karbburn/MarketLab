@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { DownloadSimple, FloppyDisk, Play, Trash, UploadSimple } from '@phosphor-icons/react';
+import { DownloadSimple, FloppyDisk, PencilSimple, Play, Trash, UploadSimple } from '@phosphor-icons/react';
 import type { BacktestConfig, BacktestResult, BacktestRun, Dataset, Instrument } from '../../domain/types';
 import {
   createBacktestRun,
@@ -78,7 +78,13 @@ function statusCopy(verification: ResearchRunVerification): { tone: TagTone; lab
  * outputs and assumptions. Saving never touches the strategy draft; deleting a
  * run never touches the strategy or the dataset.
  */
-export function ResearchRunsPanel({ current }: { current: ResearchRunSource | null }) {
+export function ResearchRunsPanel({
+  current,
+  onLoadConfig,
+}: {
+  current: ResearchRunSource | null;
+  onLoadConfig?: (run: BacktestRun) => void;
+}) {
   const { state, actions } = useStore();
   const [selectedId, setSelectedId] = useState('');
   const [verification, setVerification] = useState<{ runId: string; value: ResearchRunVerification } | null>(null);
@@ -259,6 +265,20 @@ export function ResearchRunsPanel({ current }: { current: ResearchRunSource | nu
               </div>
 
               <div className="row tight">
+                <button
+                  type="button"
+                  className="button sm"
+                  disabled={busy !== null || !onLoadConfig || !state.datasets.some((entry) => entry.id === selected.dataset.datasetId)}
+                  title={
+                    state.datasets.some((entry) => entry.id === selected.dataset.datasetId)
+                      ? 'Load this run\u2019s configuration into the strategy editor'
+                      : 'The dataset this run used is not in the library'
+                  }
+                  onClick={() => onLoadConfig?.(selected)}
+                >
+                  <PencilSimple size={13} aria-hidden />
+                  Load into editor
+                </button>
                 <button type="button" className="button sm" disabled={busy !== null} onClick={() => void rerun(selected, false)}>
                   <Play size={13} aria-hidden />
                   {busy === 'verify' ? 'Verifying…' : 'Rerun and verify'}
