@@ -299,6 +299,22 @@ export const LEARN_METRICS: readonly LearnMetric[] = [
     withheld: 'Fewer than three shared returns, or a constant return series.',
     appearsIn: [{ label: 'Quant lab', to: '/quant' }],
   },
+  {
+    id: 'saved-run-delta',
+    group: 'comparison',
+    name: 'Saved-run delta',
+    question: 'How did the recorded metric differ between two saved runs?',
+    formula: 'delta = runB_value - runA_value\npercent metrics: percentage points (pp)',
+    inputs: 'Two saved research-run snapshots and their recorded metrics.',
+    conventions: [
+      'The older run starts in A and the newer in B; swapping the sides flips the sign.',
+      'Percent metrics are compared in percentage points, not relative change.',
+      'Missing values have no delta. Profit factor is shown without a delta.',
+      'The comparison reads saved snapshots and never reruns either strategy.',
+    ],
+    withheld: 'Either run lacks the metric, or the metric has no meaningful absolute delta (profit factor).',
+    appearsIn: [{ label: 'Backtest', to: '/backtest' }],
+  },
 ];
 
 export const LEARN_SECTIONS: ReadonlyArray<{ id: string; title: string }> = [
@@ -444,6 +460,18 @@ export const LEARN_WITHHELD: ReadonlyArray<{ condition: string; result: string }
     result: 'The comparison draws nothing and says why.',
   },
   {
+    condition: 'A saved-run dataset is no longer in the library',
+    result: 'The snapshot still opens; the current input check says the dataset is unavailable.',
+  },
+  {
+    condition: 'Two saved runs cover different windows',
+    result: 'The comparison warns before the table; the deltas stay descriptive and nothing is rerun.',
+  },
+  {
+    condition: 'A saved metric is missing on one side',
+    result: 'The metric shows -- and the delta is withheld, not treated as zero.',
+  },
+  {
     condition: 'No benchmark selected',
     result: 'Beta shows --; alpha is not computed.',
   },
@@ -548,7 +576,7 @@ export const LEARN_ROUTE: ReadonlyArray<{ label: string; to: string; body: strin
   {
     label: 'Backtest',
     to: '/backtest',
-    body: 'Run once with 0 bps costs and once with 20 bps. The difference is cost drag, not a better signal.',
+    body: 'Run once with 0 bps costs and once with 20 bps, save both, then compare the snapshots. Read the input checks before calling the difference cost drag.',
   },
 ];
 

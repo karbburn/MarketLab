@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { seedLibrary } from './fixtures/library';
+import { readStore, seedLibrary } from './fixtures/library';
 
 // The application bundles no data, so the research screens are tested against
 // a seeded library of imported series.
@@ -246,5 +246,81 @@ test.describe('rule-based backtest', () => {
     // Starting a fresh strategy clears the working-copy context.
     await page.getByRole('button', { name: 'New strategy' }).click();
     await expect(page.locator('.research-working-copy')).toHaveCount(0);
+  });
+
+  test('compares two saved research runs without changing either record', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const runsPanel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    const saveRun = runsPanel.getByRole('button', { name: 'Save run' });
+
+    // First snapshot: the default strategy, named so the comparison is legible.
+    await page.getByLabel('Strategy name').fill('Baseline run');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Stale')).toBeHidden();
+    await saveRun.click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Baseline run"');
+
+    // Second snapshot: a materially different position size, so the recorded
+    // metrics and configuration differ without changing the market data.
+    await page.getByLabel('Strategy name').fill('Half size');
+    await page.getByLabel('Position size (%)').fill('50');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Stale')).toBeHidden();
+    await saveRun.click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Half size"');
+
+    const before = await readStore(page, 'researchRuns');
+    expect(before).toHaveLength(2);
+
+    const compare = page.locator('.panel').filter({ hasText: 'Compare saved runs' }).first();
+    const selectA = compare.getByRole('combobox', { name: 'Run A' });
+    const selectB = compare.getByRole('combobox', { name: 'Run B' });
+    await expect(selectA).toBeVisible();
+    await expect(selectB).toBeVisible();
+
+    // Choose an explicit pair rather than relying on the newest-first default.
+    const baselineId = await selectA.locator('option', { hasText: 'Baseline run' }).getAttribute('value');
+    const halfSizeId = await selectB.locator('option', { hasText: 'Half size' }).getAttribute('value');
+    expect(baselineId).not.toBeNull();
+    expect(halfSizeId).not.toBeNull();
+    await selectA.selectOption(baselineId as string);
+    await selectB.selectOption(halfSizeId as string);
+
+    await expect(compare.locator('.compare-run-name').nth(0)).toHaveText('Baseline run');
+    await expect(compare.locator('.compare-run-name').nth(1)).toHaveText('Half size');
+    await expect(compare.getByText('Different strategies', { exact: true })).toBeVisible();
+    await expect(compare.getByText('Inputs match', { exact: true }).first()).toBeVisible();
+
+    // Recorded values stay visible and deltas are labelled in percentage
+    // points; profit factor deliberately has no arithmetic delta.
+    const totalRow = compare.locator('.compare-metrics-table tbody tr').filter({ hasText: 'Total return' });
+    const totalDelta = totalRow.locator('td').nth(2);
+    await expect(totalRow.locator('td').nth(0)).not.toHaveText('--');
+    await expect(totalDelta).toContainText('pp');
+    expect(await totalDelta.textContent()).not.toBe('0.00 pp');
+
+    const profitFactorRow = compare.locator('.compare-metrics-table tbody tr').filter({ hasText: 'Profit factor' });
+    await expect(profitFactorRow.locator('td').nth(2)).toHaveText('n/a');
+
+    const positionRow = compare.locator('.compare-config-table tbody tr').filter({ hasText: 'Position size' });
+    await expect(positionRow).toContainText('95.00%');
+    await expect(positionRow).toContainText('50.00%');
+    await expect(positionRow).toContainText('Differs');
+
+    // Swapping is immediate and keeps both records selected.
+    const aBeforeSwap = await selectA.inputValue();
+    const bBeforeSwap = await selectB.inputValue();
+    await compare.getByRole('button', { name: 'Swap run A and run B' }).click();
+    await expect(selectA).toHaveValue(bBeforeSwap);
+    await expect(selectB).toHaveValue(aBeforeSwap);
+    await expect(compare.locator('.compare-run-name').nth(0)).toHaveText('Half size');
+    await expect(compare.locator('.compare-run-name').nth(1)).toHaveText('Baseline run');
+
+    // Comparison is read-only: both IndexedDB records are byte-for-byte the
+    // same objects after selecting, reading and swapping.
+    const after = await readStore(page, 'researchRuns');
+    expect(after).toEqual(before);
   });
 });

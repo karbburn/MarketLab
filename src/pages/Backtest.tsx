@@ -16,6 +16,7 @@ import { EmptyState, Field, Metric, NumberInput, Panel, Select, Tag, TextInput }
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 import { ResearchRunsPanel, type ResearchRunSource } from '../components/backtest/ResearchRunsPanel';
+import { ResearchRunComparison } from '../components/backtest/ResearchRunComparison';
 import { TradeTable } from '../components/backtest/TradeTable';
 
 export function BacktestPage() {
@@ -430,6 +431,8 @@ export function BacktestPage() {
       )}
 
       <ResearchRunsPanel current={researchSource} onLoadConfig={loadRunConfig} />
+
+      <ResearchRunComparison />
 
       <Panel title="Execution assumptions" subtitle="Stated plainly so the numbers cannot be mistaken for more than they are">
         <ul className="list-reset stack field-hint">

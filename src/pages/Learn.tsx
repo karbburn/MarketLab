@@ -20,6 +20,13 @@ import {
   SCREEN_DRILL_WINDOW,
   screenWindowDrill,
 } from '../lib/learn/calculations';
+import {
+  COMPARISON_DRILL_OPTIONS,
+  comparisonDrill,
+  EMPTY_COMPARISON_DRILL,
+  type ComparisonDrillInput,
+  type ComparisonDrillOptionKey,
+} from '../lib/learn/comparison';
 import { formatSignedPercent } from '../lib/format';
 
 /**
@@ -316,10 +323,26 @@ export function LearnPage() {
                 method notes, not shown as a separate tile. A high correlation is not a cause, and a
                 beta from 60 shared sessions is not a permanent property.
               </p>
+              <p>
+                Saved research runs are frozen snapshots, not live strategies. Comparing two reads
+                their stored results and recorded inputs; it never reruns or changes either run.
+                MarketLab checks the dataset identity, the stored window and frequency, the engine
+                version and the recorded assumptions before it shows a table. If those differ, the
+                deltas are descriptive, not a controlled experiment. Percentage metrics move in
+                percentage points, profit factor is shown without a delta, and a missing value stays
+                blank.
+              </p>
+              <p>
+                Different strategy settings are still a valid comparison. The inputs match, so the
+                difference describes those settings. Different market data, windows, engine versions
+                or assumptions answer a broader question, and the app says so before the numbers.
+              </p>
             </div>
+            <ComparisonDrill />
             <p className="learn-links">
               <Link to="/quant">Compare series in the Quant lab</Link>
               <Link to="/chart">See rebased overlays in the chart</Link>
+              <Link to="/backtest">Compare two saved runs</Link>
             </p>
           </section>
 
@@ -630,6 +653,96 @@ function CutoffDrill() {
         Sessions only, no prices. A {SCREEN_DRILL_WINDOW}-session window needs {drill.required} closes, so the
         first usable cutoff is S{drill.required}.
       </p>
+    </div>
+  );
+}
+
+function ComparisonDrill() {
+  const [differences, setDifferences] = useState<ComparisonDrillInput>(EMPTY_COMPARISON_DRILL);
+  const verdict = comparisonDrill(differences);
+  const selectedCount = COMPARISON_DRILL_OPTIONS.filter((option) => differences[option.key]).length;
+  const exampleNote =
+    verdict.state === 'not-comparable'
+      ? 'Descriptive only. The app warns before the table; it does not hide the saved numbers or rerun either run.'
+      : verdict.state === 'snapshot-only'
+        ? 'The recorded values stay readable. The current input check says the dataset is unavailable.'
+        : verdict.state === 'different-strategy'
+          ? 'Descriptive. The different settings explain the gap; this is not an isolated effect.'
+          : 'No difference selected in this drill. The example delta is illustrative.';
+
+  const toggle = (key: ComparisonDrillOptionKey) => {
+    setDifferences((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  return (
+    <div className="learn-drill learn-compare-drill">
+      <div className="learn-drill-head">
+        <div>
+          <span className="learn-drill-kicker">Two frozen snapshots</span>
+          <h3>Would these two saved runs be comparable?</h3>
+        </div>
+        <span className="learn-drill-count">
+          {selectedCount} of {COMPARISON_DRILL_OPTIONS.length} differences
+        </span>
+      </div>
+      <div className="learn-compare-chips" role="group" aria-label="Differences between the two saved runs">
+        {COMPARISON_DRILL_OPTIONS.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            className="learn-chip"
+            aria-pressed={differences[option.key]}
+            onClick={() => toggle(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="learn-compare-verdict" data-state={verdict.state} aria-live="polite">
+        <div className="learn-compare-verdict-head">
+          <span className="learn-compare-verdict-kicker">Verdict</span>
+          <strong>{verdict.label}</strong>
+        </div>
+        <p>{verdict.detail}</p>
+        {verdict.notes.length > 0 && (
+          <ul className="list-reset learn-compare-notes">
+            {verdict.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="learn-compare-example" data-state={verdict.state}>
+        <span className="learn-compare-example-label">Example: total return</span>
+        <dl className="learn-compare-example-values">
+          <div>
+            <dt>Run A</dt>
+            <dd>+8.40%</dd>
+          </div>
+          <div>
+            <dt>Run B</dt>
+            <dd>+12.60%</dd>
+          </div>
+          <div>
+            <dt>Delta</dt>
+            <dd>+4.20 pp</dd>
+          </div>
+        </dl>
+        <p>{exampleNote}</p>
+      </div>
+      <div className="learn-compare-actions">
+        <button
+          type="button"
+          className="button ghost sm"
+          disabled={selectedCount === 0}
+          onClick={() => setDifferences(EMPTY_COMPARISON_DRILL)}
+        >
+          Reset differences
+        </button>
+        <span className="learn-drill-note">
+          Toggles change only this lesson. No saved run is read, changed or rerun.
+        </span>
+      </div>
     </div>
   );
 }

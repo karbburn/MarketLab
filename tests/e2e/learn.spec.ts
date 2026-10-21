@@ -140,7 +140,7 @@ test.describe('learning page', () => {
 
   test('moves the screener cutoff through the warm-up boundary', async ({ page }) => {
     await page.goto('/#/learn?section=screening');
-    const drill = page.locator('.learn-drill');
+    const drill = page.locator('#screening .learn-drill');
     const slider = drill.getByLabel('Cutoff session');
 
     await slider.focus();
@@ -158,6 +158,68 @@ test.describe('learning page', () => {
       'Available',
     );
     await expect(drill.locator('.learn-drill-stat').filter({ hasText: 'Sessions after cutoff' })).toContainText('5');
+  });
+
+  test('tests whether two saved runs are comparable', async ({ page }) => {
+    await page.goto('/#/learn?section=comparison');
+    const drill = page.locator('.learn-compare-drill');
+
+    await expect(drill).toContainText('0 of 6 differences');
+    await expect(drill.locator('.learn-compare-verdict')).toContainText('No differences selected');
+    await expect(drill.getByRole('button', { name: 'Reset differences' })).toBeDisabled();
+
+    await drill.getByRole('button', { name: 'Different strategy settings' }).click();
+    await expect(drill.getByRole('button', { name: 'Different strategy settings' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(drill.locator('.learn-compare-verdict')).toContainText(
+      'Comparable inputs, different strategy',
+    );
+    await expect(drill.locator('.learn-compare-verdict')).not.toContainText('Not directly comparable');
+
+    // The chips are ordinary buttons, so activation does not need a custom key handler.
+    const missing = drill.getByRole('button', { name: 'Dataset missing now' });
+    await missing.focus();
+    await missing.press('Enter');
+    await expect(drill.locator('.learn-compare-verdict')).toContainText('Snapshot-only comparison');
+    await expect(drill.locator('.learn-compare-verdict')).toContainText(
+      'current input check is unavailable',
+    );
+    await expect(drill.locator('.learn-compare-notes')).toContainText('snapshot remains readable');
+
+    await drill.getByRole('button', { name: 'Different window' }).click();
+    await expect(drill).toContainText('3 of 6 differences');
+    await expect(drill.locator('.learn-compare-verdict')).toContainText('Not directly comparable');
+    await expect(drill.locator('.learn-compare-example')).toContainText('Descriptive only');
+
+    await drill.getByRole('button', { name: 'Reset differences' }).click();
+    await expect(drill).toContainText('0 of 6 differences');
+    await expect(drill.locator('.learn-compare-verdict')).toContainText('No differences selected');
+    await expect(drill.getByRole('button', { name: 'Different window' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await expect(drill.getByRole('button', { name: 'Reset differences' })).toBeDisabled();
+  });
+
+  test('keeps the saved-run comparison drill inside a narrow viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto('/#/learn?section=comparison');
+    const drill = page.locator('.learn-compare-drill');
+
+    await drill.getByRole('button', { name: 'Different engine version' }).click();
+    await expect(drill.locator('.learn-compare-verdict')).toContainText('Not directly comparable');
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(false);
+
+    const box = await drill.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390.5);
   });
 
   test('checks a rule and moves to the next case', async ({ page }) => {

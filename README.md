@@ -98,6 +98,11 @@ periods) are empty rather than zero.
   versioned JSON manifest (no market data), or import one. Re-running never overwrites the saved
   result. If the dataset is gone the run says so; if its prices changed the run reports changed
   inputs and only simulates on today's data when you explicitly ask.
+- **Compare saved runs** — put any two snapshots side by side: names and dates, recorded metrics
+  and absolute deltas, strategy configuration, dataset identity, window, engine version and
+  execution assumptions. Input checks hash the saved window without running either strategy, and
+  the comparison warns when market data, window, engine or assumptions differ. Deltas are
+  descriptive; the comparison never reruns or changes either saved record.
 
 ### Data
 
@@ -138,8 +143,8 @@ session and content hash — with per-series inspection, export and deletion.
   number: what a stored bar is, total return and CAGR, risk measures, comparison alignment and
   correlation, screen cutoffs, backtest execution and the cases where MarketLab withholds a
   result. It includes a metric reference with formulas you can copy, a CAGR calculator, a
-  screen-cutoff drill, a four-case rule check and links into the screen that applies each
-  convention.
+  screen-cutoff drill, a saved-run comparability drill, a four-case rule check and links into the
+  screen that applies each convention.
 
 ## Screenshots
 
@@ -343,8 +348,8 @@ the source of truth.
 
 | Suite | Gate | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, saved research-run fingerprints, verification states and manifests, chart templates and drawing hit-testing, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations, and the documented route, data and build-config claims. |
-| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, chart templates, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, saving/reloading/verifying/exporting/importing a research run, the field guide, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
+| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, saved research-run fingerprints, verification states, comparison semantics and manifests, chart templates and drawing hit-testing, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations and comparability verdicts, and the documented route, data and build-config claims. |
+| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, chart templates, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, saving/reloading/verifying/exporting/importing a research run, comparing two saved runs without changing either record, the field guide and its interactive drills, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
 | Service (pytest) | `python -m pytest services/market-data/tests -q` | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation - deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
@@ -392,6 +397,9 @@ no short selling, no alerting and no replay. These are product decisions, not ga
 - Re-running a saved run is deterministic for the same engine version, configuration and bars.
   Metrics and trades are compared within an absolute-or-relative 1e-9 tolerance to absorb floating-point
   differences between JavaScript runtimes.
+- Saved-run deltas are descriptive. When inputs differ, the comparison warns before the table but
+  still shows the recorded values; it does not rerun either strategy, substitute current data or
+  present the difference as proof that one strategy is better.
 - State is per browser profile. Moving between browsers is done deliberately through the JSON
   backup, not through an account or a sync service.
 - Nothing here is investment advice.
