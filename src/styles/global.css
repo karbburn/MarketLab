@@ -2917,6 +2917,19 @@ table.data tr.dim td {
   background: var(--surface-inset);
 }
 
+.research-working-copy {
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.research-working-copy .field-hint {
+  flex: 1;
+  min-width: 200px;
+}
+
 .research-assumptions summary {
   cursor: pointer;
   font-size: 11px;

@@ -217,4 +217,34 @@ test.describe('rule-based backtest', () => {
     await fileInput.setInputFiles(manifestPath as string);
     await expect(page.locator('.toast-body').last()).toContainText('already saved');
   });
+
+  test('loads a saved research run into the strategy editor', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    // Make the run distinguishable from the default strategy.
+    await page.getByLabel('Initial capital').fill('250000');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body')).toContainText('Saved research run');
+
+    // Start a fresh default strategy so the editor no longer holds the saved one.
+    await page.getByRole('button', { name: 'New strategy' }).click();
+    await expect(page.getByLabel('Initial capital')).toHaveValue('100000');
+
+    await panel.getByRole('button', { name: 'Load into editor' }).click();
+    await expect(page.getByLabel('Initial capital')).toHaveValue('250000');
+
+    // Loading creates an editable working copy, not a saved strategy.
+    await expect(page.getByRole('combobox', { name: 'Saved strategies' })).toHaveValue('');
+    const workingCopy = page.locator('.research-working-copy');
+    await expect(workingCopy).toContainText('Working copy');
+    await expect(workingCopy).toContainText('The saved run and its results are unchanged');
+
+    // Starting a fresh strategy clears the working-copy context.
+    await page.getByRole('button', { name: 'New strategy' }).click();
+    await expect(page.locator('.research-working-copy')).toHaveCount(0);
+  });
 });

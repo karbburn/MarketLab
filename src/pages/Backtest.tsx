@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DownloadSimple, FloppyDisk, Play, Plus, Trash } from '@phosphor-icons/react';
-import type { BacktestConfig, BacktestResult, StrategyRule } from '../domain/types';
+import type { BacktestConfig, BacktestResult, BacktestRun, StrategyRule } from '../domain/types';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
+import { planResearchRunLoad } from '../lib/backtest/research-runs';
 import { RULE_FIELDS, RULE_OPERATORS as OPERATORS } from '../lib/backtest/rule-catalog';
 import { createBacktestConfig } from '../state/defaults';
 import { createId } from '../lib/id';
@@ -22,6 +23,7 @@ export function BacktestPage() {
   const views = useMemo(() => datasetViews(state), [state]);
   const [draft, setDraft] = useState<BacktestConfig | null>(null);
   const [selectedSavedId, setSelectedSavedId] = useState('');
+  const [loadedFrom, setLoadedFrom] = useState<{ id: string; name: string } | null>(null);
   const [runRequest, setRunRequest] = useState<{ config: BacktestConfig; token: number } | null>(null);
   const tokenRef = useRef(0);
 
@@ -32,6 +34,12 @@ export function BacktestPage() {
     [views, datasetId],
   );
   const activeView = useMemo(() => views.find((view) => view.dataset.id === datasetId) ?? null, [views, datasetId]);
+  const loadedRun = loadedFrom ? state.backtestRuns.find((run) => run.id === loadedFrom.id) ?? null : null;
+  const loadedInputsDiffer =
+    loadedRun !== null &&
+    activeView !== null &&
+    (activeView.dataset.contentHash !== loadedRun.dataset.contentHash ||
+      activeView.dataset.frequency !== loadedRun.dataset.frequency);
   const signature = draft ? JSON.stringify(draft) : '';
   const runSignature = runRequest ? JSON.stringify(runRequest.config) : null;
 
@@ -51,6 +59,25 @@ export function BacktestPage() {
   const updateDraft = (updater: (current: BacktestConfig) => BacktestConfig) => {
     setDraft((current) => (current ? updater(current) : current));
   };
+
+  const loadRunConfig = useCallback((run: BacktestRun) => {
+    const plan = planResearchRunLoad(
+      run,
+      views.map((view) => view.dataset.id),
+      createId('backtest'),
+    );
+    if (!plan.ok) {
+      actions.notify('error', plan.message);
+      return;
+    }
+    // A loaded run becomes an editable working copy: it never aliases the saved
+    // run, and saving it creates a new strategy rather than overwriting one.
+    setDraft(plan.config);
+    setSelectedSavedId('');
+    setLoadedFrom({ id: run.id, name: run.name });
+    requestRun(plan.config);
+    actions.notify('info', `Loaded the configuration from research run "${run.name}".`);
+  }, [views, actions, requestRun]);
 
   const updateRule = (side: 'entry' | 'exit', ruleId: string, updater: (rule: StrategyRule) => StrategyRule) => {
     updateDraft((current) => ({
@@ -117,6 +144,7 @@ export function BacktestPage() {
               value={selectedSavedId}
               onChange={(value) => {
                 setSelectedSavedId(value);
+                setLoadedFrom(null);
                 const saved = state.backtests.find((entry) => entry.id === value) ?? null;
                 const next = saved ? { ...saved } : null;
                 setDraft(next);
@@ -133,6 +161,7 @@ export function BacktestPage() {
                 const created = createBacktestConfig({ datasetId: first.dataset.id });
                 setDraft(created);
                 setSelectedSavedId('');
+                setLoadedFrom(null);
                 requestRun(created);
               }}
             >
@@ -182,6 +211,8 @@ export function BacktestPage() {
                   if (!first) return;
                   const created = createBacktestConfig({ datasetId: first.dataset.id });
                   setDraft(created);
+                  setSelectedSavedId('');
+                  setLoadedFrom(null);
                   requestRun(created);
                 }}
               >
@@ -191,6 +222,18 @@ export function BacktestPage() {
           />
         ) : (
           <div className="stack">
+            {loadedFrom && (
+              <div className="row tight research-working-copy" role="status">
+                <Tag tone="accent">Working copy</Tag>
+                <span className="field-hint">
+                  Editing the configuration recorded by research run “{loadedFrom.name}”. The saved run and its
+                  results are unchanged; a research run saved from here is a separate record.
+                  {loadedInputsDiffer
+                    ? ' The stored dataset has changed since this run was saved, so a fresh run can legitimately produce different numbers.'
+                    : ''}
+                </span>
+              </div>
+            )}
             <div className="grid-4">
               <Field label="Strategy name">
                 <TextInput value={draft.name} onChange={(value) => updateDraft((current) => ({ ...current, name: value }))} />
@@ -386,7 +429,7 @@ export function BacktestPage() {
         </>
       )}
 
-      <ResearchRunsPanel current={researchSource} />
+      <ResearchRunsPanel current={researchSource} onLoadConfig={loadRunConfig} />
 
       <Panel title="Execution assumptions" subtitle="Stated plainly so the numbers cannot be mistaken for more than they are">
         <ul className="list-reset stack field-hint">

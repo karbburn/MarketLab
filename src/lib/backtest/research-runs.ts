@@ -425,3 +425,35 @@ export function planResearchRunImport(existing: readonly BacktestRun[], incoming
 export function sortResearchRuns(runs: readonly BacktestRun[]): BacktestRun[] {
   return [...runs].sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
 }
+
+/**
+ * Plans turning a saved run back into an editable draft.
+ *
+ * The returned configuration is a deep copy with a fresh id, so the editor can
+ * never alias the immutable run and saving it creates a new record. Loading is
+ * refused when the run's dataset is gone: showing its rules against a different
+ * series would imply a reproduction that cannot happen.
+ */
+export type ResearchRunLoadPlan =
+  | { ok: true; config: BacktestConfig }
+  | { ok: false; message: string };
+
+export function planResearchRunLoad(
+  run: BacktestRun,
+  availableDatasetIds: readonly string[],
+  nextConfigId: string,
+): ResearchRunLoadPlan {
+  if (!availableDatasetIds.includes(run.dataset.datasetId)) {
+    return {
+      ok: false,
+      message: `The dataset "${run.dataset.datasetName}" is not in the library, so research run "${run.name}" cannot be loaded.`,
+    };
+  }
+  return {
+    ok: true,
+    config: {
+      ...snapshotConfig(run.config),
+      id: nextConfigId,
+    },
+  };
+}

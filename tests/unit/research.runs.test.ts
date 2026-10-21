@@ -6,6 +6,7 @@ import {
   createBacktestRun,
   parseResearchRunManifest,
   planResearchRunImport,
+  planResearchRunLoad,
   planResearchRunSave,
   serialiseResearchRunManifest,
   sortResearchRuns,
@@ -351,6 +352,32 @@ describe('research run storage planning', () => {
       { ...run, id: 'c', createdAt: '2024-02-01T00:00:00.000Z' },
     ]);
     expect(sorted.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('planResearchRunLoad', () => {
+  it('returns an editable copy with a fresh id and no aliased rules', async () => {
+    const run = await savedRun();
+    const plan = planResearchRunLoad(run, ['ds-1'], 'bt-copy');
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.config.id).toBe('bt-copy');
+    expect(plan.config.name).toBe(run.config.name);
+    expect(plan.config.entry).toEqual(run.config.entry);
+    expect(plan.config.entry).not.toBe(run.config.entry);
+    expect(plan.config.entry[0]).not.toBe(run.config.entry[0]);
+
+    // Mutating the draft cannot reach into the saved run.
+    plan.config.entry[0]!.window = 999;
+    expect(run.config.entry[0]!.window).toBe(2);
+  });
+
+  it('refuses to load when the run dataset is not in the library', async () => {
+    const run = await savedRun();
+    const plan = planResearchRunLoad(run, ['another-dataset'], 'bt-copy');
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.message).toContain('not in the library');
   });
 });
 
