@@ -119,6 +119,24 @@ export function LearnPage() {
     };
   }, []);
 
+  const [readingProgress, setReadingProgress] = useState(0);
+
+  useEffect(() => {
+    const updateProgress = () => {
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (scrollHeight > 0) {
+        setReadingProgress(Math.min(100, Math.max(0, (window.scrollY / scrollHeight) * 100)));
+      }
+    };
+    updateProgress();
+    window.addEventListener('scroll', updateProgress, { passive: true });
+    window.addEventListener('resize', updateProgress);
+    return () => {
+      window.removeEventListener('scroll', updateProgress);
+      window.removeEventListener('resize', updateProgress);
+    };
+  }, []);
+
   const chooseSection = (id: string) => {
     setActiveSection(id);
     // A click on the section already in the URL does not change the URL, so
@@ -128,7 +146,12 @@ export function LearnPage() {
 
   return (
     <div className="page learn-page">
+      <div className="learn-progress-track" aria-hidden>
+        <div className="learn-progress-bar" style={{ width: `${readingProgress}%` }} />
+      </div>
+
       <header className="learn-hero">
+        <div className="learn-hero-badge">Methodology &amp; Field Guide</div>
         <div className="learn-hero-copy">
           <h1>How MarketLab works</h1>
           <p className="learn-lede">
@@ -146,6 +169,9 @@ export function LearnPage() {
             >
               <span className="learn-fact-value">{fact.value}</span>
               <span className="learn-fact-label">{fact.label}</span>
+              <span className="learn-fact-arrow" aria-hidden>
+                Jump to section &rarr;
+              </span>
             </Link>
           ))}
         </div>
@@ -153,7 +179,10 @@ export function LearnPage() {
 
       <div className="learn-layout">
         <nav className="learn-rail" aria-label="On this page">
-          <span className="learn-rail-title">On this page</span>
+          <div className="learn-rail-header">
+            <span className="learn-rail-title">On this page</span>
+            <span className="learn-rail-count">{LEARN_SECTIONS.length} sections</span>
+          </div>
           {LEARN_SECTIONS.map((item) => (
             <Link
               key={item.id}
@@ -164,10 +193,19 @@ export function LearnPage() {
               {item.title}
             </Link>
           ))}
+          <button
+            type="button"
+            className="learn-rail-top"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label="Scroll back to top"
+          >
+            &uarr; Back to top
+          </button>
         </nav>
 
         <div className="learn-content">
           <section className="learn-section" id="stored" aria-labelledby="stored-title">
+            <span className="learn-section-kicker">01 &bull; Data Architecture</span>
             <h2 id="stored-title" tabIndex={-1}>
               What is stored
             </h2>
@@ -206,6 +244,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="returns" aria-labelledby="returns-title">
+            <span className="learn-section-kicker">02 &bull; Arithmetic</span>
             <h2 id="returns-title" tabIndex={-1}>
               Returns
             </h2>
@@ -242,6 +281,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="risk" aria-labelledby="risk-title">
+            <span className="learn-section-kicker">03 &bull; Volatility &amp; Downside</span>
             <h2 id="risk-title" tabIndex={-1}>
               Risk
             </h2>
@@ -294,6 +334,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="comparison" aria-labelledby="comparison-title">
+            <span className="learn-section-kicker">04 &bull; Multi-Series Alignment</span>
             <h2 id="comparison-title" tabIndex={-1}>
               Comparison
             </h2>
@@ -347,6 +388,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="screening" aria-labelledby="screening-title">
+            <span className="learn-section-kicker">05 &bull; Filters &amp; Cutoffs</span>
             <h2 id="screening-title" tabIndex={-1}>
               Screens
             </h2>
@@ -375,6 +417,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="execution" aria-labelledby="execution-title">
+            <span className="learn-section-kicker">06 &bull; Simulation Model</span>
             <h2 id="execution-title" tabIndex={-1}>
               Backtests
             </h2>
@@ -405,6 +448,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="indicators" aria-labelledby="indicators-title">
+            <span className="learn-section-kicker">07 &bull; Smoothing &amp; Bands</span>
             <h2 id="indicators-title" tabIndex={-1}>
               Indicators
             </h2>
@@ -435,6 +479,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="reference" aria-labelledby="reference-title">
+            <span className="learn-section-kicker">08 &bull; Contracts &amp; Edge Cases</span>
             <h2 id="reference-title" tabIndex={-1}>
               Metric reference
             </h2>
@@ -449,6 +494,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="blanks" aria-labelledby="blanks-title">
+            <span className="learn-section-kicker">09 &bull; Missing Input Policy</span>
             <h2 id="blanks-title" tabIndex={-1}>
               Blank results
             </h2>
@@ -471,6 +517,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="rule-check" aria-labelledby="rule-check-title">
+            <span className="learn-section-kicker">10 &bull; Interactive Scenarios</span>
             <h2 id="rule-check-title" tabIndex={-1}>
               Check the rule
             </h2>
@@ -484,6 +531,7 @@ export function LearnPage() {
           </section>
 
           <section className="learn-section" id="route" aria-labelledby="route-title">
+            <span className="learn-section-kicker">11 &bull; Practical Application</span>
             <h2 id="route-title" tabIndex={-1}>
               A route through the app
             </h2>
