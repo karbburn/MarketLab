@@ -23,12 +23,17 @@ import { formatPrice, formatSignedPercent } from '../../lib/format';
 import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
 import {
+  PRICE_NUDGE_LARGE_STEP,
+  PRICE_NUDGE_STEP,
+  SESSION_NUDGE_LARGE_STEP,
   anchorsRequired,
   hitTestDrawingAnchor,
   isDrawingComplete,
+  nudgeDrawingAnchor,
   priceRangeInfo,
   replaceDrawingAnchor,
   snapPriceToBar,
+  stackAxisTags,
 } from '../../lib/drawings/geometry';
 import { removeDrawing } from '../../lib/drawings/management';
 import { createId } from '../../lib/id';
@@ -115,6 +120,10 @@ export function ChartPanel({
   const [magnet, setMagnet] = useState(false);
   const [pendingAnchors, setPendingAnchors] = useState<DrawingAnchor[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Keyboard nudging addresses one endpoint at a time. The id keeps the index
+  // from leaking across selections without a state-synchronising effect.
+  const [activeAnchor, setActiveAnchor] = useState<{ drawingId: string; index: number } | null>(null);
+  const [anchorAnnouncement, setAnchorAnnouncement] = useState('');
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
@@ -131,6 +140,7 @@ export function ChartPanel({
   const textEditClosedRef = useRef(false);
   const textEditorInputRef = useRef<HTMLInputElement>(null);
   const managerButtonRef = useRef<HTMLButtonElement>(null);
+  const axisLabelsRef = useRef<HTMLDivElement>(null);
   const localDrawings = draftDrawings ?? chart.drawings;
   // The ref makes a sequence of quick manager edits compose even when React has
   // not re-rendered with the previous edit yet.
@@ -142,6 +152,10 @@ export function ChartPanel({
   // and redo can never leave the toolbar acting on a drawing that is not there.
   const selectedDrawing = selectedId === null ? null : localDrawings.find((drawing) => drawing.id === selectedId) ?? null;
   const selectedDrawingId = selectedDrawing?.id ?? null;
+  const activeAnchorIndex =
+    selectedDrawing && activeAnchor?.drawingId === selectedDrawing.id
+      ? Math.min(activeAnchor.index, selectedDrawing.anchors.length - 1)
+      : 0;
 
   const bars = useMemo(() => view?.bars ?? [], [view]);
   const dataset = view?.dataset ?? null;
@@ -282,6 +296,9 @@ export function ChartPanel({
     canvas.height = Math.floor(rect.height * dpr);
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
+    // A visible left index scale (comparison overlays) shifts the plot area to
+    // the right. Keep the drawing layer on the pane, not on the stage origin.
+    canvas.style.left = `${controller.paneLeft()}px`;
     const context = canvas.getContext('2d');
     if (!context) return;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -361,13 +378,16 @@ export function ChartPanel({
       // A locked drawing is still highlighted when selected, but its endpoints
       // are not interactive handles.
       if (selected && !drawing.locked) {
-        for (const point of resolved) {
+        const activeIndex = Math.min(activeAnchorIndex, resolved.length - 1);
+        for (let index = 0; index < resolved.length; index += 1) {
+          const point = resolved[index] as { x: number; y: number };
+          const active = index === activeIndex;
           context.beginPath();
-          context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          context.arc(point.x, point.y, active ? 6.5 : 5, 0, Math.PI * 2);
           context.fillStyle = labelColor;
           context.fill();
-          context.lineWidth = 1.5;
-          context.strokeStyle = drawing.style.color;
+          context.lineWidth = active ? 2.5 : 1.5;
+          context.strokeStyle = active ? drawing.style.color : labelColor;
           context.stroke();
         }
       }
@@ -388,7 +408,44 @@ export function ChartPanel({
         context.setLineDash([]);
       }
     }
-  }, [labelColor, localDrawings, selectedId, pendingAnchors, readout]);
+
+    // Axis endpoint tags are DOM nodes rather than canvas ink so they can paint
+    // over the chart library's axis labels and stay crisp at every DPR. The
+    // price axis shows every endpoint of the selected drawing; the time axis
+    // follows the endpoint that pointer or keyboard editing currently addresses.
+    const tagsHost = axisLabelsRef.current;
+    if (tagsHost) {
+      tagsHost.replaceChildren();
+      if (selectedDrawing && selectedDrawing.visible && !selectedDrawing.locked) {
+        const paneLeft = controller.paneLeft();
+        const entries = selectedDrawing.anchors
+          .map((anchor, index) => {
+            const y = controller.priceToY(anchor.price);
+            // Off-screen endpoints have no meaningful axis position; do not pin
+            // them to the nearest edge as if the price were visible.
+            if (y === null || y < 0 || y > rect.height) return null;
+            return { key: `anchor-${index}`, y, label: formatPrice(anchor.price) };
+          })
+          .filter((entry): entry is { key: string; y: number; label: string } => entry !== null);
+        for (const entry of stackAxisTags(entries, rect.height)) {
+          const tag = document.createElement('span');
+          tag.className = 'drawing-axis-label price';
+          tag.textContent = entry.label;
+          tag.style.top = `${entry.y}px`;
+          tagsHost.append(tag);
+        }
+        const currentAnchor = selectedDrawing.anchors[Math.min(activeAnchorIndex, selectedDrawing.anchors.length - 1)];
+        const activeX = currentAnchor ? controller.timeToX(currentAnchor.date) : null;
+        if (currentAnchor && activeX !== null && activeX >= 0 && activeX <= rect.width) {
+          const tag = document.createElement('span');
+          tag.className = 'drawing-axis-label time';
+          tag.textContent = currentAnchor.date;
+          tag.style.left = `${paneLeft + activeX}px`;
+          tagsHost.append(tag);
+        }
+      }
+    }
+  }, [activeAnchorIndex, labelColor, localDrawings, selectedId, selectedDrawing, pendingAnchors, readout]);
 
   useEffect(() => {
     draw();
@@ -453,6 +510,32 @@ export function ChartPanel({
     [commitDrawings],
   );
 
+  /**
+   * Moves the endpoint addressed by [ and ], one ordinary history step per
+   * keypress. Sessions come from the rendered timeframe, so a weekly panel moves
+   * between displayed weekly bars rather than seven calendar days.
+   */
+  const nudgeActiveAnchor = useCallback(
+    (sessionDelta: number, priceDelta: number) => {
+      const drawing = localDrawingsRef.current.find((entry) => entry.id === selectedDrawingId);
+      if (!drawing || drawing.locked || !drawing.visible) return;
+      const index = Math.min(Math.max(activeAnchorIndex, 0), drawing.anchors.length - 1);
+      const current = drawing.anchors[index];
+      if (!current) return;
+      const nextAnchor = nudgeDrawingAnchor(current, rendered.map((bar) => bar.date), {
+        sessions: sessionDelta,
+        price: priceDelta,
+      });
+      if (nextAnchor === current) return;
+      const anchors = replaceDrawingAnchor(drawing.anchors, index, nextAnchor);
+      if (anchors === drawing.anchors) return;
+      const next = localDrawingsRef.current.map((entry) => (entry.id === drawing.id ? { ...entry, anchors } : entry));
+      commitDrawings(next);
+      setAnchorAnnouncement(describeAnchor(drawing, index, nextAnchor));
+    },
+    [activeAnchorIndex, commitDrawings, rendered, selectedDrawingId],
+  );
+
   const undo = useCallback(() => {
     const previous = historyRef.current.past.pop();
     if (!previous) return;
@@ -505,7 +588,7 @@ export function ChartPanel({
     const controller = controllerRef.current;
     if (!controller) return null;
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
+    const x = event.clientX - rect.left - controller.paneLeft();
     const y = event.clientY - rect.top;
     const rawDate = controller.xToDate(x);
     const date = rawDate ? controller.nearestDate(rawDate) : null;
@@ -522,7 +605,8 @@ export function ChartPanel({
     // The shortcuts belong to this panel, so the pointer click takes focus.
     stageRef.current?.focus({ preventScroll: true });
     const rect = event.currentTarget.getBoundingClientRect();
-    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const paneLeft = controllerRef.current?.paneLeft() ?? 0;
+    const point = { x: event.clientX - rect.left - paneLeft, y: event.clientY - rect.top };
 
     if (tool === 'cursor') {
       const controller = controllerRef.current;
@@ -533,6 +617,8 @@ export function ChartPanel({
         const anchorIndex = hitTestDrawingAnchor(anchorScreenPoints(selectedDrawing, controller), point);
         if (anchorIndex !== null) {
           setSelectedId(selectedDrawing.id);
+          setActiveAnchor({ drawingId: selectedDrawing.id, index: anchorIndex });
+          setAnchorAnnouncement(describeAnchor(selectedDrawing, anchorIndex));
           dragRef.current = {
             kind: 'anchor',
             id: selectedDrawing.id,
@@ -586,7 +672,7 @@ export function ChartPanel({
     const controller = controllerRef.current;
     if (!controller) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const point = { x: event.clientX - rect.left - controller.paneLeft(), y: event.clientY - rect.top };
     const target = [...localDrawings]
       .reverse()
       .find((drawing) => drawing.type === 'text' && !drawing.locked && drawingHit(drawing, screenPoints(drawing, controller), point));
@@ -800,15 +886,55 @@ export function ChartPanel({
         event.preventDefault();
         if (event.shiftKey) redo();
         else undo();
+        return;
       }
+      // Endpoint editing is keyboard-accessible: [ and ] choose an endpoint and
+      // the arrows nudge it. Buttons keep their native arrow behaviour and the
+      // object list has its own keyboard model, so both are left alone.
+      if (!selectedDrawingId || drawingManagerOpen || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === '[' || event.key === ']') {
+        if (!selectedDrawing) return;
+        const anchors = selectedDrawing.anchors;
+        if (anchors.length === 0) return;
+        event.preventDefault();
+        const step = event.key === ']' ? 1 : anchors.length - 1;
+        const nextIndex = (activeAnchorIndex + step) % anchors.length;
+        setActiveAnchor({ drawingId: selectedDrawing.id, index: nextIndex });
+        setAnchorAnnouncement(describeAnchor(selectedDrawing, nextIndex));
+        return;
+      }
+      if (event.target instanceof HTMLElement && event.target.closest('button, a[href]')) return;
+      const sessionStep =
+        event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+      const priceStep =
+        event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+      if (sessionStep === 0 && priceStep === 0) return;
+      event.preventDefault();
+      nudgeActiveAnchor(
+        sessionStep * (event.shiftKey ? SESSION_NUDGE_LARGE_STEP : 1),
+        priceStep * (event.shiftKey ? PRICE_NUDGE_LARGE_STEP : PRICE_NUDGE_STEP),
+      );
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closeDrawingManager, drawingManagerOpen, focused, redo, removeSelected, selectTool, selectedDrawingId, undo]);
+  }, [
+    activeAnchorIndex,
+    closeDrawingManager,
+    drawingManagerOpen,
+    focused,
+    nudgeActiveAnchor,
+    redo,
+    removeSelected,
+    selectTool,
+    selectedDrawing,
+    selectedDrawingId,
+    undo,
+  ]);
 
   const { hoverBar, previousBar } = hoverBars(rendered, readout.index);
   const changePct = changePercent(hoverBar, previousBar);
   const tone = changePct === null ? undefined : changePct >= 0 ? 'up' : 'down';
+  const drawingHelpId = `drawing-help-${chart.id}`;
 
   return (
     <div className={focused ? 'chart-panel focused' : 'chart-panel'} onFocus={onFocus} tabIndex={-1}>
@@ -923,6 +1049,7 @@ export function ChartPanel({
             tabIndex={0}
             role="group"
             aria-label={`Price chart, ${instrument?.symbol ?? 'no dataset selected'}`}
+            aria-describedby={drawingHelpId}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -935,6 +1062,14 @@ export function ChartPanel({
               ref={canvasRef}
               className={tool === 'cursor' ? 'chart-overlay' : 'chart-overlay active'}
             />
+            <div ref={axisLabelsRef} className="drawing-axis-labels" aria-hidden="true" />
+            <p id={drawingHelpId} className="visually-hidden">
+              Select a drawing to show endpoint tags on the price and time axes. Press [ or ] to choose an
+              endpoint, then use the arrow keys to nudge it. Hold Shift for five sessions or ten price steps.
+            </p>
+            <span className="visually-hidden" role="status" aria-live="polite">
+              {anchorAnnouncement}
+            </span>
             <div className="chart-legend">
               <div className="legend-row">
                 <strong className="chart-symbol">{instrument?.symbol ?? '--'}</strong>
@@ -1205,6 +1340,15 @@ function renderDrawingShape(
     context.moveTo(second.x, first.y);
     context.lineTo(second.x, second.y);
   }
+}
+
+/**
+ * Human-readable endpoint description used by the live region. Passing the
+ * already-computed anchor avoids re-reading a stale drawing after a nudge.
+ */
+function describeAnchor(drawing: Drawing, index: number, anchor = drawing.anchors[index]): string {
+  if (!anchor) return '';
+  return `Endpoint ${index + 1} of ${drawing.anchors.length}: ${anchor.date}, ${formatPrice(anchor.price)}`;
 }
 
 /**

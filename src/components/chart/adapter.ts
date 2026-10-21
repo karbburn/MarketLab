@@ -455,6 +455,15 @@ export class ChartController {
     return { width, height };
   }
 
+  /**
+   * Stage-relative x of the plot area's left edge. The overlay canvas starts at
+   * this offset when a left price axis (comparison index scale) is visible.
+   */
+  paneLeft(): number {
+    const rightAxisWidth = this.chart.priceScale('right').width();
+    return Math.max(0, this.container.clientWidth - this.paneRect().width - rightAxisWidth);
+  }
+
   timeToX(date: string): number | null {
     const coordinate = this.chart.timeScale().timeToCoordinate(date as Time);
     if (coordinate === null) return null;

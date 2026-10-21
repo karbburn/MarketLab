@@ -559,6 +559,136 @@ test.describe('chart workspace', () => {
     expect(snapped.price).not.toBe(raw.price);
   });
 
+  test('shows endpoint tags on both axes, updates them while dragging, and hides them when locked', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const priceTags = page.locator('.drawing-axis-label.price');
+    const timeTag = page.locator('.drawing-axis-label.time');
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Trend line' }).click();
+    await stage.click({ position: { x: 260, y: 160 } });
+    await stage.click({ position: { x: 460, y: 90 } });
+
+    const created = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(created).toHaveLength(2);
+    await expect(priceTags).toHaveCount(2);
+    expect((await priceTags.allTextContents()).sort()).toEqual(
+      [formatPrice(created[0]!.price), formatPrice(created[1]!.price)].sort(),
+    );
+    await expect(timeTag).toHaveText(created[0]!.date);
+
+    // Dragging the first endpoint moves that price tag and the date tag.
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + 260, box!.y + 160);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 300, box!.y + 200, { steps: 8 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ price: number }>)[0]?.price)
+      .not.toBe(created[0]!.price);
+    const moved = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(await priceTags.allTextContents()).toContain(formatPrice(moved[0]!.price));
+    await expect(timeTag).toHaveText(moved[0]!.date);
+
+    // A locked drawing keeps no endpoint tags and refuses keyboard nudging.
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await manager.getByRole('button', { name: 'Lock Trend line' }).click();
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+    await expect(priceTags).toHaveCount(0);
+    await expect(timeTag).toHaveCount(0);
+
+    await stage.focus();
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(150);
+    expect((await readDrawings(page))[0]?.anchors).toEqual(moved);
+  });
+
+  test('nudges one endpoint with the keyboard and persists it across a reload', async ({ page }) => {
+    const sessions = buildFixtureBars(1013, 100).map((bar) => bar.date);
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Trend line' }).click();
+    await stage.click({ position: { x: 260, y: 160 } });
+    await stage.click({ position: { x: 460, y: 90 } });
+
+    const before = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    const firstIndex = sessions.indexOf(before[0]!.date);
+    expect(firstIndex).toBeGreaterThanOrEqual(0);
+
+    await page.keyboard.press('ArrowRight');
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string }>)[0]?.date)
+      .toBe(sessions[firstIndex + 1]);
+    expect(((await readDrawings(page))[0]?.anchors as Array<{ date: string }>)[1]?.date).toBe(before[1]!.date);
+
+    await page.keyboard.press('ArrowUp');
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ price: number }>)[0]?.price)
+      .toBeCloseTo(before[0]!.price + 0.01, 5);
+
+    await page.keyboard.press('Shift+ArrowUp');
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ price: number }>)[0]?.price)
+      .toBeCloseTo(before[0]!.price + 0.11, 5);
+
+    // ] switches to the second endpoint, so the next nudge leaves the first alone.
+    const afterFirst = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    const secondIndex = sessions.indexOf(before[1]!.date);
+    expect(secondIndex).toBeGreaterThan(0);
+    await page.keyboard.press(']');
+    await page.keyboard.press('ArrowLeft');
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string }>)[1]?.date)
+      .toBe(sessions[secondIndex - 1]);
+    const afterSecond = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(afterSecond[0]).toEqual(afterFirst[0]);
+
+    // One keypress is one ordinary history step.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect
+      .poll(async () => ((await readDrawings(page))[0]?.anchors as Array<{ date: string }>)[1]?.date)
+      .toBe(before[1]!.date);
+
+    await page.reload();
+    await waitForChart(page);
+    const reloaded = (await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>;
+    expect(reloaded[0]).toEqual(afterFirst[0]);
+    expect(reloaded[1]).toEqual(before[1]);
+  });
+
+  test('keeps endpoint tags inside a narrow light chart', async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 800 });
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    await waitForChart(page);
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+
+    await page.getByRole('button', { name: 'Trend line' }).click();
+    await stage.click({ position: { x: 200, y: 150 } });
+    await stage.click({ position: { x: 380, y: 90 } });
+
+    const priceTags = page.locator('.drawing-axis-label.price');
+    await expect(priceTags).toHaveCount(2);
+    const stageBox = await stage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    for (let index = 0; index < 2; index += 1) {
+      const tagBox = await priceTags.nth(index).boundingBox();
+      expect(tagBox).not.toBeNull();
+      expect(tagBox!.x).toBeGreaterThanOrEqual(stageBox!.x - 1);
+      expect(tagBox!.x + tagBox!.width).toBeLessThanOrEqual(stageBox!.x + stageBox!.width + 1);
+      expect(tagBox!.y).toBeGreaterThanOrEqual(stageBox!.y - 1);
+    }
+    const timeBox = await page.locator('.drawing-axis-label.time').boundingBox();
+    expect(timeBox).not.toBeNull();
+    expect(timeBox!.y + timeBox!.height).toBeLessThanOrEqual(stageBox!.y + stageBox!.height + 1);
+  });
+
   test('manages drawing visibility, locking and deletion from the object list', async ({ page }) => {
     await page.goto('/#/chart');
     const stage = page.locator('.chart-stage').first();

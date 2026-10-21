@@ -128,6 +128,104 @@ export function replaceDrawingAnchor(
   return updated;
 }
 
+/** One displayed price step for keyboard nudging (two decimal places). */
+export const PRICE_NUDGE_STEP = 0.01;
+
+/** Shift+Arrow price step, ten displayed price steps. */
+export const PRICE_NUDGE_LARGE_STEP = 0.1;
+
+/** Shift+Arrow session step, five rendered bars. */
+export const SESSION_NUDGE_LARGE_STEP = 5;
+
+/** Height of one axis endpoint tag in CSS pixels. */
+export const AXIS_TAG_HEIGHT_PX = 18;
+
+/**
+ * Moves one anchor by rendered sessions and price steps.
+ *
+ * The session list is the currently rendered timeframe, so a weekly or monthly
+ * chart moves between displayed bars rather than calendar days. When the stored
+ * date is no longer in the series (for example after a dataset change), the
+ * nearest session is used instead of jumping to an arbitrary bar.
+ */
+export function nudgeDrawingAnchor(
+  anchor: DrawingAnchor,
+  sessions: readonly string[],
+  delta: { sessions: number; price: number },
+): DrawingAnchor {
+  if (delta.sessions === 0 && delta.price === 0) return anchor;
+  if (sessions.length === 0 && delta.sessions !== 0) return anchor;
+  let date = anchor.date;
+  if (delta.sessions !== 0) {
+    let index = sessions.indexOf(anchor.date);
+    if (index < 0) {
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let candidate = 0; candidate < sessions.length; candidate += 1) {
+        const session = sessions[candidate] as string;
+        const distance = Math.abs(Date.parse(session) - Date.parse(anchor.date));
+        if (Number.isFinite(distance) && distance < bestDistance) {
+          bestDistance = distance;
+          index = candidate;
+        }
+      }
+    }
+    if (index >= 0) {
+      const nextIndex = Math.max(0, Math.min(sessions.length - 1, index + delta.sessions));
+      date = sessions[nextIndex] ?? anchor.date;
+    }
+  }
+  // Eight decimals remove binary floating-point drift from repeated 0.01 steps
+  // without imposing the chart's display precision on the stored value.
+  const price = Math.round((anchor.price + delta.price) * 1e8) / 1e8;
+  if (date === anchor.date && price === anchor.price) return anchor;
+  return { date, price };
+}
+
+export interface AxisTag {
+  key: string;
+  y: number;
+  label: string;
+}
+
+/**
+ * Orders endpoint tags along a price axis so two nearby endpoints do not paint
+ * on top of each other. Tags with identical text are collapsed, and the final
+ * stack is clamped inside the axis height.
+ */
+export function stackAxisTags(
+  entries: readonly AxisTag[],
+  extent: number,
+  tagHeight = AXIS_TAG_HEIGHT_PX,
+  gap = 2,
+): AxisTag[] {
+  const height = Math.max(1, extent);
+  const half = tagHeight / 2;
+  const seen = new Set<string>();
+  const unique: AxisTag[] = [];
+  for (const entry of entries) {
+    if (!Number.isFinite(entry.y) || seen.has(entry.label)) continue;
+    seen.add(entry.label);
+    unique.push(entry);
+  }
+  unique.sort((left, right) => left.y - right.y || left.key.localeCompare(right.key));
+
+  const minY = Math.min(half, height / 2);
+  const maxY = Math.max(minY, height - half);
+  let cursor = Number.NEGATIVE_INFINITY;
+  const placed = unique.map((entry) => {
+    let y = Math.max(minY, Math.min(maxY, entry.y));
+    if (cursor > Number.NEGATIVE_INFINITY) y = Math.max(y, cursor + tagHeight + gap);
+    cursor = y;
+    return { ...entry, y };
+  });
+
+  const overflow = (placed[placed.length - 1]?.y ?? 0) + half - height;
+  if (overflow > 0) {
+    for (const entry of placed) entry.y = Math.max(minY, entry.y - overflow);
+  }
+  return placed;
+}
+
 /** The open, high, low or close value closest to the pointer's raw price. */
 export function nearestOhlcPrice(
   price: number,
