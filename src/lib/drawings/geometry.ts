@@ -268,10 +268,26 @@ export function snapPriceToBar(
  * positions of each anchor, so this helper stays independent of the chart engine
  * and can be unit tested directly.
  */
-export function hitTestDrawing(screenAnchors: readonly ScreenPoint[], type: DrawingType, point: ScreenPoint, tolerance = 6): boolean {
+export function hitTestDrawing(
+  screenAnchors: readonly ScreenPoint[],
+  type: DrawingType,
+  point: ScreenPoint,
+  tolerance = 6,
+  textBox?: TextLabelBox | null,
+): boolean {
   if (screenAnchors.length === 0) return false;
+  if (type === 'text' && textBox) {
+    return (
+      point.x >= textBox.x - tolerance &&
+      point.x <= textBox.x + textBox.width + tolerance &&
+      point.y >= textBox.y - tolerance &&
+      point.y <= textBox.y + textBox.height + tolerance
+    );
+  }
   if (screenAnchors.length === 1) {
     const anchor = screenAnchors[0] as ScreenPoint;
+    if (type === 'horizontal-line') return Math.abs(point.y - anchor.y) <= tolerance;
+    if (type === 'vertical-line') return Math.abs(point.x - anchor.x) <= tolerance;
     return Math.hypot(point.x - anchor.x, point.y - anchor.y) <= tolerance * 2;
   }
   if (type === 'horizontal-line') {
@@ -290,17 +306,76 @@ export function hitTestDrawing(screenAnchors: readonly ScreenPoint[], type: Draw
       const maxX = Math.max(start.x, end.x) + tolerance;
       const minY = Math.min(start.y, end.y) - tolerance;
       const maxY = Math.max(start.y, end.y) + tolerance;
-      const nearEdge =
-        Math.abs(point.x - minX) <= tolerance ||
-        Math.abs(point.x - maxX) <= tolerance ||
-        Math.abs(point.y - minY) <= tolerance ||
-        Math.abs(point.y - maxY) <= tolerance;
-      if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY && nearEdge) return true;
+      // The renderer fills the rectangle, so its whole painted area is a target.
+      if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) return true;
       continue;
     }
     if (distanceToSegment(point, start, end) <= tolerance) return true;
   }
   return false;
+}
+
+export interface TextLabelBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Width per pixel of font size used when no canvas measurement is available. */
+const TEXT_WIDTH_ESTIMATE_RATIO = 0.62;
+/** Canvas `fillText` paints from the baseline; these split a font size around it. */
+const TEXT_ASCENT_RATIO = 0.8;
+const TEXT_DESCENT_RATIO = 0.2;
+/** The renderer paints a label six pixels right of and four pixels above its anchor. */
+const TEXT_LABEL_OFFSET_X = 6;
+const TEXT_LABEL_OFFSET_Y = 4;
+
+/**
+ * The painted box of a chart text label, in the same pane coordinates as the
+ * anchor handles. Callers that can measure the text should pass `measuredWidth`;
+ * the fallback is only for tests and for a label painted before measurement.
+ */
+export function textLabelBox(
+  anchor: ScreenPoint,
+  text: string,
+  fontSize: number,
+  measuredWidth?: number,
+): TextLabelBox {
+  const width = measuredWidth ?? text.length * fontSize * TEXT_WIDTH_ESTIMATE_RATIO;
+  const baseline = anchor.y - TEXT_LABEL_OFFSET_Y;
+  return {
+    x: anchor.x + TEXT_LABEL_OFFSET_X,
+    y: baseline - fontSize * TEXT_ASCENT_RATIO,
+    width,
+    height: fontSize * (TEXT_ASCENT_RATIO + TEXT_DESCENT_RATIO),
+  };
+}
+
+/**
+ * Body hit-testing for a stored drawing.
+ *
+ * Hidden drawings are not painted and never intercept the pointer. An anchor
+ * that cannot be projected is a hole, not a shorter shape: the renderer skips
+ * the whole drawing, so hit-testing must refuse it too. Locked drawings remain
+ * selectable so the object list can inspect and unlock them; movement is
+ * refused separately by the pointer handler.
+ */
+export function hitTestVisibleDrawing(
+  drawing: { visible: boolean; type: DrawingType },
+  screenAnchors: readonly (ScreenPoint | null)[],
+  point: ScreenPoint,
+  options: { tolerance?: number; textBox?: TextLabelBox | null } = {},
+): boolean {
+  if (!drawing.visible || screenAnchors.length === 0) return false;
+  if (screenAnchors.some((anchor) => anchor === null)) return false;
+  return hitTestDrawing(
+    screenAnchors as ScreenPoint[],
+    drawing.type,
+    point,
+    options.tolerance,
+    options.textBox,
+  );
 }
 
 export function sortAnchorsByDate(anchors: readonly DrawingAnchor[]): DrawingAnchor[] {

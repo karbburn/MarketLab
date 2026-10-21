@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   BacktestConfig,
+  BacktestRun,
   Bar,
+  ChartTemplate,
   Dataset,
   Instrument,
   ScreenerDefinition,
@@ -18,6 +20,8 @@ import { normaliseCompareSelections } from '../lib/workspace/compare-selections'
 import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
+import { planResearchRunSave } from '../lib/backtest/research-runs';
+import { parseBacktestRun } from '../lib/workspace/schema';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 
@@ -47,6 +51,8 @@ export interface AppState {
   preferences: UserPreferences;
   screeners: ScreenerDefinition[];
   backtests: BacktestConfig[];
+  chartTemplates: ChartTemplate[];
+  backtestRuns: BacktestRun[];
   toasts: Toast[];
 }
 
@@ -70,6 +76,11 @@ export interface StoreActions {
   deleteScreener(screenerId: string): Promise<void>;
   saveBacktest(config: BacktestConfig): Promise<void>;
   deleteBacktest(backtestId: string): Promise<void>;
+  saveChartTemplate(template: ChartTemplate): Promise<void>;
+  deleteChartTemplate(templateId: string): Promise<void>;
+  /** Saves an immutable run; resolves false and reports why when it cannot. */
+  saveBacktestRun(run: BacktestRun): Promise<boolean>;
+  deleteBacktestRun(runId: string): Promise<void>;
   setPreferences(partial: Partial<UserPreferences>): Promise<void>;
   restoreBackup(bundle: BackupBundle, mode: 'merge' | 'replace'): Promise<void>;
   resetAll(): Promise<void>;
@@ -101,6 +112,8 @@ const EMPTY_STATE: AppState = {
   preferences: DEFAULT_PREFERENCES,
   screeners: [],
   backtests: [],
+  chartTemplates: [],
+  backtestRuns: [],
   toasts: [],
 };
 
@@ -112,6 +125,8 @@ const LOAD_STORES: StoreName[] = [
   'watchlists',
   'screeners',
   'backtests',
+  'chartTemplates',
+  'researchRuns',
   'preferences',
   'settings',
 ];
@@ -126,6 +141,8 @@ interface LoadedSnapshot {
   preferences: UserPreferences;
   screeners: ScreenerDefinition[];
   backtests: BacktestConfig[];
+  chartTemplates: ChartTemplate[];
+  backtestRuns: BacktestRun[];
 }
 
 /**
@@ -135,11 +152,11 @@ interface LoadedSnapshot {
  * Exported so the migration's atomicity can be tested with a stub adapter.
  */
 export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
-  const { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings } =
+  const { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings } =
     await adapter.transaction(
       LOAD_STORES,
       async (tx) => {
-        const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings] = await Promise.all([
+        const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings] = await Promise.all([
           tx.list<Instrument>('instruments'),
           tx.list<Dataset>('datasets'),
           tx.list<BarsRecord>('bars'),
@@ -147,10 +164,12 @@ export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot
           tx.list<Watchlist>('watchlists'),
           tx.list<ScreenerDefinition>('screeners'),
           tx.list<BacktestConfig>('backtests'),
+          tx.list<ChartTemplate>('chartTemplates'),
+          tx.list<BacktestRun>('researchRuns'),
           tx.list<PreferencesRecord>('preferences'),
           tx.list<SettingsRecord>('settings'),
         ]);
-        return { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, preferencesRecords, settings };
+        return { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings };
       },
       { mode: 'readonly', notify: false },
     );
@@ -234,6 +253,8 @@ export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot
       preferences,
       screeners: nextScreeners,
       backtests: nextBacktests,
+      chartTemplates,
+      backtestRuns,
     },
     notice: cleanup.changed ? describeCleanup(cleanup) : null,
   };
@@ -675,6 +696,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     },
 
+    async saveChartTemplate(template) {
+      if (!adapter) return;
+      try {
+        const updated = { ...template, updatedAt: new Date().toISOString() };
+        await adapter.put('chartTemplates', updated);
+        setState((previous) => ({ ...previous, chartTemplates: upsertById(previous.chartTemplates, updated) }));
+        notify('success', `Saved template "${updated.name}".`);
+      } catch (error) {
+        notify('error', `Could not save the template: ${errorMessage(error)}`);
+      }
+    },
+
+    async deleteChartTemplate(templateId) {
+      if (!adapter) return;
+      try {
+        await adapter.remove('chartTemplates', templateId);
+        setState((previous) => ({
+          ...previous,
+          chartTemplates: previous.chartTemplates.filter((entry) => entry.id !== templateId),
+        }));
+      } catch (error) {
+        notify('error', `Could not delete the template: ${errorMessage(error)}`);
+      }
+    },
+
+    async saveBacktestRun(run) {
+      if (!adapter) return false;
+      const parsed = parseBacktestRun(run);
+      if (!parsed.ok) {
+        notify('error', `The research run is invalid: ${parsed.error}`);
+        return false;
+      }
+      const decision = planResearchRunSave(stateRef.current.backtestRuns, parsed.value);
+      if (!decision.ok) {
+        notify('error', decision.message);
+        return false;
+      }
+      try {
+        await adapter.put('researchRuns', parsed.value);
+        setState((previous) => ({ ...previous, backtestRuns: upsertById(previous.backtestRuns, parsed.value) }));
+        notify('success', `Saved research run "${parsed.value.name}".`);
+        return true;
+      } catch (error) {
+        notify('error', `Could not save the research run: ${errorMessage(error)}`);
+        return false;
+      }
+    },
+
+    async deleteBacktestRun(runId) {
+      if (!adapter) return;
+      try {
+        await adapter.remove('researchRuns', runId);
+        setState((previous) => ({ ...previous, backtestRuns: previous.backtestRuns.filter((entry) => entry.id !== runId) }));
+      } catch (error) {
+        notify('error', `Could not delete the research run: ${errorMessage(error)}`);
+      }
+    },
+
     async setPreferences(partial) {
       if (!adapter) return;
       // Paint the new palette before React re-renders the charts.
@@ -706,6 +785,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           watchlists: base.watchlists,
           screeners: base.screeners,
           backtests: base.backtests,
+          chartTemplates: base.chartTemplates,
+          researchRuns: base.backtestRuns,
         },
         bundle,
       );
@@ -737,7 +818,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // none of it does. Pruning happens inside it, so a quota failure cannot
         // erase the previous library before the replacement is written.
         await adapter.transaction(
-          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'preferences'],
+          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'chartTemplates', 'researchRuns', 'preferences'],
           async (tx) => {
             const previousDatasetIds = mode === 'replace'
               ? (await tx.list<{ id: string }>('datasets')).map((record) => record.id)
@@ -749,6 +830,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             await tx.putMany('watchlists', merged.watchlists);
             await tx.putMany('screeners', merged.screeners);
             await tx.putMany('backtests', merged.backtests);
+            await tx.putMany('chartTemplates', merged.chartTemplates);
+            await tx.putMany('researchRuns', merged.researchRuns);
             if (mode === 'replace') {
               await removeRecordsNotIn(tx, 'instruments', merged.instruments);
               await removeRecordsNotIn(tx, 'datasets', merged.datasets);
@@ -760,6 +843,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await removeRecordsNotIn(tx, 'watchlists', merged.watchlists);
               await removeRecordsNotIn(tx, 'screeners', merged.screeners);
               await removeRecordsNotIn(tx, 'backtests', merged.backtests);
+              await removeRecordsNotIn(tx, 'chartTemplates', merged.chartTemplates);
+              await removeRecordsNotIn(tx, 'researchRuns', merged.researchRuns);
             }
             if (bundle.preferences) {
               await tx.put<PreferencesRecord>('preferences', { id: 'preferences', ...bundle.preferences });
@@ -790,6 +875,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         watchlists: merged.watchlists,
         screeners: merged.screeners,
         backtests: merged.backtests,
+        chartTemplates: merged.chartTemplates,
+        backtestRuns: merged.researchRuns,
         preferences: nextPreferences,
       }));
 
@@ -812,9 +899,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await Promise.allSettled([...writeQueues.current.values()]);
       try {
         await adapter.transaction(
-          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'],
+          ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'chartTemplates', 'researchRuns', 'settings'],
           async (tx) => {
-            for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'settings'] as StoreName[]) {
+            for (const store of ['instruments', 'datasets', 'bars', 'workspaces', 'watchlists', 'screeners', 'backtests', 'chartTemplates', 'researchRuns', 'settings'] as StoreName[]) {
               await tx.clear(store);
             }
             await tx.put<SettingsRecord>('settings', {

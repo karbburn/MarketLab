@@ -1780,6 +1780,12 @@ table.data tr.dim td {
   gap: 10px;
 }
 
+.template-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
 .stack {
   display: grid;
   gap: 8px;
@@ -2898,4 +2904,25 @@ table.data tr.dim td {
   .learn-fact-value {
     transition: none;
   }
+}
+
+/* Saved research runs */
+.fingerprint {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.research-verification {
+  background: var(--surface-inset);
+}
+
+.research-assumptions summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.research-assumptions[open] summary {
+  margin-bottom: 8px;
 }

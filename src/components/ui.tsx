@@ -359,7 +359,9 @@ export function Segmented<T extends string>({
   );
 }
 
-export function Tag({ tone, children }: { tone?: 'accent' | 'up' | 'down' | 'warn'; children: ReactNode }) {
+export type TagTone = 'accent' | 'up' | 'down' | 'warn';
+
+export function Tag({ tone, children }: { tone?: TagTone; children: ReactNode }) {
   return <span className={tone ? `tag ${tone}` : 'tag'}>{children}</span>;
 }
 

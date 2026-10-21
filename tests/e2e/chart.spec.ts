@@ -1053,4 +1053,148 @@ test.describe('chart workspace', () => {
     expect(await focusInsidePanel()).toBe(false);
     expect(await readDrawings(page)).toHaveLength(1);
   });
+
+  test('saves a chart template, applies it without touching drawings, and keeps both after a reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const chartType = page.getByLabel('Chart type').first();
+    const priceScale = page.getByLabel('Price scale').first();
+    const timeframe = page.getByRole('group', { name: 'Timeframe' }).first();
+    const indicatorFoot = page.locator('.panel-foot').first();
+
+    // Build a distinctive presentation: weekly log bars, no volume, one SMA.
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    const indicatorDialog = page.getByRole('dialog', { name: 'Indicators' });
+    await indicatorDialog.locator('button.nav-item', { hasText: 'Simple Moving Average' }).click();
+    await indicatorDialog.getByRole('button', { name: 'Add to chart' }).click();
+    await expect(indicatorDialog).toBeHidden();
+    await expect(indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 20' })).toHaveCount(1);
+
+    await chartType.selectOption('bar');
+    await priceScale.selectOption('logarithmic');
+    await timeframe.getByRole('button', { name: '1W' }).click();
+    await page.getByRole('switch', { name: 'Volume pane' }).click();
+    await expect(page.getByRole('switch', { name: 'Volume pane' })).toHaveAttribute('aria-checked', 'false');
+
+    // A drawing on the panel must survive both saving and applying a template.
+    const stage = page.locator('.chart-stage').first();
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await stage.click({ position: { x: 320, y: 140 } });
+    expect(await readDrawings(page)).toHaveLength(1);
+    const savedAnchors = (await readDrawings(page))[0]?.anchors;
+
+    const templates = page.getByRole('dialog', { name: 'Chart templates' });
+    await page.getByRole('button', { name: 'Chart templates' }).click();
+    await expect(templates).toBeVisible();
+    await templates.getByLabel('Template name').fill('Weekly review');
+    await templates.getByRole('button', { name: 'Save template' }).click();
+    await expect(templates.locator('.template-row').filter({ hasText: 'Weekly review' })).toHaveCount(1);
+    await templates.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(templates).toBeHidden();
+
+    // Change everything the template owns, including removing the indicator.
+    await chartType.selectOption('line');
+    await priceScale.selectOption('normal');
+    await timeframe.getByRole('button', { name: '1D' }).click();
+    await page.getByRole('switch', { name: 'Volume pane' }).click();
+    await indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 20' }).click();
+    await expect(page.locator('.indicator-legend-item')).toHaveCount(0);
+
+    // Apply the template from the panel it was saved on.
+    await page.getByRole('button', { name: 'Chart templates' }).click();
+    await expect(templates).toBeVisible();
+    await templates.locator('.template-row').filter({ hasText: 'Weekly review' }).getByRole('button', { name: 'Apply' }).click();
+    await expect(templates).toBeHidden();
+    await waitForChart(page);
+
+    await expect(chartType).toHaveValue('bar');
+    await expect(priceScale).toHaveValue('logarithmic');
+    await expect(timeframe.getByRole('button', { name: '1W' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('switch', { name: 'Volume pane' })).toHaveAttribute('aria-checked', 'false');
+    await expect(indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 20' })).toHaveCount(1);
+
+    // The destination series and annotations are untouched by the template.
+    await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
+    const drawings = await readDrawings(page);
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]?.anchors).toEqual(savedAnchors);
+
+    // The template library and the applied presentation both persist.
+    await page.reload();
+    await waitForChart(page);
+    await expect(page.getByLabel('Chart type').first()).toHaveValue('bar');
+    await expect(page.getByLabel('Price scale').first()).toHaveValue('logarithmic');
+    await expect(page.locator('.panel-foot').first().getByText('Simple Moving Average 20')).toBeVisible();
+    expect(await readDrawings(page)).toHaveLength(1);
+
+    await page.getByRole('button', { name: 'Chart templates' }).click();
+    await expect(templates).toBeVisible();
+    await expect(templates.locator('.template-row').filter({ hasText: 'Weekly review' })).toHaveCount(1);
+  });
+
+  test('ignores a hidden drawing on canvas and still selects a locked one without moving it', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Horizontal level' }).click();
+    await stage.click({ position: { x: 300, y: 140 } });
+    await expect(deleteSelected).toBeEnabled();
+
+    // Hidden drawings are not painted, so they must not own the pointer.
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    const manager = page.getByRole('region', { name: 'Drawing objects' });
+    await manager.getByRole('button', { name: 'Hide Horizontal level' }).click();
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+    await stage.click({ position: { x: 320, y: 140 } });
+    await expect(deleteSelected).toBeDisabled();
+
+    // Showing it makes the same line selectable again.
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    await manager.getByRole('button', { name: 'Show Horizontal level' }).click();
+    await manager.getByRole('button', { name: 'Lock Horizontal level' }).click();
+    await expect.poll(async () => (await readDrawings(page))[0]?.locked).toBe(true);
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+
+    // Locking must not make the drawing unreachable: a body click selects it,
+    // which is what lets the manager inspect and unlock it.
+    await stage.click({ position: { x: 320, y: 140 } });
+    await expect(deleteSelected).toBeDisabled();
+    await page.getByRole('button', { name: 'Drawing objects' }).click();
+    await expect(manager.getByRole('button', { name: 'Select Horizontal level' })).toHaveAttribute('aria-current', 'true');
+    await manager.getByRole('button', { name: 'Close drawing objects' }).click();
+
+    // A locked drawing is selectable but immovable.
+    const before = (await readDrawings(page))[0]?.anchors;
+    const box = await stage.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + 320, box!.y + 140);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 420, box!.y + 170, { steps: 8 });
+    await page.mouse.up();
+    expect((await readDrawings(page))[0]?.anchors).toEqual(before);
+  });
+
+  test('selects a text label from its painted text, not only from its anchor', async ({ page }) => {
+    await page.goto('/#/chart');
+    const stage = page.locator('.chart-stage').first();
+    const editor = page.getByRole('textbox', { name: 'Drawing label' });
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
+    await waitForChart(page);
+
+    await page.getByRole('button', { name: 'Text label' }).click();
+    await stage.click({ position: { x: 300, y: 150 } });
+    await editor.fill('Breakout label');
+    await editor.press('Enter');
+    await expect(editor).toBeHidden();
+
+    // Deselect, then click inside the painted words well to the right of the
+    // anchor. The old anchor-radius hit test could not reach this point.
+    await stage.click({ position: { x: 120, y: 230 } });
+    await expect(deleteSelected).toBeDisabled();
+    await stage.click({ position: { x: 380, y: 142 } });
+    await expect(deleteSelected).toBeEnabled();
+  });
 });

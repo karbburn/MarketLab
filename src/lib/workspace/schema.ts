@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CHART_TYPES, type Workspace } from '../../domain/types';
+import { CHART_TYPES, type BacktestRun, type ChartTemplate, type Workspace } from '../../domain/types';
 import { isDateString } from '../date';
 import { anchorsRequired } from '../drawings/geometry';
 
@@ -56,6 +56,26 @@ const indicatorInstanceSchema = z.object({
   visible: z.boolean(),
   placement: z.enum(['overlay', 'pane']),
   style: indicatorStyleSchema,
+});
+
+export const CHART_TEMPLATE_SCHEMA_VERSION = 1;
+
+/**
+ * A template captures presentation only. The schema has no dataset, instrument,
+ * range, comparison or drawing fields, so a template from another library can
+ * still be applied without dangling references.
+ */
+export const chartTemplateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  schemaVersion: z.number().int().nonnegative(),
+  chartType: z.enum(CHART_TYPES),
+  priceScaleMode: z.enum(['normal', 'logarithmic', 'percentage']),
+  showVolume: z.boolean(),
+  timeframe: z.enum(['1D', '1W', '1M']),
+  indicators: z.array(indicatorInstanceSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const visibleRangeSchema = z
@@ -257,6 +277,88 @@ export const backtestConfigSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const RESEARCH_RUN_SCHEMA_VERSION = 1;
+
+const backtestMetricsSchema = z.object({
+  totalReturnPct: z.number().finite(),
+  cagrPct: z.number().finite().nullable(),
+  annualisedVolatilityPct: z.number().finite(),
+  maxDrawdownPct: z.number().finite(),
+  sharpe: z.number().finite().nullable(),
+  tradeCount: z.number().int().nonnegative(),
+  winRatePct: z.number().finite().nullable(),
+  profitFactor: z.number().finite().nullable(),
+  averageTradePct: z.number().finite().nullable(),
+  exposurePct: z.number().finite(),
+  benchmarkTotalReturnPct: z.number().finite(),
+});
+
+const backtestTradeSchema = z.object({
+  entryDate: dateString,
+  entryPrice: z.number().finite().positive(),
+  exitDate: dateString,
+  exitPrice: z.number().finite().positive(),
+  quantity: z.number().finite().positive(),
+  grossPnl: z.number().finite(),
+  costs: z.number().finite().nonnegative(),
+  netPnl: z.number().finite(),
+  returnPct: z.number().finite(),
+  barsHeld: z.number().int().nonnegative(),
+  exitReason: z.enum(['signal', 'stop-loss', 'take-profit', 'end-of-data']),
+});
+
+const backtestRunDatasetSchema = z.object({
+  datasetId: z.string().min(1),
+  instrumentId: z.string().min(1),
+  instrumentSymbol: z.string(),
+  datasetName: z.string(),
+  frequency: z.enum(['daily', 'weekly', 'monthly']),
+  contentHash: z.string().min(1),
+  windowFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/, 'Expected a SHA-256 window fingerprint.'),
+  windowStart: dateString,
+  windowEnd: dateString,
+  barCount: z.number().int().nonnegative(),
+});
+
+/**
+ * A saved research run. It carries the configuration and the outputs, but no
+ * bars and no equity curve: the inputs are identified by hash and window
+ * fingerprint instead of being duplicated into the record.
+ */
+export const backtestRunSchema = z.object({
+  id: z.string().min(1),
+  schemaVersion: z.number().int().nonnegative(),
+  name: z.string().min(1),
+  createdAt: z.string(),
+  engineVersion: z.string().min(1),
+  config: backtestConfigSchema,
+  dataset: backtestRunDatasetSchema,
+  assumptions: z.array(z.string().min(1)),
+  metrics: backtestMetricsSchema,
+  trades: z.array(backtestTradeSchema),
+});
+
+/**
+ * Parses a stored or imported research run. A run written by a newer build is
+ * rejected rather than coerced, exactly like a workspace or a template.
+ */
+export function parseBacktestRun(input: unknown): { ok: true; value: BacktestRun } | { ok: false; error: string } {
+  if (input && typeof input === 'object' && 'schemaVersion' in input) {
+    const version = (input as { schemaVersion?: unknown }).schemaVersion;
+    if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
+      return { ok: false, error: 'The research run schema version is missing or invalid.' };
+    }
+    if (version > RESEARCH_RUN_SCHEMA_VERSION) {
+      return { ok: false, error: `This research run was saved by a newer version (schema ${version}).` };
+    }
+  }
+  const parsed = backtestRunSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues.map((issue) => `${issue.path.join('.') || 'run'}: ${issue.message}`).join('; ') };
+  }
+  return { ok: true, value: parsed.data as BacktestRun };
+}
+
 /**
  * Parses and, when needed, upgrades a stored or imported workspace.
  *
@@ -291,4 +393,25 @@ function migrateWorkspace(input: Record<string, unknown>, fromVersion: number): 
     working = { ...working, schemaVersion: 1 };
   }
   return working;
+}
+
+/**
+ * Validates a stored or imported template. A template written by a newer build
+ * is rejected instead of being coerced, exactly like a workspace.
+ */
+export function parseChartTemplate(input: unknown): { ok: true; value: ChartTemplate } | { ok: false; error: string } {
+  if (input && typeof input === 'object' && 'schemaVersion' in input) {
+    const version = (input as { schemaVersion?: unknown }).schemaVersion;
+    if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
+      return { ok: false, error: 'The template schema version is missing or invalid.' };
+    }
+    if (version > CHART_TEMPLATE_SCHEMA_VERSION) {
+      return { ok: false, error: `This template was saved by a newer version (schema ${version}).` };
+    }
+  }
+  const parsed = chartTemplateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues.map((issue) => `${issue.path.join('.') || 'template'}: ${issue.message}`).join('; ') };
+  }
+  return { ok: true, value: parsed.data as ChartTemplate };
 }

@@ -35,6 +35,25 @@ import { evaluateRules, requiredWarmup, StrategyContext } from './rules';
  * 8. The benchmark is a buy-and-hold of the same instrument over the same
  *    window, starting from the same initial capital, with no costs.
  */
+export const BACKTEST_ENGINE_VERSION = '1.0.0';
+
+/**
+ * The assumptions above, in display order, so the research screens and the
+ * engine documentation cannot drift. Saved research runs record this list as it
+ * was at the time of the run.
+ */
+export const BACKTEST_ASSUMPTIONS: readonly string[] = [
+  "Signals are evaluated on a session's close. Orders fill at the next session's open. There is no same-bar fill and no look-ahead.",
+  'Slippage is applied adversely on entry and again on exit. Commission is charged on the traded notional at entry and at exit.',
+  'Position size is a fixed percentage of the equity at entry, and the resulting share count is fractional. The entry commission is paid out of that percentage. No lot rounding, no margin, no leverage beyond that percentage.',
+  "If a session's range touches both the stop and the target, the stop is assumed to fill first. That is the conservative choice.",
+  'A stop is a sell stop: it fills at the stop price, except when the session opens through it, in which case it fills at the open. The target is booked at the target price even if the session gaps above it. Adverse slippage applies to both.',
+  'A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.',
+  'Volatility, the Sharpe ratio and exposure are annualised at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year.',
+  'The buy-and-hold benchmark uses the same initial capital over the same window with no costs.',
+  'Only long positions are simulated. Short selling is not modelled.',
+];
+
 export interface EngineOptions {
   bars: readonly Bar[];
   config: BacktestConfig;
@@ -51,7 +70,7 @@ interface OpenPosition {
 }
 
 export function runBacktest(bars: readonly Bar[], config: BacktestConfig, frequency: Frequency = 'daily'): BacktestResult {
-  const windowBars = sliceWindow(bars, config.startDate, config.endDate);
+  const windowBars = selectBacktestWindow(bars, config.startDate, config.endDate);
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestResult['equityCurve'] = [];
   const initialCapital = config.initialCapital > 0 ? config.initialCapital : 10_000;
@@ -184,7 +203,15 @@ export function runBacktest(bars: readonly Bar[], config: BacktestConfig, freque
   };
 }
 
-function sliceWindow(bars: readonly Bar[], startDate: DateString | null, endDate: DateString | null): Bar[] {
+/**
+ * The exact bars a run consumes. Exported so a saved run's fingerprint is taken
+ * over the same slice the engine executes, not a re-implementation of the rule.
+ */
+export function selectBacktestWindow(
+  bars: readonly Bar[],
+  startDate: DateString | null,
+  endDate: DateString | null,
+): Bar[] {
   return bars.filter((bar) => {
     if (startDate && compareDates(bar.date, startDate) < 0) return false;
     if (endDate && compareDates(bar.date, endDate) > 0) return false;

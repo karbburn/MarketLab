@@ -187,6 +187,25 @@ export interface IndicatorStyle {
   lineWidth?: number;
 }
 
+/**
+ * A reusable chart presentation: the five view settings and the ordered
+ * indicator set. It deliberately carries no dataset, instrument, visible range,
+ * comparison or drawing data, so applying it never moves a panel to another
+ * series or discards annotations.
+ */
+export interface ChartTemplate {
+  id: string;
+  name: string;
+  schemaVersion: number;
+  chartType: ChartType;
+  priceScaleMode: PriceScaleMode;
+  showVolume: boolean;
+  timeframe: Timeframe;
+  indicators: IndicatorInstance[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type DrawingType =
   | 'trendline'
   | 'ray'
@@ -367,4 +386,40 @@ export interface BacktestResult {
     exposurePct: number;
     benchmarkTotalReturnPct: number;
   };
+}
+
+/**
+ * Identity of the market data a saved research run consumed. The bars
+ * themselves are deliberately not stored: a run is reproducible only while the
+ * library still holds a dataset with this content hash and window fingerprint.
+ */
+export interface BacktestRunDataset {
+  datasetId: string;
+  instrumentId: string;
+  instrumentSymbol: string;
+  datasetName: string;
+  frequency: Frequency;
+  contentHash: string;
+  windowFingerprint: string;
+  windowStart: DateString;
+  windowEnd: DateString;
+  barCount: number;
+}
+
+/**
+ * An immutable saved backtest: the configuration that was run, the identity of
+ * its input window, and the outputs needed to inspect and verify it. The equity
+ * curve is intentionally omitted; it is derived and would dwarf the record.
+ */
+export interface BacktestRun {
+  id: string;
+  schemaVersion: number;
+  name: string;
+  createdAt: string;
+  engineVersion: string;
+  config: BacktestConfig;
+  dataset: BacktestRunDataset;
+  assumptions: string[];
+  metrics: BacktestResult['metrics'];
+  trades: BacktestTrade[];
 }
