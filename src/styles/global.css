@@ -1273,6 +1273,42 @@ table.data tr.dim td {
   cursor: crosshair;
 }
 
+/* Endpoint price/time tags painted over the chart library's own axes. */
+.drawing-axis-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.drawing-axis-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.drawing-axis-label.price {
+  right: 0;
+  transform: translateY(-50%);
+  border-radius: 3px 0 0 3px;
+}
+
+.drawing-axis-label.time {
+  bottom: 0;
+  transform: translateX(-50%);
+  border-radius: 3px 3px 0 0;
+}
+
 .chart-legend {
   position: absolute;
   top: 6px;
