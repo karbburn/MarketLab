@@ -20,7 +20,7 @@ import { normaliseCompareSelections } from '../lib/workspace/compare-selections'
 import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
-import { planResearchRunSave } from '../lib/backtest/research-runs';
+import { planResearchRunSave, withResearchRunName } from '../lib/backtest/research-runs';
 import { parseBacktestRun } from '../lib/workspace/schema';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
@@ -80,6 +80,8 @@ export interface StoreActions {
   deleteChartTemplate(templateId: string): Promise<void>;
   /** Saves an immutable run; resolves false and reports why when it cannot. */
   saveBacktestRun(run: BacktestRun): Promise<boolean>;
+  /** Changes only the run's display name; recorded inputs and outputs stay intact. */
+  renameBacktestRun(runId: string, name: string): Promise<boolean>;
   deleteBacktestRun(runId: string): Promise<void>;
   setPreferences(partial: Partial<UserPreferences>): Promise<void>;
   restoreBackup(bundle: BackupBundle, mode: 'merge' | 'replace'): Promise<void>;
@@ -740,6 +742,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return true;
       } catch (error) {
         notify('error', `Could not save the research run: ${errorMessage(error)}`);
+        return false;
+      }
+    },
+
+    async renameBacktestRun(runId, name) {
+      if (!adapter) return false;
+      const existing = stateRef.current.backtestRuns.find((entry) => entry.id === runId);
+      if (!existing) {
+        notify('error', 'That research run is no longer saved.');
+        return false;
+      }
+      let renamed: BacktestRun;
+      try {
+        renamed = withResearchRunName(existing, name);
+      } catch (error) {
+        notify('error', errorMessage(error));
+        return false;
+      }
+      const parsed = parseBacktestRun(renamed);
+      if (!parsed.ok) {
+        notify('error', `The research run is invalid: ${parsed.error}`);
+        return false;
+      }
+      try {
+        await adapter.put('researchRuns', parsed.value);
+        setState((previous) => ({ ...previous, backtestRuns: upsertById(previous.backtestRuns, parsed.value) }));
+        notify('success', `Renamed research run to "${parsed.value.name}".`);
+        return true;
+      } catch (error) {
+        notify('error', `Could not rename the research run: ${errorMessage(error)}`);
         return false;
       }
     },

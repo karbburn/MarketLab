@@ -427,6 +427,20 @@ export function sortResearchRuns(runs: readonly BacktestRun[]): BacktestRun[] {
 }
 
 /**
+ * Returns a run with only its display name changed.
+ *
+ * A name is library metadata, not a recorded input or output. The id, saved
+ * time, configuration, dataset identity and fingerprints, engine version,
+ * assumptions, metrics and trades are carried through untouched. Callers still
+ * parse and persist the result, so an invalid rename never reaches storage.
+ */
+export function withResearchRunName(run: BacktestRun, name: string): BacktestRun {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('A research run needs a name.');
+  return trimmed === run.name ? run : { ...run, name: trimmed };
+}
+
+/**
  * Plans turning a saved run back into an editable draft.
  *
  * The returned configuration is a deep copy with a fresh id, so the editor can

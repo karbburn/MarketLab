@@ -143,6 +143,7 @@ export function TextInput({
   ariaDescribedBy,
   onKeyDown,
   onBlur,
+  autoFocus,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -160,6 +161,7 @@ export function TextInput({
   ariaDescribedBy?: string;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   onBlur?: () => void;
+  autoFocus?: boolean;
 }) {
   return (
     <input
@@ -178,6 +180,7 @@ export function TextInput({
       onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
+      autoFocus={autoFocus}
     />
   );
 }

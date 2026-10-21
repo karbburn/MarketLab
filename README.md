@@ -94,10 +94,13 @@ periods) are empty rather than zero.
   chart and a trade log you can export. Execution assumptions are printed next to the results.
 - **Saved research runs** — store an immutable snapshot of a backtest: the configuration, the
   dataset identity and a SHA-256 fingerprint of the exact window, the execution assumptions,
-  metrics and trades. Inspect a run later, re-run it to verify the outputs, export it as a
-  versioned JSON manifest (no market data), or import one. Re-running never overwrites the saved
-  result. If the dataset is gone the run says so; if its prices changed the run reports changed
-  inputs and only simulates on today's data when you explicitly ask.
+  metrics and trades. Browse runs in a filterable, newest-first library; selecting one opens its
+  snapshot. Rename a run's display label at any time: it is metadata only and never alters the
+  recorded configuration, dataset fingerprint, assumptions, metrics or trades. Inspect a run
+  later, re-run it to verify the outputs, export it as a versioned JSON manifest (no market data),
+  or import one. Re-running never overwrites the saved result. If the dataset is gone the run says
+  so; if its prices changed the run reports changed inputs and only simulates on today's data when
+  you explicitly ask.
 - **Compare saved runs** — put any two snapshots side by side: names and dates, recorded metrics
   and absolute deltas, strategy configuration, dataset identity, window, engine version and
   execution assumptions. Input checks hash the saved window without running either strategy, and
@@ -348,8 +351,8 @@ the source of truth.
 
 | Suite | Gate | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, saved research-run fingerprints, verification states, comparison semantics and manifests, chart templates and drawing hit-testing, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations and comparability verdicts, and the documented route, data and build-config claims. |
-| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, chart templates, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, saving/reloading/verifying/exporting/importing a research run, comparing two saved runs without changing either record, the field guide and its interactive drills, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
+| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, saved research-run fingerprints, label-only renaming, verification states, comparison semantics and manifests, chart templates and drawing hit-testing, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations and comparability verdicts, and the documented route, data and build-config claims. |
+| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, chart templates, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, saving/reloading/verifying/exporting/importing a research run, filtering and renaming in the saved-run library without changing the recorded snapshot, comparing two saved runs without changing either record, the field guide and its interactive drills, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
 | Service (pytest) | `python -m pytest services/market-data/tests -q` | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation - deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome

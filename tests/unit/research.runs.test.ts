@@ -11,6 +11,7 @@ import {
   serialiseResearchRunManifest,
   sortResearchRuns,
   verifyBacktestRun,
+  withResearchRunName,
 } from '../../src/lib/backtest/research-runs';
 import { runBacktest, selectBacktestWindow } from '../../src/lib/backtest/engine';
 import { describeStrategyRule, describeStrategyRules } from '../../src/lib/backtest/rule-catalog';
@@ -352,6 +353,37 @@ describe('research run storage planning', () => {
       { ...run, id: 'c', createdAt: '2024-02-01T00:00:00.000Z' },
     ]);
     expect(sorted.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('withResearchRunName', () => {
+  it('trims the label and changes nothing else in the snapshot', async () => {
+    const run = await savedRun();
+    const renamed = withResearchRunName(run, '  Renamed run  ');
+    expect(renamed.name).toBe('Renamed run');
+    expect(renamed).toEqual({ ...run, name: 'Renamed run' });
+    expect(renamed.id).toBe(run.id);
+    expect(renamed.createdAt).toBe(run.createdAt);
+    expect(renamed.dataset).toEqual(run.dataset);
+    expect(renamed.metrics).toEqual(run.metrics);
+    expect(renamed.trades).toEqual(run.trades);
+  });
+
+  it('treats a whitespace-only change as a no-op and refuses a blank name', async () => {
+    const run = await savedRun();
+    expect(withResearchRunName(run, '  Saved run  ')).toBe(run);
+    expect(() => withResearchRunName(run, '   ')).toThrow('A research run needs a name.');
+  });
+
+  it('round-trips the corrected label through an exported manifest', async () => {
+    const run = await savedRun();
+    const renamed = withResearchRunName(run, 'Corrected label');
+    const parsed = parseResearchRunManifest(JSON.parse(serialiseResearchRunManifest(renamed)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.run.name).toBe('Corrected label');
+    expect(parsed.value.run.metrics).toEqual(run.metrics);
+    expect(parsed.value.run.trades).toEqual(run.trades);
   });
 });
 
