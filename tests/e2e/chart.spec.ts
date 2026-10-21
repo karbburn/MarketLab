@@ -186,20 +186,180 @@ test.describe('chart workspace', () => {
     const dialog = page.getByRole('dialog', { name: 'Indicators' });
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole('button', { name: /Simple Moving Average/ }).click();
+    await dialog.locator('button.nav-item', { hasText: 'Simple Moving Average' }).click();
     await dialog.getByRole('button', { name: 'Add to chart' }).click();
     await expect(dialog).toBeHidden();
 
     const indicatorFoot = page.locator('.panel-foot').first();
-    await expect(indicatorFoot.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(1);
+    await expect(indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 20' })).toHaveCount(1);
     await expect(page.locator('.indicator-legend-item')).toHaveCount(1);
 
-    await indicatorFoot.getByRole('button', { name: 'Hide', exact: true }).click();
-    await indicatorFoot.getByRole('button', { name: 'Show', exact: true }).click();
+    await indicatorFoot.getByRole('button', { name: 'Hide Simple Moving Average 20' }).click();
+    await indicatorFoot.getByRole('button', { name: 'Show Simple Moving Average 20' }).click();
 
-    await indicatorFoot.getByRole('button', { name: 'Remove', exact: true }).click();
+    await indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 20' }).click();
     await expect(page.locator('.panel-foot')).toHaveCount(0);
     await expect(page.locator('.indicator-legend-item')).toHaveCount(0);
+  });
+
+  test('edits indicator parameters after adding it and keeps the change after a reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const indicatorFoot = page.locator('.panel-foot').first();
+    const dialog = page.getByRole('dialog', { name: 'Indicators' });
+
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator('button.nav-item', { hasText: 'Simple Moving Average' }).click();
+    await dialog.getByRole('button', { name: 'Add to chart' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(indicatorFoot.getByText('Simple Moving Average 20')).toBeVisible();
+
+    // The row editor keeps the dialog open: Save is gated on a differing draft.
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    const editor = dialog.getByRole('group', { name: 'Simple Moving Average 20 parameter settings' });
+    await dialog.getByRole('button', { name: 'Edit Simple Moving Average 20' }).click();
+    await expect(editor).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Save parameters' })).toBeDisabled();
+
+    await editor.getByRole('spinbutton').fill('50');
+    await dialog.getByRole('button', { name: 'Save parameters' }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(indicatorFoot.getByText('Simple Moving Average 50')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(indicatorFoot.getByRole('button', { name: 'Remove Simple Moving Average 50' })).toHaveCount(1);
+
+    // The edited parameters live in the workspace, not in component state.
+    await page.reload();
+    await waitForChart(page);
+    await expect(page.locator('.panel-foot').first().getByText('Simple Moving Average 50')).toBeVisible();
+  });
+
+  test('keeps two instances of the same indicator distinguishable and restores them independently', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const indicatorFoot = page.locator('.panel-foot').first();
+    const dialog = page.getByRole('dialog', { name: 'Indicators' });
+    const libraryButton = dialog.locator('button.nav-item', { hasText: 'Simple Moving Average' });
+
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    await libraryButton.click();
+    await dialog.getByRole('button', { name: 'Add to chart' }).click();
+    await expect(dialog).toBeHidden();
+
+    // The second instance gets a different period so its foot tag is unique.
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    await libraryButton.click();
+    await dialog.getByRole('spinbutton').fill('50');
+    await dialog.getByRole('button', { name: 'Add to chart' }).click();
+    await expect(dialog).toBeHidden();
+
+    await expect(indicatorFoot.getByText('Simple Moving Average 20')).toBeVisible();
+    await expect(indicatorFoot.getByText('Simple Moving Average 50')).toBeVisible();
+
+    // Hiding one instance must not disturb the other across a reload.
+    await indicatorFoot.getByRole('button', { name: 'Hide Simple Moving Average 20' }).click();
+    await page.reload();
+    await waitForChart(page);
+
+    const footAfterReload = page.locator('.panel-foot').first();
+    await expect(footAfterReload.getByRole('button', { name: 'Show Simple Moving Average 20' })).toHaveCount(1);
+    await expect(footAfterReload.getByRole('button', { name: 'Hide Simple Moving Average 50' })).toHaveCount(1);
+
+    // Removing one leaves the other stored and still hidden.
+    await footAfterReload.getByRole('button', { name: 'Remove Simple Moving Average 50' }).click();
+    await page.reload();
+    await waitForChart(page);
+    await expect(page.locator('.panel-foot').first().getByRole('button', { name: 'Show Simple Moving Average 20' })).toHaveCount(1);
+    await expect(page.locator('.indicator-legend-item')).toHaveCount(0);
+  });
+
+  test('reorders indicators and keeps the new order after a reload', async ({ page }) => {
+    await page.goto('/#/chart');
+    await waitForChart(page);
+
+    const dialog = page.getByRole('dialog', { name: 'Indicators' });
+
+    const addFromLibrary = async (name: string) => {
+      await page.getByRole('button', { name: 'Add indicator' }).first().click();
+      await expect(dialog).toBeVisible();
+      await dialog.locator('button.nav-item', { hasText: name }).click();
+      await dialog.getByRole('button', { name: 'Add to chart' }).click();
+      await expect(dialog).toBeHidden();
+    };
+
+    await addFromLibrary('Simple Moving Average');
+    await addFromLibrary('Relative Strength Index');
+    await addFromLibrary('MACD');
+
+    const legend = page.locator('.indicator-legend-item');
+    await expect(legend).toHaveCount(3);
+
+    // RSI sits behind the SMA: moving it up swaps the two entries.
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Move Relative Strength Index 14 up' }).click();
+
+    await expect(legend.nth(0)).toContainText('Relative Strength Index');
+    await expect(legend.nth(1)).toContainText('Simple Moving Average');
+    await expect(legend.nth(2)).toContainText('MACD');
+
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toBeHidden();
+
+    // The stored array order drives the pane stacking on a fresh load too.
+    await page.reload();
+    await waitForChart(page);
+    const legendAfterReload = page.locator('.indicator-legend-item');
+    await expect(legendAfterReload.nth(0)).toContainText('Relative Strength Index');
+    await expect(legendAfterReload.nth(1)).toContainText('Simple Moving Average');
+    await expect(legendAfterReload.nth(2)).toContainText('MACD');
+  });
+
+  test('manages indicators from a narrow light-themed viewport and cancels an edit with Escape', async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 800 });
+    await page.goto('/#/chart');
+    await waitForChart(page);
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+
+    const indicatorFoot = page.locator('.panel-foot').first();
+
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'Indicators' });
+    await expect(dialog).toBeVisible();
+
+    // The manager dialog fits inside the narrow window.
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(721);
+
+    await dialog.locator('button.nav-item', { hasText: 'Simple Moving Average' }).click();
+    await dialog.getByRole('button', { name: 'Add to chart' }).click();
+    await expect(dialog).toBeHidden();
+
+    // Escape inside the row editor cancels the edit; the dialog stays open.
+    await page.getByRole('button', { name: 'Add indicator' }).first().click();
+    await expect(dialog).toBeVisible();
+    const editor = dialog.getByRole('group', { name: 'Simple Moving Average 20 parameter settings' });
+    await dialog.getByRole('button', { name: 'Edit Simple Moving Average 20' }).click();
+    await expect(editor).toBeVisible();
+
+    await editor.getByRole('spinbutton').press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(indicatorFoot.getByText('Simple Moving Average 20')).toBeVisible();
+
+    // The next Escape, outside the editor, closes the dialog as usual.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
   });
 
   test('draws a level, undoes, redoes and deletes it', async ({ page }) => {
