@@ -187,6 +187,25 @@ export interface IndicatorStyle {
   lineWidth?: number;
 }
 
+/**
+ * A reusable chart presentation: the five view settings and the ordered
+ * indicator set. It deliberately carries no dataset, instrument, visible range,
+ * comparison or drawing data, so applying it never moves a panel to another
+ * series or discards annotations.
+ */
+export interface ChartTemplate {
+  id: string;
+  name: string;
+  schemaVersion: number;
+  chartType: ChartType;
+  priceScaleMode: PriceScaleMode;
+  showVolume: boolean;
+  timeframe: Timeframe;
+  indicators: IndicatorInstance[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type DrawingType =
   | 'trendline'
   | 'ray'

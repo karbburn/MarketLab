@@ -1,6 +1,7 @@
 import type {
   BacktestConfig,
   Bar,
+  ChartTemplate,
   Dataset,
   Instrument,
   ScreenerDefinition,
@@ -13,6 +14,7 @@ import {
   barSchema,
   datasetSchema,
   instrumentSchema,
+  parseChartTemplate,
   parseWorkspace,
   preferencesSchema,
   screenerDefinitionSchema,
@@ -33,6 +35,8 @@ export interface BackupBundle {
   preferences: UserPreferences | null;
   screeners: ScreenerDefinition[];
   backtests: BacktestConfig[];
+  /** Optional so backups written before templates existed still parse. */
+  chartTemplates?: ChartTemplate[];
 }
 
 export interface BackupInput {
@@ -44,6 +48,7 @@ export interface BackupInput {
   preferences: UserPreferences | null;
   screeners: readonly ScreenerDefinition[];
   backtests: readonly BacktestConfig[];
+  chartTemplates?: readonly ChartTemplate[];
 }
 
 export function createBackup(input: BackupInput): BackupBundle {
@@ -59,6 +64,7 @@ export function createBackup(input: BackupInput): BackupBundle {
     preferences: input.preferences,
     screeners: [...input.screeners],
     backtests: [...input.backtests],
+    chartTemplates: [...(input.chartTemplates ?? [])],
   };
 }
 
@@ -129,6 +135,7 @@ export function parseBackup(
   const isWatchlists = (value: unknown): value is Watchlist => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.instrumentIds);
   const isScreeners = (value: unknown): value is ScreenerDefinition => screenerDefinitionSchema.safeParse(value).success;
   const isBacktests = (value: unknown): value is BacktestConfig => backtestConfigSchema.safeParse(value).success;
+  const isChartTemplates = (value: unknown): value is ChartTemplate => parseChartTemplate(value).ok;
 
   const workspaces: Workspace[] = [];
   if (Array.isArray(input.workspaces)) {
@@ -150,6 +157,7 @@ export function parseBackup(
     sortWindow: resolveSortWindow(screener.sortBy, screener.sortWindow),
   }));
   const backtests = arrayOf('backtests', isBacktests);
+  const chartTemplates = arrayOf('chartTemplates', isChartTemplates);
 
   // Datasets whose bars are missing, or whose instrument is missing, are dropped
   // with a note rather than loaded in a broken state.
@@ -193,6 +201,7 @@ export function parseBackup(
       preferences,
       screeners,
       backtests,
+      chartTemplates,
     },
   };
 }
@@ -205,6 +214,7 @@ export interface LocalEntities {
   watchlists: readonly Watchlist[];
   screeners: readonly ScreenerDefinition[];
   backtests: readonly BacktestConfig[];
+  chartTemplates?: readonly ChartTemplate[];
 }
 
 export interface MergeResult {
@@ -215,6 +225,7 @@ export interface MergeResult {
   watchlists: Watchlist[];
   screeners: ScreenerDefinition[];
   backtests: BacktestConfig[];
+  chartTemplates: ChartTemplate[];
   /** Entries whose id already existed and were overwritten. */
   overwritten: number;
   /** Datasets skipped because an identical series (same content hash) is already stored. */
@@ -247,6 +258,7 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     watchlists: new Set(base.watchlists.map((entry) => entry.id)),
     screeners: new Set(base.screeners.map((entry) => entry.id)),
     backtests: new Set(base.backtests.map((entry) => entry.id)),
+    chartTemplates: new Set((base.chartTemplates ?? []).map((entry) => entry.id)),
   };
   let overwritten = 0;
 
@@ -355,6 +367,8 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
 
   overwritten += bundle.screeners.filter((entry) => baseIds.screeners.has(entry.id)).length;
   overwritten += bundle.backtests.filter((entry) => baseIds.backtests.has(entry.id)).length;
+  const acceptedChartTemplates = bundle.chartTemplates ?? [];
+  overwritten += acceptedChartTemplates.filter((entry) => baseIds.chartTemplates.has(entry.id)).length;
 
   const acceptedDatasetIds = new Set(acceptedDatasets.map((dataset) => dataset.id));
   const barsByDataset: Record<string, Bar[]> = { ...base.barsByDataset };
@@ -370,6 +384,7 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     watchlists: mergeById(base.watchlists, acceptedWatchlists),
     screeners: mergeById(base.screeners, acceptedScreeners),
     backtests: mergeById(base.backtests, acceptedBacktests),
+    chartTemplates: mergeById(base.chartTemplates ?? [], acceptedChartTemplates),
     overwritten,
     duplicateDatasets,
     remappedPanels,

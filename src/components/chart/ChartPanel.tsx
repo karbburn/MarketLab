@@ -12,6 +12,7 @@ import {
   Plus,
   Ruler,
   Square,
+  SquaresFour,
   TextT,
   TrendUp,
   Trash,
@@ -49,6 +50,7 @@ import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
 import { DrawingManager } from './DrawingManager';
+import { TemplateDialog } from './TemplateDialog';
 
 const TOOLS: Array<{ id: DrawingType | 'cursor'; label: string; icon: typeof Cursor }> = [
   { id: 'cursor', label: 'Pointer and selection', icon: Cursor },
@@ -127,6 +129,7 @@ export function ChartPanel({
   const [anchorAnnouncement, setAnchorAnnouncement] = useState('');
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [drawingManagerOpen, setDrawingManagerOpen] = useState(false);
   // While a drawing is being dragged or edited the local copy leads; the stored
@@ -984,6 +987,16 @@ export function ChartPanel({
           <Plus size={14} weight="bold" />
         </button>
         <button
+          type="button"
+          className="tool-button"
+          title="Chart templates"
+          aria-label="Chart templates"
+          aria-pressed={templateDialogOpen}
+          onClick={() => setTemplateDialogOpen(true)}
+        >
+          <SquaresFour size={14} />
+        </button>
+        <button
           ref={managerButtonRef}
           type="button"
           className="tool-button"
@@ -1293,6 +1306,13 @@ export function ChartPanel({
         primaryDatasetId={chart.datasetId}
         views={allViews}
         preparation={comparison}
+      />
+
+      <TemplateDialog
+        open={templateDialogOpen}
+        onClose={() => setTemplateDialogOpen(false)}
+        chart={chart}
+        workspaceId={workspaceId}
       />
     </div>
   );

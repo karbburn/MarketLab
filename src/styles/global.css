@@ -1780,6 +1780,12 @@ table.data tr.dim td {
   gap: 10px;
 }
 
+.template-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
 .stack {
   display: grid;
   gap: 8px;

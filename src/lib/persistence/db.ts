@@ -18,6 +18,7 @@ export type StoreName =
   | 'watchlists'
   | 'screeners'
   | 'backtests'
+  | 'chartTemplates'
   | 'preferences'
   | 'settings';
 
@@ -29,6 +30,7 @@ export const STORE_NAMES: StoreName[] = [
   'watchlists',
   'screeners',
   'backtests',
+  'chartTemplates',
   'preferences',
   'settings',
 ];
@@ -80,7 +82,9 @@ export interface PersistenceAdapter {
 }
 
 const DB_NAME = 'marketlab';
-const DB_VERSION = 1;
+// v2 adds durable stores for chart templates and saved research runs. The
+// upgrade only creates stores; existing records are not rewritten.
+const DB_VERSION = 2;
 
 export function createMemoryAdapter(): PersistenceAdapter {
   const tables = new Map<StoreName, Map<string, unknown>>();
