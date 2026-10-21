@@ -1,37 +1,21 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DownloadSimple, FloppyDisk, Play, Plus, Trash } from '@phosphor-icons/react';
-import type { BacktestConfig, BacktestResult, RuleField, ScreenerOperator, StrategyRule } from '../domain/types';
+import type { BacktestConfig, BacktestResult, StrategyRule } from '../domain/types';
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
-import { runBacktest } from '../lib/backtest/engine';
+import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
+import { RULE_FIELDS, RULE_OPERATORS as OPERATORS } from '../lib/backtest/rule-catalog';
 import { createBacktestConfig } from '../state/defaults';
 import { createId } from '../lib/id';
 import { downloadTextFile } from '../lib/export/download';
 import { equityToCsv, tradesToCsv } from '../lib/export/csv';
-import { formatPercent, formatPrice, formatSignedPercent, formatSignedPrice } from '../lib/format';
+import { formatPercent } from '../lib/format';
 import { EmptyState, Field, Metric, NumberInput, Panel, Select, Tag, TextInput } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
-
-const RULE_FIELDS: Array<{ value: RuleField; label: string; needsSecondary: boolean; implicitThreshold: boolean }> = [
-  { value: 'price-vs-sma', label: 'Price vs SMA (%)', needsSecondary: false, implicitThreshold: false },
-  { value: 'price-vs-ema', label: 'Price vs EMA (%)', needsSecondary: false, implicitThreshold: false },
-  { value: 'sma-cross', label: 'SMA cross', needsSecondary: true, implicitThreshold: true },
-  { value: 'macd-cross', label: 'MACD cross', needsSecondary: true, implicitThreshold: true },
-  { value: 'rsi', label: 'RSI level', needsSecondary: false, implicitThreshold: false },
-  { value: 'breakout-high', label: 'Breakout above high', needsSecondary: false, implicitThreshold: true },
-  { value: 'breakout-low', label: 'Breakdown below low', needsSecondary: false, implicitThreshold: true },
-];
-
-const OPERATORS: Array<{ value: ScreenerOperator; label: string }> = [
-  { value: 'crosses-above', label: 'crosses above' },
-  { value: 'crosses-below', label: 'crosses below' },
-  { value: 'gt', label: 'greater than' },
-  { value: 'gte', label: 'at least' },
-  { value: 'lt', label: 'less than' },
-  { value: 'lte', label: 'at most' },
-];
+import { ResearchRunsPanel, type ResearchRunSource } from '../components/backtest/ResearchRunsPanel';
+import { TradeTable } from '../components/backtest/TradeTable';
 
 export function BacktestPage() {
   const { state, actions } = useStore();
@@ -47,6 +31,7 @@ export function BacktestPage() {
     () => views.find((view) => view.dataset.id === datasetId)?.dataset.frequency ?? 'daily',
     [views, datasetId],
   );
+  const activeView = useMemo(() => views.find((view) => view.dataset.id === datasetId) ?? null, [views, datasetId]);
   const signature = draft ? JSON.stringify(draft) : '';
   const runSignature = runRequest ? JSON.stringify(runRequest.config) : null;
 
@@ -75,6 +60,10 @@ export function BacktestPage() {
   };
 
   const stale = draft !== null && runSignature !== null && runSignature !== signature;
+  const researchSource: ResearchRunSource | null =
+    draft && result && activeView && !stale
+      ? { config: runRequest?.config ?? draft, result, dataset: activeView.dataset, instrument: activeView.instrument }
+      : null;
 
   const equitySeries = useMemo<ChartSeries[]>(() => {
     if (!result || result.equityCurve.length === 0) return [];
@@ -392,63 +381,18 @@ export function BacktestPage() {
           </div>
 
           <Panel title="Trades" subtitle="Fills are at the next session's open, then adjusted for slippage and commission" flush>
-            {result.trades.length === 0 ? (
-              <EmptyState title="No trades" body="The rule set never produced an entry in this window. Check the rule thresholds or widen the window." />
-            ) : (
-              <div className="table-wrap scroll-y">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>Entry</th>
-                      <th className="num">Entry price</th>
-                      <th>Exit</th>
-                      <th className="num">Exit price</th>
-                      <th className="num">Quantity</th>
-                      <th className="num">Gross PnL</th>
-                      <th className="num">Costs</th>
-                      <th className="num">Net PnL</th>
-                      <th className="num">Return</th>
-                      <th className="num">Bars</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.trades.map((trade, index) => (
-                      <tr key={`${trade.entryDate}-${trade.exitDate}-${index}`}>
-                        <td className="mono">{trade.entryDate}</td>
-                        <td className="num">{formatPrice(trade.entryPrice)}</td>
-                        <td className="mono">{trade.exitDate}</td>
-                        <td className="num">{formatPrice(trade.exitPrice)}</td>
-                        <td className="num">{trade.quantity.toFixed(2)}</td>
-                        <td className={`num ${trade.grossPnl >= 0 ? 'up' : 'down'}`}>{formatSignedPrice(trade.grossPnl)}</td>
-                        <td className="num muted">{formatPrice(trade.costs)}</td>
-                        <td className={`num ${trade.netPnl >= 0 ? 'up' : 'down'}`}>{formatSignedPrice(trade.netPnl)}</td>
-                        <td className={`num ${trade.returnPct >= 0 ? 'up' : 'down'}`}>{formatSignedPercent(trade.returnPct)}</td>
-                        <td className="num">{trade.barsHeld}</td>
-                        <td>
-                          <Tag tone={trade.exitReason === 'stop-loss' ? 'down' : trade.exitReason === 'take-profit' ? 'up' : undefined}>{trade.exitReason}</Tag>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <TradeTable trades={result.trades} />
           </Panel>
         </>
       )}
 
+      <ResearchRunsPanel current={researchSource} />
+
       <Panel title="Execution assumptions" subtitle="Stated plainly so the numbers cannot be mistaken for more than they are">
         <ul className="list-reset stack field-hint">
-          <li>Signals are evaluated on a session's close. Orders fill at the next session's open. There is no same-bar fill and no look-ahead.</li>
-          <li>Slippage is applied adversely on entry and again on exit. Commission is charged on the traded notional at entry and at exit.</li>
-          <li>Position size is a fixed percentage of the equity at entry, and the resulting share count is fractional. The entry commission is paid out of that percentage. No lot rounding, no margin, no leverage beyond that percentage.</li>
-          <li>If a session's range touches both the stop and the target, the stop is assumed to fill first. That is the conservative choice.</li>
-          <li>A stop is a sell stop: it fills at the stop price, except when the session opens through it, in which case it fills at the open. The target is booked at the target price even if the session gaps above it. Adverse slippage applies to both.</li>
-          <li>A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.</li>
-          <li>Volatility, the Sharpe ratio and exposure are annualised at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year.</li>
-          <li>The buy-and-hold benchmark uses the same initial capital over the same window with no costs.</li>
-          <li>Only long positions are simulated. Short selling is not modelled.</li>
+          {BACKTEST_ASSUMPTIONS.map((assumption) => (
+            <li key={assumption}>{assumption}</li>
+          ))}
           <li>
             <Link to="/learn?section=execution">Walk through the execution model stage by stage</Link>
           </li>

@@ -2905,3 +2905,24 @@ table.data tr.dim td {
     transition: none;
   }
 }
+
+/* Saved research runs */
+.fingerprint {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.research-verification {
+  background: var(--surface-inset);
+}
+
+.research-assumptions summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.research-assumptions[open] summary {
+  margin-bottom: 8px;
+}

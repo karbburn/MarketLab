@@ -1,5 +1,6 @@
 import type {
   BacktestConfig,
+  BacktestRun,
   Bar,
   ChartTemplate,
   Dataset,
@@ -14,6 +15,7 @@ import {
   barSchema,
   datasetSchema,
   instrumentSchema,
+  parseBacktestRun,
   parseChartTemplate,
   parseWorkspace,
   preferencesSchema,
@@ -37,6 +39,8 @@ export interface BackupBundle {
   backtests: BacktestConfig[];
   /** Optional so backups written before templates existed still parse. */
   chartTemplates?: ChartTemplate[];
+  /** Optional so backups written before saved research runs existed still parse. */
+  researchRuns?: BacktestRun[];
 }
 
 export interface BackupInput {
@@ -49,6 +53,7 @@ export interface BackupInput {
   screeners: readonly ScreenerDefinition[];
   backtests: readonly BacktestConfig[];
   chartTemplates?: readonly ChartTemplate[];
+  researchRuns?: readonly BacktestRun[];
 }
 
 export function createBackup(input: BackupInput): BackupBundle {
@@ -65,6 +70,7 @@ export function createBackup(input: BackupInput): BackupBundle {
     screeners: [...input.screeners],
     backtests: [...input.backtests],
     chartTemplates: [...(input.chartTemplates ?? [])],
+    researchRuns: [...(input.researchRuns ?? [])],
   };
 }
 
@@ -136,6 +142,7 @@ export function parseBackup(
   const isScreeners = (value: unknown): value is ScreenerDefinition => screenerDefinitionSchema.safeParse(value).success;
   const isBacktests = (value: unknown): value is BacktestConfig => backtestConfigSchema.safeParse(value).success;
   const isChartTemplates = (value: unknown): value is ChartTemplate => parseChartTemplate(value).ok;
+  const isResearchRuns = (value: unknown): value is BacktestRun => parseBacktestRun(value).ok;
 
   const workspaces: Workspace[] = [];
   if (Array.isArray(input.workspaces)) {
@@ -158,6 +165,7 @@ export function parseBackup(
   }));
   const backtests = arrayOf('backtests', isBacktests);
   const chartTemplates = arrayOf('chartTemplates', isChartTemplates);
+  const researchRuns = arrayOf('researchRuns', isResearchRuns);
 
   // Datasets whose bars are missing, or whose instrument is missing, are dropped
   // with a note rather than loaded in a broken state.
@@ -202,6 +210,7 @@ export function parseBackup(
       screeners,
       backtests,
       chartTemplates,
+      researchRuns,
     },
   };
 }
@@ -215,6 +224,7 @@ export interface LocalEntities {
   screeners: readonly ScreenerDefinition[];
   backtests: readonly BacktestConfig[];
   chartTemplates?: readonly ChartTemplate[];
+  researchRuns?: readonly BacktestRun[];
 }
 
 export interface MergeResult {
@@ -226,6 +236,7 @@ export interface MergeResult {
   screeners: ScreenerDefinition[];
   backtests: BacktestConfig[];
   chartTemplates: ChartTemplate[];
+  researchRuns: BacktestRun[];
   /** Entries whose id already existed and were overwritten. */
   overwritten: number;
   /** Datasets skipped because an identical series (same content hash) is already stored. */
@@ -259,6 +270,7 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     screeners: new Set(base.screeners.map((entry) => entry.id)),
     backtests: new Set(base.backtests.map((entry) => entry.id)),
     chartTemplates: new Set((base.chartTemplates ?? []).map((entry) => entry.id)),
+    researchRuns: new Set((base.researchRuns ?? []).map((entry) => entry.id)),
   };
   let overwritten = 0;
 
@@ -365,10 +377,28 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     return replacement ? { ...backtest, datasetId: replacement } : backtest;
   });
 
+  // A saved run names its dataset by id. When the same series is already stored
+  // under another id, re-point the run so it can still be verified after the
+  // restore instead of reporting a missing dataset.
+  const acceptedResearchRuns = (bundle.researchRuns ?? []).map((run) => {
+    const replacement = datasetRemap.get(run.dataset.datasetId);
+    if (!replacement) return run;
+    const target = resolved.get(replacement);
+    return {
+      ...run,
+      dataset: {
+        ...run.dataset,
+        datasetId: replacement,
+        instrumentId: target?.instrumentId ?? run.dataset.instrumentId,
+      },
+    };
+  });
+
   overwritten += bundle.screeners.filter((entry) => baseIds.screeners.has(entry.id)).length;
   overwritten += bundle.backtests.filter((entry) => baseIds.backtests.has(entry.id)).length;
   const acceptedChartTemplates = bundle.chartTemplates ?? [];
   overwritten += acceptedChartTemplates.filter((entry) => baseIds.chartTemplates.has(entry.id)).length;
+  overwritten += acceptedResearchRuns.filter((entry) => baseIds.researchRuns.has(entry.id)).length;
 
   const acceptedDatasetIds = new Set(acceptedDatasets.map((dataset) => dataset.id));
   const barsByDataset: Record<string, Bar[]> = { ...base.barsByDataset };
@@ -385,6 +415,7 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     screeners: mergeById(base.screeners, acceptedScreeners),
     backtests: mergeById(base.backtests, acceptedBacktests),
     chartTemplates: mergeById(base.chartTemplates ?? [], acceptedChartTemplates),
+    researchRuns: mergeById(base.researchRuns ?? [], acceptedResearchRuns),
     overwritten,
     duplicateDatasets,
     remappedPanels,

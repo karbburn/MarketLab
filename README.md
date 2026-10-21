@@ -48,7 +48,14 @@ TradingView or any other commercial charting platform; it reimplements a familia
 - Drawing tools: trend line, ray, horizontal level, vertical marker, zone rectangle, Fibonacci
   retracement, measure move and text label — with drag-to-move, undo/redo (`Ctrl`/`Cmd`+`Z`,
   `Shift` to redo) and `Delete` to remove a selection. Shortcuts apply only to the focused chart
-  and never while a dialog or a text field has focus.
+  and never while a dialog or a text field has focus. Hit-testing matches what is painted:
+  hidden drawings cannot intercept the pointer, locked drawings stay selectable but immovable,
+  a text label is selectable across its painted box, and a level with a single anchor is
+  selectable along its whole line.
+- **Saved chart templates** — save the chart type, price scale, volume pane, timeframe and ordered
+  indicator set from any panel, then apply it here or on another panel. Applying a template
+  replaces only those properties, in one write: the destination dataset, instrument, visible
+  range, comparisons and drawings are preserved, and the template is not part of drawing undo.
 - **Comparison overlays** — add other stored series to a panel as rebased index lines on a
   separate left axis. Series are aligned on real shared sessions and rebased to 100 at the first
   common session; nothing is forward-filled. The legend removes one series or clears all, and the
@@ -85,6 +92,12 @@ periods) are empty rather than zero.
 - **Backtest** — a long-only rule engine with entry, exit, stop-loss and take-profit rules,
   position sizing, commission and slippage, an equity curve against buy-and-hold, a drawdown
   chart and a trade log you can export. Execution assumptions are printed next to the results.
+- **Saved research runs** — store an immutable snapshot of a backtest: the configuration, the
+  dataset identity and a SHA-256 fingerprint of the exact window, the execution assumptions,
+  metrics and trades. Inspect a run later, re-run it to verify the outputs, export it as a
+  versioned JSON manifest (no market data), or import one. Re-running never overwrites the saved
+  result. If the dataset is gone the run says so; if its prices changed the run reports changed
+  inputs and only simulates on today's data when you explicitly ask.
 
 ### Data
 
@@ -99,7 +112,8 @@ periods) are empty rather than zero.
   retrieval time and provider-reported corporate actions, and shows the source in the data
   library, the inspection panel and the chart legend.
 - **Export and backup** — datasets, quant summaries, screener results, backtest trades and the
-  equity curve as CSV; the whole workspace as a versioned JSON backup that can be merged into or
+  equity curve as CSV; a saved research run as a versioned JSON manifest; the whole workspace,
+  including templates and saved runs, as a versioned JSON backup that can be merged into or
   restored over the current state.
 
 ### Workspace
@@ -258,10 +272,10 @@ The rules below are enforced in code, not just in the documentation:
 ```
 src/
   components/     app shell, command palette, UI primitives, chart panels, chart adapter, dialogs
-  domain/         canonical domain types (bars, datasets, workspaces, drawings)
+  domain/         canonical domain types (bars, datasets, workspaces, drawings, runs)
   lib/
-    backtest/     rule definitions, comparison helpers, simulation engine
-    chart/        comparison-overlay preparation and chart presentation helpers
+    backtest/     rule definitions, comparison helpers, simulation engine, saved-run contracts
+    chart/        comparison-overlay preparation, chart presentation and template helpers
     command-palette/  palette planning, search, recents and shortcut labels
     corporate-actions.ts  provider-action labels and marker planning
     csv/          CSV parsing and column mapping
@@ -275,7 +289,7 @@ src/
     quant/        performance, risk, correlation and comparison metrics
     screener/     screener fields and evaluation
     validation/   dataset validation and OHLC invariants
-    workspace/    backup schema and migration
+    workspace/    workspace, template and saved-run schemas
   pages/          one module per top-level screen
   state/          store, defaults, selectors
   styles/         design tokens and global styles
@@ -329,8 +343,8 @@ the source of truth.
 
 | Suite | Gate | What it covers |
 | --- | --- | --- |
-| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations, and the documented route, data and build-config claims. |
-| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, the field guide, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
+| Unit (Vitest) | `npm test` | Indicator values, OHLC validation and CSV mapping, risk metrics and correlation, comparison alignment and rebasing, corporate-action validation and marker planning, screener evaluation, the backtest fill model, saved research-run fingerprints, verification states and manifests, chart templates and drawing hit-testing, the download batch queue, symbol token handling, watchlist context maths, backup parsing, the legacy-series removal, export formatting, command-palette search and recents, the field guide's calculations, and the documented route, data and build-config claims. |
+| End-to-end (Playwright) | `npm run test:e2e` | The shell and navigation, the command palette, the chart workspace, chart templates, comparison overlays and corporate-action markers, every drawing tool with the anchors it stores, typing and editing a label, keyboard drawing shortcuts, watchlist context columns, CSV import and rejection paths, the research screens, saving/reloading/verifying/exporting/importing a research run, the field guide, settings, backup export/restore, the single and batch download success, failure, retry and symbol-suggestion paths, first-run guidance and the migration. |
 | Service (pytest) | `python -m pytest services/market-data/tests -q` | Success, invalid parameters, empty results, unknown symbols, corporate-action extraction and filtering, throttling, timeouts, malformed responses, caching, CORS and search normalisation - deterministic, never touching the network. |
 
 The end-to-end suite drives the built app with the locally installed Google Chrome
@@ -371,6 +385,13 @@ no short selling, no alerting and no replay. These are product decisions, not ga
   short selling, borrow costs or corporate actions beyond the adjusted close it stores.
 - Corporate-action markers are display annotations sourced from provider metadata. They do not
   change OHLC, indicator inputs, screens or backtest calculations.
+- A saved research run identifies its inputs with the dataset content hash and a SHA-256
+  fingerprint of the exact window. It can only be reproduced while those bars remain in the
+  library: a fingerprint cannot recreate deleted data. Importing a manifest is not a signature
+  check, since a hand-edited file can rewrite both the fingerprint and the outputs.
+- Re-running a saved run is deterministic for the same engine version, configuration and bars.
+  Metrics and trades are compared within a 1e-9 relative tolerance to absorb floating-point
+  differences between JavaScript runtimes.
 - State is per browser profile. Moving between browsers is done deliberately through the JSON
   backup, not through an account or a sync service.
 - Nothing here is investment advice.

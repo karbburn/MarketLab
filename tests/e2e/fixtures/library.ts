@@ -16,7 +16,7 @@ import type { Page } from '@playwright/test';
 const DB_NAME = 'marketlab';
 // Mirrors `DB_VERSION` in src/lib/persistence/db.ts. The page-side seed
 // function below cannot import it, so the two move together.
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAMES = [
   'instruments',
   'datasets',
@@ -26,6 +26,7 @@ const STORE_NAMES = [
   'screeners',
   'backtests',
   'chartTemplates',
+  'researchRuns',
   'preferences',
   'settings',
 ];
@@ -440,7 +441,7 @@ export function buildLegacyLibrary(): FixtureRecords {
  */
 async function writeRecords(records: FixtureRecords): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('marketlab', 2);
+    const open = indexedDB.open('marketlab', 3);
     open.onupgradeneeded = () => {
       const db = open.result;
       for (const store of [
@@ -452,6 +453,7 @@ async function writeRecords(records: FixtureRecords): Promise<void> {
         'screeners',
         'backtests',
         'chartTemplates',
+        'researchRuns',
         'preferences',
         'settings',
       ]) {

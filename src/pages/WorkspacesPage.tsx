@@ -33,6 +33,7 @@ export function WorkspacesPage() {
       screeners: state.screeners,
       backtests: state.backtests,
       chartTemplates: state.chartTemplates,
+      researchRuns: state.backtestRuns,
     });
     actions.notify('success', 'Backup file created.');
   };

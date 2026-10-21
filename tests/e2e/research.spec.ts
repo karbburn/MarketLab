@@ -161,4 +161,60 @@ test.describe('rule-based backtest', () => {
 
     expect(download.suggestedFilename()).toMatch(/^marketlab-trades-.*\.csv$/);
   });
+
+  test('saves a research run, verifies it and keeps it after a reload', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await expect(panel.getByRole('button', { name: 'Save run' })).toBeEnabled();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body')).toContainText('Saved research run "Untitled strategy"');
+
+    const runs = panel.getByRole('combobox', { name: 'Saved research runs' });
+    await expect(runs).toContainText('Untitled strategy');
+    await expect(panel.getByText(/Window fingerprint sha256:[0-9a-f]+/)).toBeVisible();
+
+    // The saved configuration is inspectable, not only its outputs.
+    await panel.getByText('Strategy configuration recorded with this run').click();
+    await expect(panel.getByText('20-session SMA crosses above 50-session SMA')).toBeVisible();
+
+    // Verification re-runs the frozen engine against the stored inputs and
+    // reports a match without altering the saved record.
+    await panel.getByRole('button', { name: 'Rerun and verify' }).click();
+    await expect(panel.getByText('Verified', { exact: true })).toBeVisible();
+
+    await page.reload();
+    const reloaded = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await expect(reloaded.getByRole('combobox', { name: 'Saved research runs' })).toContainText('Untitled strategy');
+    await expect(reloaded.getByText(/Window fingerprint sha256:[0-9a-f]+/)).toBeVisible();
+  });
+
+  test('exports a research manifest and refuses to overwrite it on re-import', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(panel.getByRole('button', { name: 'Export manifest' })).toBeEnabled();
+
+    const downloadPromise = page.waitForEvent('download');
+    await panel.getByRole('button', { name: 'Export manifest' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.research-run\.json$/);
+    const manifestPath = await download.path();
+    expect(manifestPath).not.toBeNull();
+
+    await panel.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(panel.getByText('No saved research runs')).toBeVisible();
+
+    const fileInput = panel.getByLabel('Import research run manifest');
+    await fileInput.setInputFiles(manifestPath as string);
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Untitled strategy"');
+    await expect(panel.getByRole('combobox', { name: 'Saved research runs' })).toContainText('Untitled strategy');
+
+    // A second import of the same immutable run is reported, not written.
+    await fileInput.setInputFiles(manifestPath as string);
+    await expect(page.locator('.toast-body').last()).toContainText('already saved');
+  });
 });
