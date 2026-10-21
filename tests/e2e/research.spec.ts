@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { readStore, seedLibrary } from './fixtures/library';
 
 // The application bundles no data, so the research screens are tested against
@@ -171,7 +172,7 @@ test.describe('rule-based backtest', () => {
     await panel.getByRole('button', { name: 'Save run' }).click();
     await expect(page.locator('.toast-body')).toContainText('Saved research run "Untitled strategy"');
 
-    const runs = panel.getByRole('combobox', { name: 'Saved research runs' });
+    const runs = panel.getByRole('list', { name: 'Saved research runs' });
     await expect(runs).toContainText('Untitled strategy');
     await expect(panel.getByText(/Window fingerprint sha256:[0-9a-f]+/)).toBeVisible();
 
@@ -186,7 +187,7 @@ test.describe('rule-based backtest', () => {
 
     await page.reload();
     const reloaded = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
-    await expect(reloaded.getByRole('combobox', { name: 'Saved research runs' })).toContainText('Untitled strategy');
+    await expect(reloaded.getByRole('list', { name: 'Saved research runs' })).toContainText('Untitled strategy');
     await expect(reloaded.getByText(/Window fingerprint sha256:[0-9a-f]+/)).toBeVisible();
   });
 
@@ -211,7 +212,7 @@ test.describe('rule-based backtest', () => {
     const fileInput = panel.getByLabel('Import research run manifest');
     await fileInput.setInputFiles(manifestPath as string);
     await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Untitled strategy"');
-    await expect(panel.getByRole('combobox', { name: 'Saved research runs' })).toContainText('Untitled strategy');
+    await expect(panel.getByRole('list', { name: 'Saved research runs' })).toContainText('Untitled strategy');
 
     // A second import of the same immutable run is reported, not written.
     await fileInput.setInputFiles(manifestPath as string);
@@ -322,5 +323,106 @@ test.describe('rule-based backtest', () => {
     // same objects after selecting, reading and swapping.
     const after = await readStore(page, 'researchRuns');
     expect(after).toEqual(before);
+  });
+
+  test('filters the run library and renames a snapshot without changing its results', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    const saveRun = panel.getByRole('button', { name: 'Save run' });
+
+    await page.getByLabel('Strategy name').fill('Baseline run');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Stale')).toBeHidden();
+    await saveRun.click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Baseline run"');
+
+    await page.getByLabel('Strategy name').fill('Half size');
+    await page.getByLabel('Position size (%)').fill('50');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Stale')).toBeHidden();
+    await saveRun.click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run "Half size"');
+
+    const library = panel.getByRole('list', { name: 'Saved research runs' });
+    await expect(library.getByRole('button')).toHaveCount(2);
+    await expect(library).toContainText('Baseline run');
+    await expect(library).toContainText('Half size');
+    await expect(library).toContainText('Return');
+    await expect(library).toContainText('Trades');
+    await expect(library).toContainText('Sharpe');
+
+    const before = await readStore(page, 'researchRuns');
+    const baselineBefore = before.find((run) => run.name === 'Baseline run');
+    expect(baselineBefore).toBeDefined();
+    const baselineId = String(baselineBefore!.id);
+
+    await library.getByRole('button', { name: /Baseline run/ }).click();
+    await expect(panel.locator('.research-run-inspector-title')).toContainText('Baseline run');
+
+    // Filtering narrows the library and follows the visible set. A zero-match
+    // filter hides the inspector instead of showing a run outside the results.
+    const filter = panel.getByRole('textbox', { name: 'Filter saved runs' });
+    await filter.fill('half');
+    await expect(library.getByRole('button')).toHaveCount(1);
+    await expect(library).toContainText('Half size');
+    await expect(library).not.toContainText('Baseline run');
+    await expect(panel.locator('.research-run-inspector-title')).toContainText('Half size');
+    await filter.fill('zzz');
+    await expect(panel.getByText('No runs match this filter')).toBeVisible();
+    await expect(panel.locator('.research-runs-inspector')).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Clear filter' }).click();
+    await expect(library.getByRole('button')).toHaveCount(2);
+
+    await library.getByRole('button', { name: /Baseline run/ }).click();
+    await expect(panel.locator('.research-run-inspector-title')).toContainText('Baseline run');
+
+    // Renaming is a metadata correction: blank names are refused, and the
+    // recorded snapshot must remain identical except for the display label.
+    await panel.getByRole('button', { name: 'Rename' }).click();
+    const nameInput = panel.getByRole('textbox', { name: 'Research run name' });
+    await expect(nameInput).toBeFocused();
+    await nameInput.fill('   ');
+    await panel.getByRole('button', { name: 'Save name' }).click();
+    await expect(panel.getByRole('alert')).toContainText('Enter a name');
+
+    await nameInput.fill('Baseline renamed');
+    await nameInput.press('Enter');
+    await expect(page.locator('.toast-body').last()).toContainText('Renamed research run to "Baseline renamed"');
+    await expect(library).toContainText('Baseline renamed');
+    await expect(panel.locator('.research-run-inspector-title')).toContainText('Baseline renamed');
+
+    const after = await readStore(page, 'researchRuns');
+    const baselineAfter = after.find((run) => String(run.id) === baselineId);
+    expect(baselineAfter).toBeDefined();
+    expect(baselineAfter).toEqual({ ...baselineBefore, name: 'Baseline renamed' });
+
+    // The comparison reads live records, so its labels update without a rerun.
+    const compare = page.locator('.panel').filter({ hasText: 'Compare saved runs' }).first();
+    await expect(compare.getByRole('combobox', { name: 'Run A' })).toContainText('Baseline renamed');
+
+    // Export uses the corrected label and still carries the same recorded metrics.
+    const downloadPromise = page.waitForEvent('download');
+    await panel.getByRole('button', { name: 'Export manifest' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toContain('baseline-renamed');
+    const manifestPath = await download.path();
+    expect(manifestPath).not.toBeNull();
+    const manifest = JSON.parse(await readFile(manifestPath as string, 'utf8')) as {
+      run: { name: string; metrics: unknown };
+    };
+    expect(manifest.run.name).toBe('Baseline renamed');
+    expect(manifest.run.metrics).toEqual(baselineBefore!.metrics);
+
+    await page.reload();
+    const reloaded = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await expect(reloaded.getByRole('list', { name: 'Saved research runs' })).toContainText('Baseline renamed');
+
+    await page.setViewportSize({ width: 390, height: 900 });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(false);
   });
 });
