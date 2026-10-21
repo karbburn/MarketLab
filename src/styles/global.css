@@ -1933,6 +1933,7 @@ table.data tr.dim td {
   display: grid;
   gap: 10px;
   max-width: 760px;
+  margin: 0 auto;
 }
 
 .learn-hero h1 {
@@ -2072,6 +2073,7 @@ table.data tr.dim td {
   display: grid;
   gap: 11px;
   max-width: 72ch;
+  margin: 0 auto;
 }
 
 .learn-prose p {
@@ -2152,6 +2154,7 @@ table.data tr.dim td {
   display: grid;
   gap: 4px;
   max-width: 72ch;
+  margin: 0 auto;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
   border-radius: var(--radius);
@@ -2287,6 +2290,7 @@ table.data tr.dim td {
   display: grid;
   gap: 12px;
   max-width: 72ch;
+  margin: 0 auto;
   padding: 14px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
