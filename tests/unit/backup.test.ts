@@ -376,6 +376,37 @@ describe('parseBackup validation', () => {
     expect(result.skipped).toContain('bars:d1');
   });
 
+  it('rejects a restored series with an impossible high/low instead of loading it', () => {
+    // The shared bar rules reject this; a hand-edited or truncated file must
+    // not be able to put a high below its low into charts or screeners.
+    const inconsistent = [{ date: '2024-01-02', open: 100, high: 90, low: 110, close: 100, volume: 10 }];
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: inconsistent }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
+    expect(result.skipped).toContain('bars:d1');
+    expect(result.skipped).toContain('datasets:d1 (missing bars)');
+  });
+
+  it('rejects a restored series that repeats a session', () => {
+    const duplicated = [...bars, { ...(bars[0] as Bar) }];
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: duplicated }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
+  });
+
+  it('rejects a restored series stored out of chronological order', () => {
+    const reversed = [...bars].reverse();
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: reversed }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
+  });
+
   it('rejects screeners that do not satisfy the screener schema', () => {
     const incomplete = {
       id: 's1',

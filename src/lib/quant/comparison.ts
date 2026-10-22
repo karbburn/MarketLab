@@ -14,14 +14,16 @@ function alignmentKey(bar: Bar): string {
 }
 
 /**
- * Aligns multiple bar series on the dates they have in common.
+ * Aligns multiple bar series on the periods they have in common.
  *
- * A date is only included when every series provides a bar for it, so no value
+ * A key is only included when every series provides a bar for it, so no value
  * is ever forward-filled or interpolated. Aggregated bars are matched on their
  * bucket key (`2024-W01`, `2024-08`) rather than their last-session date, so two
  * markets whose final session of a week or month differs still share the
  * period; the axis is still labelled with the first series' real session date.
- * Series with no overlap produce an empty alignment rather than an approximation.
+ * Callers must pass bars at a common timeframe (as `barsForTimeframe` returns
+ * them, which tags native weekly/monthly bars with their period too); series
+ * with no overlap produce an empty alignment rather than an approximation.
  */
 export function alignOnCommonDates(series: ReadonlyArray<readonly Bar[]>): AlignedSeries {
   if (series.length === 0) return { dates: [], closes: [] };
