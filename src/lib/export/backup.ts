@@ -22,7 +22,7 @@ import {
   screenerDefinitionSchema,
 } from '../workspace/schema';
 import { resolveSortWindow } from '../screener/fields';
-import { validateBarEntries } from '../validation/dataset';
+import { barSeriesContentHash, validateBarEntries } from '../validation/dataset';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -185,14 +185,25 @@ export function parseBackup(
   // Datasets whose bars are missing, or whose instrument is missing, are dropped
   // with a note rather than loaded in a broken state.
   const instrumentIds = new Set(instruments.map((instrument) => instrument.id));
-  const barsById = new Set(bars.map((entry) => entry.id));
+  const barsById = new Map(bars.map((entry) => [entry.id, entry.bars]));
   const usableDatasets = datasets.filter((dataset) => {
     if (!instrumentIds.has(dataset.instrumentId)) {
       skipped.push(`datasets:${dataset.id} (missing instrument)`);
       return false;
     }
-    if (!barsById.has(dataset.id)) {
+    const storedBars = barsById.get(dataset.id);
+    if (!storedBars) {
       skipped.push(`datasets:${dataset.id} (missing bars)`);
+      return false;
+    }
+    // The content hash is the dataset's identity, not decoration: a merge
+    // treats an equal hash as the same series and saved-run provenance quotes
+    // it. Recompute it from the bars actually received so a file cannot claim
+    // an identity its data does not have (for example by borrowing another
+    // series' hash and being silently deduplicated onto it). An empty hash is a
+    // legacy record with no identity to check, so it is left as it was.
+    if (dataset.contentHash && barSeriesContentHash(storedBars) !== dataset.contentHash) {
+      skipped.push(`datasets:${dataset.id} (content hash mismatch)`);
       return false;
     }
     return true;

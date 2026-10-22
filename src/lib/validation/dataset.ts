@@ -135,6 +135,19 @@ function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) <= NUMERIC_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b));
 }
 
+/**
+ * Content identity of a series: the digest a `Dataset` records.
+ *
+ * Exported so a restore can recompute it from the bars it actually received
+ * instead of trusting the file's metadata. Both sides must use this single
+ * definition, or a restored dataset would be refused for a hash that differs
+ * only in how it was computed.
+ */
+export function barSeriesContentHash(bars: readonly Bar[]): string {
+  const source = bars.map((bar) => `${bar.date}:${bar.open}:${bar.high}:${bar.low}:${bar.close}:${bar.volume ?? ''}`).join('|');
+  return source ? `fnv1a-${hashString(source)}` : '';
+}
+
 export function validateCsvRows(input: CsvValidationInput): CsvValidationResult {
   const { rows, mapping, duplicatePolicy } = input;
   const fatalErrors: string[] = [];
@@ -430,13 +443,11 @@ export function validateBarEntries(input: BarSeriesValidationInput): BarSeriesVa
     }
   }
 
-  const hashSource = bars.map((bar) => `${bar.date}:${bar.open}:${bar.high}:${bar.low}:${bar.close}:${bar.volume ?? ''}`).join('|');
-
   return {
     bars,
     fatalErrors,
     hasVolume: bars.some((bar) => bar.volume !== null),
-    contentHash: hashSource ? `fnv1a-${hashString(hashSource)}` : '',
+    contentHash: barSeriesContentHash(bars),
     summary: {
       acceptedRows: bars.length,
       rejectedRows,
