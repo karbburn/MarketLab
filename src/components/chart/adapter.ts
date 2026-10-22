@@ -510,6 +510,21 @@ export class ChartController {
     return { from: range.from as number, to: range.to as number };
   }
 
+  /**
+   * Draws a linked panel's crosshair without moving the pointer, or clears it.
+   *
+   * `setCrosshairPosition` does not emit crosshair-move callbacks, so a mirrored
+   * line cannot feed back into the panel that produced it. The price belongs to
+   * this panel's own bar for the date; nothing is borrowed from the source panel.
+   */
+  setMirroredCrosshair(point: { date: string; price: number } | null): void {
+    if (!point || !this.priceSeries) {
+      this.chart.clearCrosshairPosition();
+      return;
+    }
+    this.chart.setCrosshairPosition(point.price, point.date as Time, this.priceSeries);
+  }
+
   setVisibleRange(range: { from: number; to: number }): void {
     this.chart.timeScale().setVisibleLogicalRange(range as LogicalRange);
   }

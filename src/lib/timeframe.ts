@@ -88,6 +88,19 @@ export function resolveTimeframe(dataset: Dataset, requested: Timeframe): Timefr
 }
 
 /**
+ * Period key a session date falls into at `timeframe`, matching the keys
+ * {@link aggregateBars} writes. Daily bars have no period of their own.
+ *
+ * This is also how a linked panel maps a crosshair from another panel: the source
+ * panel knows a session date, and a weekly or monthly panel needs the key of the
+ * period containing it, not the date the source happens to be showing.
+ */
+export function periodKeyForDate(date: string, timeframe: Timeframe): string | undefined {
+  if (timeframe === '1D') return undefined;
+  return timeframe === '1W' ? weekKey(date) : monthKey(date);
+}
+
+/**
  * Period key for a bar that is already at `timeframe`, matching what
  * {@link aggregateBars} would write.
  *
@@ -98,8 +111,7 @@ export function resolveTimeframe(dataset: Dataset, requested: Timeframe): Timefr
  * session each series happens to end on.
  */
 function periodBucket(bar: Bar, timeframe: Timeframe): string | undefined {
-  if (timeframe === '1D') return undefined;
-  return bar.bucket ?? (timeframe === '1W' ? weekKey(bar.date) : monthKey(bar.date));
+  return bar.bucket ?? periodKeyForDate(bar.date, timeframe);
 }
 
 /** Copies bars at `timeframe`, tagging each with the period bucket it covers. */
