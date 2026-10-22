@@ -21,7 +21,8 @@ import {
 } from '@phosphor-icons/react';
 import type { ChartConfig, ChartType, Drawing, DrawingAnchor, DrawingType, PriceScaleMode, Timeframe } from '../../domain/types';
 import { formatPrice, formatSignedPercent } from '../../lib/format';
-import { barsForTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
+import { barsForTimeframe, resolveTimeframe, timeframeLabel, availableTimeframes } from '../../lib/timeframe';
+import { linkedBarForCrosshair } from '../../lib/chart/crosshair-link';
 import { calculateIndicator, getIndicatorDefinition } from '../../lib/indicators';
 import { describeIndicatorInstance } from '../../lib/indicators/management';
 import {
@@ -94,6 +95,8 @@ export function ChartPanel({
   onFocus,
   onRangeChange,
   appliedRange,
+  onCrosshairDate,
+  mirroredCrosshairDate,
 }: {
   chart: ChartConfig;
   workspaceId: string;
@@ -102,6 +105,10 @@ export function ChartPanel({
   onFocus: () => void;
   onRangeChange?: (range: { from: number; to: number } | null) => void;
   appliedRange?: { from: number; to: number } | null;
+  /** Publishes the session under this panel's crosshair; null when it leaves. */
+  onCrosshairDate?: (date: string | null) => void;
+  /** A session hovered on another linked panel, mirrored here without the pointer. */
+  mirroredCrosshairDate?: string | null;
 }) {
   const { state, actions } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -130,6 +137,23 @@ export function ChartPanel({
   const [activeAnchor, setActiveAnchor] = useState<{ drawingId: string; index: number } | null>(null);
   const [anchorAnnouncement, setAnchorAnnouncement] = useState('');
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
+  // The pointer owns the readout while it is over this panel. A mirrored
+  // crosshair only fills it when the pointer is elsewhere, so refs keep the
+  // chart subscription from re-binding on every workspace update.
+  const localReadoutRef = useRef<CrosshairReading>({ date: null, price: null, index: null });
+  const mirroredReadingRef = useRef<CrosshairReading | null>(null);
+  const mirroredDrawnRef = useRef(false);
+  const lastEmittedDateRef = useRef<string | null>(null);
+  const onCrosshairDateRef = useRef(onCrosshairDate);
+  const crosshairEmitterAttachedRef = useRef(onCrosshairDate);
+  useEffect(() => {
+    // A newly attached link must publish the session the pointer already rests
+    // on, so re-arm the emitter only on the off -> on transition. Comparing the
+    // date alone is enough during normal hovers.
+    if (!crosshairEmitterAttachedRef.current && onCrosshairDate) lastEmittedDateRef.current = null;
+    crosshairEmitterAttachedRef.current = onCrosshairDate;
+    onCrosshairDateRef.current = onCrosshairDate;
+  }, [onCrosshairDate]);
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
@@ -170,6 +194,17 @@ export function ChartPanel({
     if (!dataset) return bars;
     return barsForTimeframe(bars, dataset, chart.timeframe);
   }, [bars, dataset, chart.timeframe]);
+
+  const resolvedTimeframe = useMemo(
+    () => (dataset ? resolveTimeframe(dataset, chart.timeframe) : chart.timeframe),
+    [dataset, chart.timeframe],
+  );
+  // Resolved against this panel's own bars and timeframe: a session the series
+  // did not trade yields null rather than the nearest bar.
+  const mirroredBar = useMemo(
+    () => linkedBarForCrosshair(rendered, mirroredCrosshairDate ?? null, resolvedTimeframe),
+    [rendered, mirroredCrosshairDate, resolvedTimeframe],
+  );
 
   const allViews = useMemo(() => datasetViews(state), [state]);
 
@@ -256,13 +291,50 @@ export function ChartPanel({
     if (!containerRef.current) return;
     const controller = new ChartController(containerRef.current);
     controllerRef.current = controller;
-    const unsubscribe = controller.subscribeCrosshair((reading) => setReadout(reading));
+    const unsubscribe = controller.subscribeCrosshair((reading) => {
+      localReadoutRef.current = reading;
+      // With the pointer outside, keep showing the linked session rather than
+      // snapping back to the latest bar.
+      setReadout(reading.date === null && mirroredReadingRef.current ? mirroredReadingRef.current : reading);
+      const emit = onCrosshairDateRef.current;
+      if (emit && lastEmittedDateRef.current !== reading.date) {
+        lastEmittedDateRef.current = reading.date;
+        emit(reading.date);
+      }
+    });
     return () => {
       unsubscribe();
       controllerRef.current = null;
       controller.destroy();
     };
   }, []);
+
+  // Mirror a session hovered on another panel. The line is drawn from this
+  // panel's own bar for that date or period, and only cleared when something was
+  // actually drawn, so this panel's real pointer crosshair is left alone.
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+    if (mirroredBar) {
+      controller.setMirroredCrosshair({ date: mirroredBar.date, price: mirroredBar.close });
+      mirroredDrawnRef.current = true;
+      const index = rendered.findIndex((bar) => bar.date === mirroredBar.date);
+      const next: CrosshairReading = {
+        date: mirroredBar.date,
+        price: mirroredBar.close,
+        index: index >= 0 ? index : null,
+      };
+      mirroredReadingRef.current = next;
+      if (localReadoutRef.current.date === null) setReadout(next);
+      return;
+    }
+    if (mirroredDrawnRef.current) {
+      controller.setMirroredCrosshair(null);
+      mirroredDrawnRef.current = false;
+    }
+    mirroredReadingRef.current = null;
+    if (localReadoutRef.current.date === null) setReadout({ date: null, price: null, index: null });
+  }, [mirroredBar, rendered]);
 
   useEffect(() => {
     const controller = controllerRef.current;

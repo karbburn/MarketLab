@@ -147,7 +147,7 @@ export function WorkspacesPage() {
                       <td className="num">{indicators}</td>
                       <td className="num">{drawings}</td>
                       <td className="muted">
-                        {workspace.linkGroups[0]?.properties.filter((property) => property !== 'crosshair').join(', ') || 'none'}
+                        {workspace.linkGroups[0]?.properties.join(', ') || 'none'}
                       </td>
                       <td className="mono faint">{workspace.updatedAt.slice(0, 16).replace('T', ' ')}</td>
                       <td>

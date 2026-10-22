@@ -14,6 +14,7 @@ const LINK_PROPERTIES: Array<{ id: LinkProperty; label: string; note: string }> 
   { id: 'symbol', label: 'Symbol', note: 'Panel symbol and dataset follow the focused panel' },
   { id: 'timeframe', label: 'Timeframe', note: 'Timeframe follows the focused panel' },
   { id: 'visible-range', label: 'Visible range', note: 'Mirror the focused panel zoom across panels' },
+  { id: 'crosshair', label: 'Crosshair', note: 'Mirror the hovered session across panels, when the other series has a bar for it' },
 ];
 
 /** Smallest layout that can render every stored panel. */
@@ -29,6 +30,9 @@ export function ChartWorkspacePage() {
   const views = useMemo(() => datasetViews(state), [state]);
   const [focusedChartId, setFocusedChartId] = useState<string | null>(null);
   const [sharedRange, setSharedRange] = useState<{ from: number; to: number } | null>(null);
+  // The panel currently under the pointer and the session it reports. Excluding
+  // that panel from mirroring keeps its real crosshair in charge of itself.
+  const [linkedCrosshair, setLinkedCrosshair] = useState<{ chartId: string; date: string } | null>(null);
   const [watchlistByWorkspace, setWatchlistByWorkspace] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -61,6 +65,8 @@ export function ChartWorkspacePage() {
 
   const writeLinkProperties = (properties: LinkProperty[]) => {
     if (!workspace) return;
+    // Turning the link off must not leave a line drawn by a peer panel.
+    if (!properties.includes('crosshair')) setLinkedCrosshair(null);
     void actions.updateWorkspace(workspace.id, (current) => ({
       ...current,
       linkGroups: [
@@ -68,12 +74,21 @@ export function ChartWorkspacePage() {
           id: current.linkGroups[0]?.id ?? `link_${current.id}`,
           name: current.linkGroups[0]?.name ?? 'Linked panels',
           chartIds: current.charts.map((chart) => chart.id),
-          // `crosshair` is not implemented; drop any stored value rather than
-          // persisting a property that nothing reads.
-          properties: properties.filter((property) => property !== 'crosshair'),
+          properties,
         },
       ],
     }));
+  };
+
+  // A crosshair event fires on every pointer move; only a new session or panel
+  // is worth re-rendering the workspace for. Returning the same state makes
+  // React bail out instead of repainting every panel at pointer frequency.
+  const reportLinkedCrosshair = (chartId: string, date: string | null) => {
+    setLinkedCrosshair((current) => {
+      if (date === null) return current === null ? current : null;
+      if (current && current.chartId === chartId && current.date === date) return current;
+      return { chartId, date };
+    });
   };
 
   // Propagate symbol, dataset and timeframe from the focused panel to its links.
@@ -242,7 +257,10 @@ export function ChartWorkspacePage() {
                 </span>
               </label>
             ))}
-            <span className="field-hint">Range mirroring only applies to panels showing the same dataset and timeframe.</span>
+            <span className="field-hint">
+              Range mirroring only applies to panels showing the same dataset and timeframe. A linked crosshair appears
+              only where the other series has a bar for that session or period.
+            </span>
           </div>
 
           <div className="row">
@@ -320,6 +338,16 @@ export function ChartWorkspacePage() {
                 chart.datasetId === focusedChart?.datasetId &&
                 chart.timeframe === focusedChart?.timeframe
                   ? sharedRange
+                  : null
+              }
+              onCrosshairDate={
+                linksEnabled('crosshair')
+                  ? (date) => reportLinkedCrosshair(chart.id, date)
+                  : undefined
+              }
+              mirroredCrosshairDate={
+                linksEnabled('crosshair') && linkedCrosshair && linkedCrosshair.chartId !== chart.id
+                  ? linkedCrosshair.date
                   : null
               }
             />

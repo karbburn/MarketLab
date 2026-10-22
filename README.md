@@ -42,9 +42,10 @@ TradingView or any other commercial charting platform; it reimplements a familia
 - Candlestick, OHLC bar, line, area and baseline series, with a volume pane and normal,
   logarithmic or percentage price scales.
 - Crosshair readout showing OHLC, change and session date for the bar under the pointer.
-- Layouts of one, two stacked, two side by side or four panels. Link groups keep panels that
-  share a dataset and timeframe in step for symbol, timeframe or visible range, and reducing a
-  layout hides panels without deleting them or their drawings.
+- Layouts of one, two stacked, two side by side or four panels. Link groups keep panels in step for
+  symbol, timeframe, visible range or crosshair; a linked crosshair follows the hovered session (or
+  its week or month) into any panel that has a bar for it. Reducing a layout hides panels without
+  deleting them or their drawings.
 - Drawing tools: trend line, ray, horizontal level, vertical marker, zone rectangle, Fibonacci
   retracement, measure move and text label — with drag-to-move, undo/redo (`Ctrl`/`Cmd`+`Z`,
   `Shift` to redo) and `Delete` to remove a selection. Shortcuts apply only to the focused chart

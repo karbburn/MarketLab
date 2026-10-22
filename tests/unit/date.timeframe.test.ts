@@ -4,6 +4,7 @@ import {
   aggregateBars,
   availableTimeframes,
   barsForTimeframe,
+  periodKeyForDate,
   resolveTimeframe,
   timeframeFrequency,
   timeframeLabel,
@@ -196,5 +197,15 @@ describe('timeframe availability', () => {
     // Daily bars keep their session date as the alignment key.
     const daily = barsForTimeframe([bar('2024-01-05', 10, 16, 9, 15, 1500)], dataset('daily'), '1D');
     expect(daily[0]?.bucket).toBeUndefined();
+  });
+});
+
+describe('periodKeyForDate', () => {
+  it('derives the same keys aggregation writes, and none for daily', () => {
+    // Friday and the Thursday of the same week share a key.
+    expect(periodKeyForDate('2024-01-05', '1W')).toBe(periodKeyForDate('2024-01-04', '1W'));
+    expect(periodKeyForDate('2024-01-05', '1W')).toBe('2024-W01');
+    expect(periodKeyForDate('2024-02-14', '1M')).toBe('2024-02');
+    expect(periodKeyForDate('2024-02-14', '1D')).toBeUndefined();
   });
 });
