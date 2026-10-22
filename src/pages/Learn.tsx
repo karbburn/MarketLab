@@ -119,24 +119,6 @@ export function LearnPage() {
     };
   }, []);
 
-  const [readingProgress, setReadingProgress] = useState(0);
-
-  useEffect(() => {
-    const updateProgress = () => {
-      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-      if (scrollHeight > 0) {
-        setReadingProgress(Math.min(100, Math.max(0, (window.scrollY / scrollHeight) * 100)));
-      }
-    };
-    updateProgress();
-    window.addEventListener('scroll', updateProgress, { passive: true });
-    window.addEventListener('resize', updateProgress);
-    return () => {
-      window.removeEventListener('scroll', updateProgress);
-      window.removeEventListener('resize', updateProgress);
-    };
-  }, []);
-
   const chooseSection = (id: string) => {
     setActiveSection(id);
     // A click on the section already in the URL does not change the URL, so
@@ -146,12 +128,7 @@ export function LearnPage() {
 
   return (
     <div className="page learn-page">
-      <div className="learn-progress-track" aria-hidden>
-        <div className="learn-progress-bar" style={{ width: `${readingProgress}%` }} />
-      </div>
-
       <header className="learn-hero">
-        <div className="learn-hero-badge">Methodology &amp; Field Guide</div>
         <div className="learn-hero-copy">
           <h1>How MarketLab works</h1>
           <p className="learn-lede">

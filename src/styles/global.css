@@ -1925,44 +1925,11 @@ table.data tr.dim td {
   position: relative;
 }
 
-.learn-progress-track {
-  position: fixed;
-  top: var(--shell-topbar);
-  left: 0;
-  right: 0;
-  height: 3px;
-  z-index: 40;
-  background: transparent;
-  pointer-events: none;
-}
-
-.learn-progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--up));
-  transition: width 100ms ease-out;
-}
-
 .learn-hero {
   display: grid;
   gap: 20px;
   padding: 16px 0 28px;
   border-bottom: 1px solid var(--border-subtle);
-}
-
-.learn-hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  padding: 4px 10px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .learn-hero-copy {
@@ -2011,27 +1978,12 @@ table.data tr.dim td {
   overflow: hidden;
 }
 
-.learn-fact::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: transparent;
-  transition: background var(--duration) ease;
-}
-
 .learn-fact:hover {
   background: var(--surface-raised);
   border-color: var(--border-strong);
   text-decoration: none;
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
-}
-
-.learn-fact:hover::before {
-  background: var(--accent);
 }
 
 .learn-fact:focus-visible {
@@ -2153,16 +2105,7 @@ table.data tr.dim td {
   background: var(--accent-soft);
 }
 
-.learn-rail a[aria-current='location']::before {
-  content: '';
-  position: absolute;
-  left: -15px;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-}
+
 
 .learn-rail-top {
   margin-top: 14px;
@@ -2296,7 +2239,7 @@ table.data tr.dim td {
 .learn-copy:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
-  border-color: var(--accent);
+  border-color: var(--border-strong);
 }
 
 .learn-copy:focus-visible {
@@ -2331,11 +2274,9 @@ table.data tr.dim td {
   max-width: 76ch;
   margin: 4px 0 0;
   padding: 14px 18px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface-panel));
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  background: var(--surface-inset);
 }
 
 .learn-callout-label {
@@ -2384,7 +2325,7 @@ table.data tr.dim td {
 
 .learn-links a:hover {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-color: var(--border-strong);
   background: var(--surface-hover);
   text-decoration: none;
 }
@@ -3073,21 +3014,8 @@ table.data tr.dim td {
   gap: 6px;
   padding: 11px 12px;
   border: 1px solid var(--border-subtle);
-  border-left: 2px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface-inset);
-}
-
-.learn-compare-verdict[data-state='not-comparable'] {
-  border-left-color: var(--warn);
-}
-
-.learn-compare-verdict[data-state='snapshot-only'] {
-  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
-.learn-compare-verdict[data-state='different-strategy'] {
-  border-left-color: color-mix(in srgb, var(--up) 55%, transparent);
 }
 
 .learn-compare-verdict-head {
@@ -3246,13 +3174,7 @@ table.data tr.dim td {
     padding-bottom: 2px;
   }
 
-  .learn-rail a[aria-current='location']::before {
-    display: none;
-  }
 
-  .learn-progress-track {
-    display: none;
-  }
 }
 
 @media (max-width: 900px) {
@@ -3603,21 +3525,8 @@ table.data tr.dim td {
   gap: 7px;
   padding: 9px 10px;
   border: 1px solid var(--border-subtle);
-  border-left-width: 2px;
   border-radius: var(--radius);
   background: var(--surface-inset);
-}
-
-.compare-findings.is-warning {
-  border-left-color: var(--warn);
-}
-
-.compare-findings.is-note {
-  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
-.compare-findings.is-match {
-  border-left-color: color-mix(in srgb, var(--up) 60%, transparent);
 }
 
 .compare-findings-head {
