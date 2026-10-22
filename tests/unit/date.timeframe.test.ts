@@ -174,7 +174,9 @@ describe('timeframe availability', () => {
     const weeklyBars = [bar('2024-01-05', 10, 16, 9, 15, 1500)];
     const result = barsForTimeframe(weeklyBars, dataset('weekly'), '1D');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual(weeklyBars[0]);
+    // The resolved timeframe is still weekly, so the bar is tagged with the
+    // week it covers while its OHLC values are passed through untouched.
+    expect(result[0]).toEqual({ ...weeklyBars[0], bucket: '2024-W01' });
     expect(timeframeFrequency('1W')).toBe('weekly');
   });
 
@@ -182,7 +184,17 @@ describe('timeframe availability', () => {
     const weeklyBars = [bar('2024-01-05', 10, 16, 9, 15, 1500)];
     const result = barsForTimeframe(weeklyBars, dataset('weekly'), '1M');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual(weeklyBars[0]);
+    expect(result[0]).toEqual({ ...weeklyBars[0], bucket: '2024-W01' });
     expect(timeframeLabel('1M', 'weekly')).toBe('Weekly');
+  });
+
+  it('tags a stored weekly or monthly series with the period it covers', () => {
+    const weekly = barsForTimeframe([bar('2024-01-05', 10, 16, 9, 15, 1500)], dataset('weekly'), '1W');
+    expect(weekly[0]?.bucket).toBe('2024-W01');
+    const monthly = barsForTimeframe([bar('2024-01-31', 10, 16, 9, 15, 1500)], dataset('monthly'), '1M');
+    expect(monthly[0]?.bucket).toBe('2024-01');
+    // Daily bars keep their session date as the alignment key.
+    const daily = barsForTimeframe([bar('2024-01-05', 10, 16, 9, 15, 1500)], dataset('daily'), '1D');
+    expect(daily[0]?.bucket).toBeUndefined();
   });
 });

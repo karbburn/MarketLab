@@ -135,6 +135,34 @@ describe('prepareComparison', () => {
     expect(candidatePoints[1]?.value).toBeCloseTo(101, 10);
   });
 
+  it('aligns a stored weekly series with daily bars aggregated to the same weeks', () => {
+    const dailyDates = ['2024-01-01', '2024-01-02', '2024-01-05', '2024-01-08', '2024-01-09', '2024-01-12'];
+    const storedWeekly: ComparisonTarget = {
+      ...target('weekly-etf', [104, 107], 'weekly'),
+      // A weekly series stored natively ends on its own last session and has no
+      // aggregation bucket; that must not make it incomparable to daily data.
+      bars: bars(['2024-01-05', '2024-01-12'], [104, 107]),
+    };
+    const daily: ComparisonTarget = {
+      ...target('aapl', [100]),
+      bars: bars(dailyDates, [100, 101, 104, 105, 106, 107]),
+    };
+
+    // Daily primary aggregated to weekly against a natively weekly candidate.
+    const forward = prepareComparison({ primary: daily, candidates: [storedWeekly], timeframe: '1W' });
+    expect(forward.status).toBe('ok');
+    expect(forward.sessionCount).toBe(2);
+    const forwardCandidate = forward.lines[1]?.points ?? [];
+    expect(forwardCandidate.map((point) => point.date)).toEqual(['2024-01-05', '2024-01-12']);
+    expect(forwardCandidate[1]?.value).toBeCloseTo((107 / 104) * 100, 10);
+
+    // The same comparison with the stored weekly series as the primary.
+    const reversed = prepareComparison({ primary: storedWeekly, candidates: [daily], timeframe: '1W' });
+    expect(reversed.status).toBe('ok');
+    const reversedCandidate = reversed.lines[1]?.points ?? [];
+    expect(reversedCandidate[1]?.value).toBeCloseTo((107 / 104) * 100, 10);
+  });
+
   it('reports an empty stored series instead of inventing one', () => {
     const empty: ComparisonTarget = { ...target('empty', []), bars: [] };
     const result = prepareComparison({

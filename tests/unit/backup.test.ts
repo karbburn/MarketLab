@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createBackup, isEmptyReplaceRestore, mergeBackup, parseBackup, type BackupBundle } from '../../src/lib/export/backup';
+import { createBackup, isEmptyReplaceRestore, mergeBackup, parseBackup, serialiseBackup, type BackupBundle } from '../../src/lib/export/backup';
+import { barSeriesContentHash } from '../../src/lib/validation/dataset';
 import type { BacktestConfig, Bar, Dataset, Instrument, ScreenerDefinition, UserPreferences, Watchlist, Workspace } from '../../src/domain/types';
 
 function instrument(id: string, symbol: string): Instrument {
@@ -340,7 +341,7 @@ describe('parseBackup validation', () => {
       schemaVersion: 1,
       exportedAt: '2024-02-01T00:00:00.000Z',
       instruments: [instrument('i1', 'AAA')],
-      datasets: [dataset('d1', 'i1', 'hash-1')],
+      datasets: [dataset('d1', 'i1', barSeriesContentHash(bars))],
       bars: [{ id: 'd1', bars }],
       workspaces: [],
       watchlists: [],
@@ -353,6 +354,59 @@ describe('parseBackup validation', () => {
 
   it('accepts a well-formed backup', () => {
     const result = parseBackup(backupInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datasets).toHaveLength(1);
+    expect(result.value.bars).toHaveLength(1);
+  });
+
+  it('accepts a backup it just exported, so hashing cannot drift on one side', () => {
+    const bundle = createBackup({
+      instruments: [instrument('i1', 'AAA')],
+      datasets: [dataset('d1', 'i1', barSeriesContentHash(bars))],
+      bars: [{ id: 'd1', bars }],
+      workspaces: [workspace('ws1', 'd1', 'i1')],
+      watchlists: [watchlist('wl1', ['i1'])],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    });
+    const result = parseBackup(JSON.parse(serialiseBackup(bundle)));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.skipped).toEqual([]);
+    expect(result.value.datasets).toHaveLength(1);
+    expect(result.value.bars).toHaveLength(1);
+  });
+
+  it('refuses a dataset whose bars do not reproduce its recorded hash', () => {
+    const result = parseBackup(backupInput({ datasets: [dataset('d1', 'i1', 'fnv1a-00000000')] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datasets).toEqual([]);
+    expect(result.value.bars).toEqual([]);
+    expect(result.skipped).toContain('datasets:d1 (content hash mismatch)');
+  });
+
+  it('refuses bars edited after export even when the recorded hash is unchanged', () => {
+    // Still OHLC-valid, so only the content check can catch the contradiction.
+    const edited = [{ ...(bars[0] as Bar), high: 2.5, close: 2.4 }, bars[1] as Bar];
+    const result = parseBackup(
+      backupInput({
+        datasets: [dataset('d1', 'i1', barSeriesContentHash(bars))],
+        bars: [{ id: 'd1', bars: edited }],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datasets).toEqual([]);
+    expect(result.value.bars).toEqual([]);
+    // The bars themselves passed the series rules; the hash is what disagrees.
+    expect(result.skipped).not.toContain('bars:d1');
+  });
+
+  it('keeps a legacy dataset that records no hash to verify', () => {
+    const result = parseBackup(backupInput({ datasets: [dataset('d1', 'i1', '')] }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.datasets).toHaveLength(1);
@@ -374,6 +428,37 @@ describe('parseBackup validation', () => {
     if (!result.ok) return;
     expect(result.value.bars).toEqual([]);
     expect(result.skipped).toContain('bars:d1');
+  });
+
+  it('rejects a restored series with an impossible high/low instead of loading it', () => {
+    // The shared bar rules reject this; a hand-edited or truncated file must
+    // not be able to put a high below its low into charts or screeners.
+    const inconsistent = [{ date: '2024-01-02', open: 100, high: 90, low: 110, close: 100, volume: 10 }];
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: inconsistent }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
+    expect(result.skipped).toContain('bars:d1');
+    expect(result.skipped).toContain('datasets:d1 (missing bars)');
+  });
+
+  it('rejects a restored series that repeats a session', () => {
+    const duplicated = [...bars, { ...(bars[0] as Bar) }];
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: duplicated }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
+  });
+
+  it('rejects a restored series stored out of chronological order', () => {
+    const reversed = [...bars].reverse();
+    const result = parseBackup(backupInput({ bars: [{ id: 'd1', bars: reversed }] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.bars).toEqual([]);
+    expect(result.value.datasets).toEqual([]);
   });
 
   it('rejects screeners that do not satisfy the screener schema', () => {

@@ -22,6 +22,7 @@ import {
   screenerDefinitionSchema,
 } from '../workspace/schema';
 import { resolveSortWindow } from '../screener/fields';
+import { barSeriesContentHash, validateBarEntries } from '../validation/dataset';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -133,11 +134,25 @@ export function parseBackup(
 
   const isInstruments = (value: unknown): value is Instrument => instrumentSchema.safeParse(value).success;
   const isDatasets = (value: unknown): value is Dataset => datasetSchema.safeParse(value).success;
-  const isBars = (value: unknown): value is { id: string; bars: Bar[] } =>
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    Array.isArray(value.bars) &&
-    value.bars.every((bar) => isBar(bar));
+  /**
+   * Restored bars must satisfy the same series rules as the CSV and provider
+   * ingest paths. A backup is a file on disk, so a duplicate session, an
+   * out-of-order row or a high below the low would otherwise reach charts,
+   * screeners and backtests without ever passing the importer. The shared
+   * validator is reused so restore cannot drift from ingest, and a series that
+   * fails is dropped whole rather than silently shortened.
+   */
+  function isBars(value: unknown): value is { id: string; bars: Bar[] } {
+    if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.bars)) return false;
+    if (!value.bars.every((bar) => isBar(bar))) return false;
+    // An entry with no bars is left to the dataset check below, as before.
+    if (value.bars.length === 0) return true;
+    const checked = validateBarEntries({
+      rows: value.bars.map((bar, index) => ({ ...bar, rowNumber: index + 1 })),
+      duplicatePolicy: 'reject',
+    });
+    return checked.fatalErrors.length === 0 && checked.summary.rejectedRows === 0 && checked.summary.sortCorrections === 0;
+  }
   const isWatchlists = (value: unknown): value is Watchlist => isRecord(value) && typeof value.id === 'string' && Array.isArray(value.instrumentIds);
   const isScreeners = (value: unknown): value is ScreenerDefinition => screenerDefinitionSchema.safeParse(value).success;
   const isBacktests = (value: unknown): value is BacktestConfig => backtestConfigSchema.safeParse(value).success;
@@ -170,14 +185,25 @@ export function parseBackup(
   // Datasets whose bars are missing, or whose instrument is missing, are dropped
   // with a note rather than loaded in a broken state.
   const instrumentIds = new Set(instruments.map((instrument) => instrument.id));
-  const barsById = new Set(bars.map((entry) => entry.id));
+  const barsById = new Map(bars.map((entry) => [entry.id, entry.bars]));
   const usableDatasets = datasets.filter((dataset) => {
     if (!instrumentIds.has(dataset.instrumentId)) {
       skipped.push(`datasets:${dataset.id} (missing instrument)`);
       return false;
     }
-    if (!barsById.has(dataset.id)) {
+    const storedBars = barsById.get(dataset.id);
+    if (!storedBars) {
       skipped.push(`datasets:${dataset.id} (missing bars)`);
+      return false;
+    }
+    // The content hash is the dataset's identity, not decoration: a merge
+    // treats an equal hash as the same series and saved-run provenance quotes
+    // it. Recompute it from the bars actually received so a file cannot claim
+    // an identity its data does not have (for example by borrowing another
+    // series' hash and being silently deduplicated onto it). An empty hash is a
+    // legacy record with no identity to check, so it is left as it was.
+    if (dataset.contentHash && barSeriesContentHash(storedBars) !== dataset.contentHash) {
+      skipped.push(`datasets:${dataset.id} (content hash mismatch)`);
       return false;
     }
     return true;

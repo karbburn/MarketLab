@@ -12,6 +12,7 @@
  */
 
 import type { Page } from '@playwright/test';
+import { barSeriesContentHash } from '../../../src/lib/validation/dataset';
 
 const DB_NAME = 'marketlab';
 // Mirrors `DB_VERSION` in src/lib/persistence/db.ts. The page-side seed
@@ -150,7 +151,10 @@ export function buildFixtureLibrary(): FixtureRecords {
       lastDate: series[series.length - 1]?.date ?? '',
       rowCount: series.length,
       importedAt: '2026-10-16T00:00:00.000Z',
-      contentHash: `fixture-${symbol.toLowerCase()}`,
+      // An app-produced dataset always records the digest of the bars it holds,
+      // and a restore verifies it. Fixtures must be internally consistent too,
+      // otherwise the export/restore test would be exercising a fake file.
+      contentHash: barSeriesContentHash(series),
       hasVolume: true,
       validation: validation(series.length),
     });
@@ -221,6 +225,8 @@ export function buildSparseOverlapLibrary(): FixtureRecords {
     dataset.firstDate = last.date;
     dataset.lastDate = last.date;
     dataset.rowCount = 1;
+    // Shortening the series changes its content identity.
+    dataset.contentHash = barSeriesContentHash([last]);
   }
   return records;
 }

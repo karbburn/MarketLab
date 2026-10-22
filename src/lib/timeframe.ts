@@ -87,13 +87,41 @@ export function resolveTimeframe(dataset: Dataset, requested: Timeframe): Timefr
   return available[0] as Timeframe;
 }
 
+/**
+ * Period key for a bar that is already at `timeframe`, matching what
+ * {@link aggregateBars} would write.
+ *
+ * Aggregated bars carry their bucket. A series stored natively at the target
+ * frequency never went through aggregation, so its bars have no bucket; deriving
+ * the key from the session date lets a native weekly/monthly series be aligned
+ * with an aggregated one by the period it covers rather than by whichever
+ * session each series happens to end on.
+ */
+function periodBucket(bar: Bar, timeframe: Timeframe): string | undefined {
+  if (timeframe === '1D') return undefined;
+  return bar.bucket ?? (timeframe === '1W' ? weekKey(bar.date) : monthKey(bar.date));
+}
+
+/** Copies bars at `timeframe`, tagging each with the period bucket it covers. */
+function atTimeframe(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
+  return bars.map((bar) => {
+    const bucket = periodBucket(bar, timeframe);
+    return bucket === undefined ? { ...bar } : { ...bar, bucket };
+  });
+}
+
+/**
+ * Returns the bars a panel should draw for the requested timeframe, resolved
+ * against the dataset's own frequency. Bars are tagged with the period bucket
+ * of the returned timeframe so comparisons can align on periods.
+ */
 export function barsForTimeframe(bars: readonly Bar[], dataset: Dataset, requested: Timeframe): Bar[] {
   const timeframe = resolveTimeframe(dataset, requested);
-  if (timeframeFrequency(timeframe) === dataset.frequency) return bars.map((bar) => ({ ...bar }));
+  if (timeframeFrequency(timeframe) === dataset.frequency) return atTimeframe(bars, timeframe);
   // Only aggregation (daily -> weekly/monthly) is supported. Lower-frequency
   // data is never interpolated into higher-frequency bars.
   if (dataset.frequency === 'daily') return aggregateBars(bars, timeframe);
-  return bars.map((bar) => ({ ...bar }));
+  return atTimeframe(bars, timeframe);
 }
 
 export function timeframeLabel(timeframe: Timeframe, source: Frequency): string {
