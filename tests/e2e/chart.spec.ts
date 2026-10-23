@@ -700,7 +700,12 @@ test.describe('chart workspace', () => {
 
     // The same pointer position with magnet off stores the raw chart price.
     await page.getByRole('button', { name: 'Horizontal level' }).click();
-    await page.mouse.click(box!.x + target!.x, target!.y + 4);
+    // The drawing toolbar scrolls into view when the trash button (bottom of the
+    // vertical toolbar) is clicked. Click through the stage with a position
+    // relative to its current box so Playwright can re-scroll without the
+    // coordinates going stale.
+    const position = { x: target!.x, y: target!.y - box!.y + 4 };
+    await stage.click({ position });
     await expect(deleteSelected).toBeEnabled();
     const raw = ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0]!;
     await deleteSelected.click();
@@ -709,7 +714,7 @@ test.describe('chart workspace', () => {
     await magnet.click();
     await expect(magnet).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'Horizontal level' }).click();
-    await page.mouse.click(box!.x + target!.x, target!.y + 4);
+    await stage.click({ position });
     await expect(deleteSelected).toBeEnabled();
 
     const snapped = ((await readDrawings(page))[0]?.anchors as Array<{ date: string; price: number }>)[0]!;
