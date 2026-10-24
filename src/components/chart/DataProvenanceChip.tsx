@@ -55,6 +55,7 @@ export function DataProvenanceDialog({
       <div className="stack">
         <div className="provenance-summary" data-status={summary.status}>
           <strong>{summary.headline}</strong>
+          <p className="provenance-status-note field-hint">{summary.statusNote}</p>
           <span className="field-hint">
             {summary.sourceLabel} &middot; {summary.coverage}
           </span>

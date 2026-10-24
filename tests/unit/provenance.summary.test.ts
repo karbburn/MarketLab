@@ -61,6 +61,10 @@ describe('buildProvenanceSummary', () => {
     expect(summary.status).toBe('clean');
     expect(summary.statusLabel).toBe('Data: clean');
     expect(summary.headline).toBe('Clean');
+    expect(summary.statusNote).toBe(
+      'No issues were recorded by import-time validation when this series was stored. ' +
+        'It does not certify the data; the limits below state what MarketLab cannot know.',
+    );
     expect(summary.issues).toEqual([]);
     expect(summary.inspectDatasetId).toBe('ds_test');
     expect(summary.fields).toEqual(
@@ -148,6 +152,9 @@ describe('buildProvenanceSummary', () => {
 
     expect(summary.status).toBe('attention');
     expect(summary.statusLabel).toBe('Data: 6 issues');
+    expect(summary.statusNote).toBe(
+      'Import-time validation recorded the issues listed below when this series was stored.',
+    );
     expect(summary.issues.map((issue) => issue.code)).toEqual([
       'rejected-rows',
       'duplicate-sessions',
@@ -191,6 +198,7 @@ describe('buildProvenanceSummary', () => {
     expect(summary.status).toBe('legacy');
     expect(summary.statusLabel).toBe('Data: legacy demo');
     expect(summary.headline).toBe('Legacy demo data');
+    expect(summary.statusNote).toBe('Synthetic demo series, not real market data.');
     expect(summary.fields).toEqual(
       expect.arrayContaining([expect.objectContaining({ label: 'Adjustment', value: 'Not applicable (synthetic series)' })]),
     );
@@ -209,6 +217,7 @@ describe('buildProvenanceSummary', () => {
 
     expect(summary.status).toBe('empty');
     expect(summary.statusLabel).toBe('Data: no rows');
+    expect(summary.statusNote).toBe('No rows are stored, so there is nothing to validate.');
     expect(summary.coverage).toBe('No stored sessions');
     expect(summary.fields).toEqual(
       expect.arrayContaining([expect.objectContaining({ label: 'Coverage', value: 'No stored sessions' })]),

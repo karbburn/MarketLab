@@ -47,6 +47,11 @@ export interface ProvenanceSummary {
   statusLabel: string;
   /** Headline used in the dialog and the chip's accessible name. */
   headline: string;
+  /**
+   * What the status actually claims. Without this, `Data: clean` reads as a
+   * certification of the prices rather than a report of what MarketLab checked.
+   */
+  statusNote: string;
   tone: 'up' | 'warn' | 'down';
   sourceLabel: string;
   sourceDetail: string;
@@ -280,27 +285,34 @@ export function buildProvenanceSummary(dataset: Dataset, context: ProvenanceCont
   let status: ProvenanceStatus;
   let headline: string;
   let statusLabel: string;
+  let statusNote: string;
   let tone: ProvenanceSummary['tone'];
 
   if (!hasRows) {
     status = 'empty';
     headline = 'No stored rows';
     statusLabel = 'Data: no rows';
+    statusNote = 'No rows are stored, so there is nothing to validate.';
     tone = 'down';
   } else if (legacy) {
     status = 'legacy';
     headline = 'Legacy demo data';
     statusLabel = 'Data: legacy demo';
+    statusNote = 'Synthetic demo series, not real market data.';
     tone = 'warn';
   } else if (issues.length > 0) {
     status = 'attention';
     headline = countLabel(issues.length, 'issue', 'issues');
     statusLabel = `Data: ${countLabel(issues.length, 'issue', 'issues')}`;
+    statusNote = 'Import-time validation recorded the issues listed below when this series was stored.';
     tone = 'warn';
   } else {
     status = 'clean';
     headline = 'Clean';
     statusLabel = 'Data: clean';
+    statusNote =
+      'No issues were recorded by import-time validation when this series was stored. ' +
+      'It does not certify the data; the limits below state what MarketLab cannot know.';
     tone = 'up';
   }
 
@@ -308,6 +320,7 @@ export function buildProvenanceSummary(dataset: Dataset, context: ProvenanceCont
     status,
     statusLabel,
     headline,
+    statusNote,
     tone,
     sourceLabel:
       dataset.sourceKind === 'provider-download'

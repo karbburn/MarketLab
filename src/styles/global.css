@@ -1533,6 +1533,11 @@ table.data tr.dim td {
   border-color: color-mix(in srgb, var(--down) 40%, transparent);
 }
 
+.provenance-status-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .provenance-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
