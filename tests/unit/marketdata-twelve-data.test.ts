@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { addDays } from '../../src/lib/date';
 import {
   YahooProviderError,
 } from '../../src/lib/marketdata/yahoo';
 import {
   TWELVE_DATA_PROVIDER_ID,
+  TWELVE_DATA_MAX_WINDOW_DAYS,
   fetchTwelveDataHistory,
   normaliseTwelveDataSeries,
+  twelveDataPageWindows,
   twelveDataTimeSeriesUrl,
 } from '../../src/lib/marketdata/twelvedata';
 import {
@@ -341,5 +344,309 @@ describe('hosted fallback policy', () => {
       if (previous === undefined) delete env.TWELVE_DATA_API_KEY;
       else env.TWELVE_DATA_API_KEY = previous;
     }
+  });
+});
+
+// ------------------------------------------------------------ long history
+
+/**
+ * A session can exist at most once per calendar day, so a window of N calendar
+ * days can contain at most N daily sessions. Keeping every window below the
+ * provider's per-request ceiling is therefore provable without knowing an
+ * instrument's session calendar.
+ */
+const DAY_MS = 86_400_000;
+
+function dayNumber(date: string): number {
+  return Date.parse(`${date}T00:00:00Z`);
+}
+
+function tdValues(dates: string[]): { values: Array<Record<string, string>> } {
+  return {
+    values: dates.map((date) => ({ datetime: date, open: '1', high: '2', low: '0.5', close: '1.5' })),
+  };
+}
+
+describe('Twelve Data window planning', () => {
+  it('answers a short request with one window and includes the requested end', () => {
+    expect(twelveDataPageWindows('2024-02-01', '2024-02-10')).toEqual([
+      { start: '2024-02-01', end: '2024-02-11' },
+    ]);
+  });
+
+  it('splits a long request into adjacent windows that cover it exactly', () => {
+    const windows = twelveDataPageWindows('1995-01-01', '2026-10-23');
+    expect(windows.length).toBeGreaterThan(1);
+    expect(windows[0]!.start).toBe('1995-01-01');
+    // Windows are half-open and adjacent: the next begins where the last ends.
+    for (let i = 1; i < windows.length; i += 1) {
+      expect(windows[i]!.start).toBe(windows[i - 1]!.end);
+    }
+    // The exclusive last end is one day past the requested end, consistent
+    // with the provider's observed exclusive end_date semantics.
+    expect(windows[windows.length - 1]!.end).toBe(addDays('2026-10-23', 1));
+  });
+
+  it('never plans a window that could exceed the per-request bar ceiling', () => {
+    const windows = twelveDataPageWindows('1900-01-01', '2026-10-24');
+    for (const window of windows) {
+      expect(dayNumber(window.end) - dayNumber(window.start)).toBeLessThanOrEqual(
+        TWELVE_DATA_MAX_WINDOW_DAYS * DAY_MS,
+      );
+    }
+  });
+});
+
+describe('Twelve Data long-range fetch', () => {
+  /** A request that yard-sticks into exactly the number of windows below. */
+  const LONG_RANGE = { symbol: 'AAPL', start: '2024-01-01', end: '2036-12-31' };
+  const LONG_WINDOWS = twelveDataPageWindows(LONG_RANGE.start, LONG_RANGE.end);
+
+  const YAHOO_THROTTLED = async (url: string | URL | Request): Promise<Response> => {
+    throw new Error(`unexpected provider call: ${String(url)}`);
+  };
+
+  function tdFetch(responses: Array<(() => Response) | null>): typeof fetch {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const requested = String(url);
+      if (!requested.includes('api.twelvedata.com')) return YAHOO_THROTTLED(url);
+      const index = calls.length;
+      if (index < responses.length) {
+        const factory = responses[index];
+        if (factory) {
+          calls.push(requested);
+          return factory();
+        }
+      }
+      throw new Error(`unexpected TD call ${index}: ${requested}`);
+    }) as unknown as typeof fetch;
+    (fetchImpl as unknown as { calls: string[]; }).calls = calls;
+    return fetchImpl;
+  }
+
+  it('fetches each window once, sequentially, and merges them ascending without duplicates', async () => {
+    const window1 = LONG_WINDOWS[0]!;
+    const window2 = LONG_WINDOWS[1]!;
+    expect(LONG_WINDOWS).toHaveLength(2);
+
+    // Page 1 also reports a session AT window 1's exclusive end, which an
+    // inclusive-end provider would repeat; page 2 reports it again, two
+    // sessions beyond page 1's site, plus one session beyond the requested
+    // end. The merge must emit that boundary date once and nothing outside.
+    const leakedBoundary = window1.end;
+    const beyondRequest = addDays(addDays(LONG_RANGE.end, 1), 5);
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start, addDays(leakedBoundary, -1), leakedBoundary])),
+      () => jsonResponse({
+        // The boundary session is reported again with a different close — the
+        // merge must keep the first window's value, and drop the leaked
+        // session beyond the requested range entirely.
+        values: [
+          { datetime: leakedBoundary, open: '1', high: '2', low: '0.5', close: '9.9' },
+          { datetime: addDays(window2.end, -1), open: '1', high: '2', low: '0.5', close: '1.5' },
+          { datetime: beyondRequest, open: '1', high: '2', low: '0.5', close: '1.5' },
+        ],
+      }),
+    ]);
+    const calls = (fetchImpl as unknown as { calls: string[] }).calls;
+
+    const payload = await fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl);
+
+    expect(calls).toHaveLength(2);
+    const [firstUrl, secondUrl] = calls.map((url) => new URLSearchParams(url.split('?')[1]));
+    expect(firstUrl!.get('start_date')).toBe(window1.start);
+    expect(firstUrl!.get('end_date')).toBe(window1.end);
+    expect(secondUrl!.get('start_date')).toBe(window2.start);
+    expect(secondUrl!.get('end_date')).toBe(window2.end);
+
+    const dates = payload.bars.map((bar) => bar.date);
+    expect([...dates].sort()).toEqual(dates);
+    expect(dates.filter((date) => date === leakedBoundary)).toHaveLength(1);
+    // The first window's value is kept for a session the provider reported twice.
+    expect(payload.bars.find((bar) => bar.date === leakedBoundary)!.close).toBe(1.5);
+    expect(dates).not.toContain(beyondRequest);
+    expect(dates[0]).toBe(LONG_RANGE.start);
+    expect(dates[dates.length - 1]).toBe(addDays(window2.end, -1));
+  });
+
+  it('keeps provider provenance for the whole requested range, not a window', async () => {
+    const fetchImpl = tdFetch([
+      () => jsonResponse({ ...tdValues([LONG_RANGE.start]), meta: { exchange: 'NASDAQ', currency: 'USD' } }),
+      () => jsonResponse({ ...tdValues([LONG_RANGE.end]), meta: { exchange: 'NASDAQ', currency: 'USD' } }),
+    ]);
+
+    const payload = await fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl);
+
+    expect(payload.provider.provider).toBe(TWELVE_DATA_PROVIDER_ID);
+    expect(payload.provider.rangeRequested).toEqual({ start: LONG_RANGE.start, end: LONG_RANGE.end });
+    expect(payload.provider.rangeActual).toEqual({ start: LONG_RANGE.start, end: LONG_RANGE.end });
+    expect(payload.provider.adjustment).toContain('splits-applied');
+    expect(payload.provider.exchange).toBe('NASDAQ');
+    expect(payload.bars.map((bar) => bar.date)).toEqual([LONG_RANGE.start, LONG_RANGE.end]);
+  });
+
+  it('skips an empty window in the middle and reports absence only when every window is empty', async () => {
+    const TRIPLE = { symbol: 'AAPL', start: '1995-01-01', end: '2026-10-23' };
+    const windows = twelveDataPageWindows(TRIPLE.start, TRIPLE.end);
+    expect(windows).toHaveLength(3);
+
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([TRIPLE.start])),
+      () => jsonResponse({ status: 'error', code: '404', message: 'No data for this window.' }),
+      () => jsonResponse(tdValues([TRIPLE.end])),
+    ]);
+    const payload = await fetchTwelveDataHistory(TRIPLE, 'test-key', fetchImpl);
+    expect(payload.bars.map((bar) => bar.date)).toEqual([TRIPLE.start, TRIPLE.end]);
+
+    const fetchAllEmpty = tdFetch([
+      () => jsonResponse({ status: 'error', code: '404', message: 'No data for this window.' }),
+      () => jsonResponse({ status: 'error', code: '404', message: 'No data for this window.' }),
+      () => jsonResponse({ status: 'error', code: '404', message: 'No data for this window.' }),
+    ]);
+    await expect(fetchTwelveDataHistory(TRIPLE, 'test-key', fetchAllEmpty)).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining('No data found'),
+    });
+  });
+
+  it('allows an HTTP-level empty-window 404 the same as an envelope one', async () => {
+    const windows = LONG_WINDOWS;
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start])),
+      () => new Response(JSON.stringify({ status: 'error', code: 404 }), { status: 404 }),
+    ]);
+
+    const payload = await fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl);
+
+    // Only window 1's sessions exist; window 2 was empty and the download still
+    // succeeded.
+    expect(payload.bars).toHaveLength(1);
+    expect(payload.bars[0]!.date).toBe(LONG_RANGE.start);
+    for (const window of [windows[1]]) {
+      for (const bar of payload.bars) {
+        expect(dayNumber(bar.date)).toBeLessThan(dayNumber(window!.start));
+      }
+    }
+  });
+
+  it('aborts the whole download without inventing pages when a window is malformed', async () => {
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start])),
+      () => jsonResponse({ status: 'ok', meta: {}, values: ['not-an-object'] }),
+      () => jsonResponse({ status: 'ok', meta: {}, values: ['not-an-object'] }),
+    ]);
+
+    await expect(
+      fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: expect.stringContaining('non-object time-series row'),
+    });
+  });
+
+  it('retries a transient window failure once and succeeds, charging that attempt too', async () => {
+    const spends: boolean[] = [];
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start])),
+      () => new Response('boom', { status: 500 }),
+      () => jsonResponse(tdValues([LONG_WINDOWS[0]!.end])),
+    ]);
+    const calls = (fetchImpl as unknown as { calls: string[] }).calls;
+
+    const payload = await fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl, {
+      spendFallbackCredit: () => (spends.push(true), true),
+    });
+    // Window 1 succeeded on its first attempt; window 2 needed both attempts.
+    expect(calls).toHaveLength(3);
+    const urls = calls.map((url) => new URLSearchParams(url.split('?')[1]));
+    expect(urls[0]!.get('start_date')).toBe(LONG_WINDOWS[0]!.start);
+    expect(urls[1]!.get('start_date')).toBe(LONG_WINDOWS[1]!.start);
+    expect(urls[2]!.get('start_date')).toBe(LONG_WINDOWS[1]!.start);
+    expect(spends).toEqual([true, true, true]);
+    expect(payload.bars.map((bar) => bar.date)).toEqual([LONG_RANGE.start, LONG_WINDOWS[0]!.end]);
+  });
+
+  it('fails the whole download when a window exhausts its retry budget', async () => {
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start])),
+      () => new Response('boom', { status: 500 }),
+      () => new Response('boom', { status: 500 }),
+    ]);
+
+    await expect(
+      fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('never retries throttling', async () => {
+    const fetchImpl = tdFetch([
+      () => jsonResponse(tdValues([LONG_RANGE.start])),
+      () => new Response('slow down', { status: 429 }),
+    ]);
+
+    await expect(
+      fetchTwelveDataHistory(LONG_RANGE, 'test-key', fetchImpl),
+    ).rejects.toMatchObject({
+      status: 429,
+      message: expect.stringContaining('throttling'),
+    });
+  });
+
+  it('charges one credit per window for a successful multi-window fallback', async () => {
+    let spends = 0;
+    let tdCalls = 0;
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const requested = String(url);
+      if (requested.includes('finance.yahoo.com')) return jsonResponse({ detail: 'slow down' }, 429);
+      tdCalls += 1;
+      return jsonResponse(tdValues([LONG_RANGE.start, LONG_WINDOWS[0]!.end, LONG_RANGE.end]));
+    }) as unknown as typeof fetch;
+
+    const payload = await fetchHostedHistory(LONG_RANGE, {
+      twelveDataApiKey: 'test-key',
+      fetchImpl,
+      spendFallbackCredit: () => {
+        spends += 1;
+        return true;
+      },
+    });
+
+    expect(payload.bars.map((bar) => bar.date)).toEqual([LONG_RANGE.start, LONG_WINDOWS[0]!.end, LONG_RANGE.end]);
+    expect(tdCalls).toBe(2);
+    expect(spends).toBe(2);
+  });
+
+  it('aborts mid-range with the combined budget message when the budget refuses', async () => {
+    // A three-window range: two pages are retrieved, the third attempt is
+    // refused before any provider contact. Windows that succeeded keep
+    // nothing — the caller gets a failure, never a partial history that
+    // pretends to be complete.
+    const TRIPLE = { symbol: 'AAPL', start: '1995-01-01', end: '2026-10-23' };
+    expect(twelveDataPageWindows(TRIPLE.start, TRIPLE.end)).toHaveLength(3);
+    let tdCalls = 0;
+    let takeCalls = 0;
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const requested = String(url);
+      if (requested.includes('finance.yahoo.com')) return jsonResponse({ detail: 'slow down' }, 429);
+      tdCalls += 1;
+      return jsonResponse(tdValues([TRIPLE.start, TRIPLE.end]));
+    }) as unknown as typeof fetch;
+
+    const failure = await fetchHostedHistory(TRIPLE, {
+      twelveDataApiKey: 'test-key',
+      fetchImpl,
+      spendFallbackCredit: () => {
+        takeCalls += 1;
+        return takeCalls <= 2;
+      },
+    }).then(() => null).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(YahooProviderError);
+    expect((failure as Error).message).toContain('Yahoo Finance: Yahoo is throttling requests');
+    expect((failure as Error).message).toContain('fallback budget for Twelve Data is spent');
+    expect(tdCalls).toBe(2);
+    // The refused third attempt asked the budget before contacting the provider.
+    expect(takeCalls).toBe(3);
   });
 });

@@ -229,7 +229,10 @@ minute per address, plus a shared global budget for Twelve Data fallback credits
 the limit a request is refused with HTTP 429 and `Retry-After`. These counters live in the
 edge function's warm instance, so they bound accidental load, floods and most scripted abuse;
 a distributed attack is bounded only by platform-level rules (Vercel), which remains the
-recommended hard control.
+recommended hard control. Long historical ranges that a single Twelve Data request could not
+carry are retrieved as sequential bounded windows of at most 4,500 calendar days per request
+(a range fitting one request still costs one credit); every window must succeed or the whole
+download fails, so missing early history is never traded for a silently shortened series.
 
 The policy is narrower than "anything Yahoo failed to answer". Both free Yahoo hosts are tried
 first, including when Yahoo returns a throttling error inside an otherwise successful response.

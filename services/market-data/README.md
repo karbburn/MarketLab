@@ -97,6 +97,10 @@ not reinvested, but the endpoint does not provide a separate adjusted close or
 corporate-action rows, so `adjClose` is null and `corporateActions` is empty.
 The response always names the provider that answered. Without the key, only
 Yahoo is used and failures stay explicit.
+Because the `time_series` endpoint caps a single request at 5,000 rows and has
+no continuation parameter, the proxy fetches ranges wider than one request as
+sequential bounded windows of at most 4,500 calendar days; a window that fails
+aborts the whole download honestly.
 
 ## Tests (deterministic; no network)
 
