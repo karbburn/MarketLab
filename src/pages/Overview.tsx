@@ -54,7 +54,11 @@ export function OverviewPage() {
               <Metric label="Total rows" value={totalSessions.toLocaleString('en-US')} note={`${sessions.toLocaleString('en-US')} in memory`} />
             </Panel>
             <Panel title="History span">
-              <Metric label="Coverage" value={firstDate && lastDate ? `${firstDate.slice(0, 7)} to ${lastDate.slice(0, 7)}` : '--'} note={firstDate && lastDate ? `${firstDate} through ${lastDate}` : 'No data loaded'} />
+              <Metric
+                label="Coverage (union)"
+                value={firstDate && lastDate ? `${firstDate.slice(0, 7)} to ${lastDate.slice(0, 7)}` : '--'}
+                note={firstDate && lastDate ? `Earliest and latest session across the stored series: ${firstDate} through ${lastDate}` : 'No data loaded'}
+              />
             </Panel>
             <Panel title="Workspaces">
               <Metric label="Saved" value={String(state.workspaces.length)} note={`${state.watchlists.length} watchlist(s)`} />

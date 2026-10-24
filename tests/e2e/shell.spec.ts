@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { seedLibrary } from './fixtures/library';
+import { buildFixtureBars, seedLibrary } from './fixtures/library';
 
 test.describe('shell, navigation and theme', () => {
   test('starts with an empty library and explains how to get real data', async ({ page }) => {
@@ -41,6 +41,20 @@ test.describe('shell, navigation and theme', () => {
       await expect(page.locator('.topbar-title')).toHaveText(section.title);
       await expect(page.locator('.page')).toBeVisible();
     }
+  });
+
+  test('labels the overview history span as a union across the stored series', async ({ page }) => {
+    await seedLibrary(page);
+
+    // The panels aggregate every stored series, so the earliest-to-latest
+    // reading must be presented as a union, not as one dataset's span.
+    const series = buildFixtureBars(1013, 100);
+    const firstDate = series[0]?.date ?? '';
+    const lastDate = series[series.length - 1]?.date ?? '';
+
+    const span = page.locator('.panel').filter({ hasText: 'History span' }).first();
+    await expect(span).toContainText('Coverage (union)');
+    await expect(span).toContainText(`Earliest and latest session across the stored series: ${firstDate} through ${lastDate}`);
   });
 
   test('switches theme and keeps the choice after a reload', async ({ page }) => {
