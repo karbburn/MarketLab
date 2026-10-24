@@ -267,6 +267,13 @@ export function formatRunTimestamp(iso: string): string {
 export function compareRunProvenance(left: BacktestRun, right: BacktestRun): ProvenanceComparisonRow[] {
   const a = left.dataset;
   const b = right.dataset;
+  const notRecorded = 'Not recorded';
+  const requestedRangeLabel = (run: BacktestRun): string => {
+    const provider = run.dataset.provider;
+    if (!provider) return notRecorded;
+    if (!provider.requestedStart || !provider.requestedEnd) return 'Range not recorded';
+    return `${provider.requestedStart} to ${provider.requestedEnd}`;
+  };
   return [
     provenanceRow('saved', 'Saved', formatRunTimestamp(left.createdAt), formatRunTimestamp(right.createdAt)),
     provenanceRow(
@@ -278,6 +285,43 @@ export function compareRunProvenance(left: BacktestRun, right: BacktestRun): Pro
     provenanceRow('dataset', 'Dataset', a.datasetName, b.datasetName),
     provenanceRow('dataset-record', 'Dataset record', a.datasetId, b.datasetId, true),
     provenanceRow('frequency', 'Frequency', a.frequency, b.frequency),
+    provenanceRow(
+      'source',
+      'Source provider',
+      a.provider?.provider ?? notRecorded,
+      b.provider?.provider ?? notRecorded,
+    ),
+    provenanceRow(
+      'adjustment',
+      'Price adjustment',
+      a.provider?.adjustment ?? notRecorded,
+      b.provider?.adjustment ?? notRecorded,
+    ),
+    provenanceRow(
+      'currency',
+      'Source currency',
+      a.provider?.currency ?? notRecorded,
+      b.provider?.currency ?? notRecorded,
+    ),
+    provenanceRow(
+      'requested-range',
+      'Requested range',
+      requestedRangeLabel(left),
+      requestedRangeLabel(right),
+      true,
+    ),
+    provenanceRow(
+      'coverage',
+      'Coverage at save',
+      a.provider?.coverageStatus ?? notRecorded,
+      b.provider?.coverageStatus ?? notRecorded,
+    ),
+    provenanceRow(
+      'retrieved',
+      'Data retrieved',
+      a.provider?.retrievedAt ? formatRunTimestamp(a.provider.retrievedAt) : notRecorded,
+      b.provider?.retrievedAt ? formatRunTimestamp(b.provider.retrievedAt) : notRecorded,
+    ),
     provenanceRow('content-hash', 'Content hash', a.contentHash, b.contentHash, true),
     provenanceRow(
       'window',

@@ -280,7 +280,14 @@ export const backtestConfigSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const RESEARCH_RUN_SCHEMA_VERSION = 1;
+/**
+ * Schema version 2 adds an optional `provider` snapshot to the dataset block.
+ * v1 records parse unchanged (the block is optional), and because zod objects
+ * are non-strict a v2 record read by an older build silently strips the new
+ * keys. Fingerprints, verification and the manifest envelope (still version 1)
+ * are untouched by this change.
+ */
+export const RESEARCH_RUN_SCHEMA_VERSION = 2;
 
 const backtestMetricsSchema = z.object({
   totalReturnPct: z.number().finite(),
@@ -310,6 +317,24 @@ const backtestTradeSchema = z.object({
   exitReason: z.enum(['signal', 'stop-loss', 'take-profit', 'end-of-data']),
 });
 
+/**
+ * Save-time snapshot of the dataset's source provenance. Optional so v1 runs
+ * (saved before this existed) parse unchanged; the run inspector discloses the
+ * gap honestly for those records instead of inventing values.
+ */
+const backtestRunDatasetProviderSchema = z.object({
+  provider: z.string().min(1),
+  adjustment: z.string().min(1),
+  exchange: z.string().nullable(),
+  currency: z.string().nullable(),
+  timezone: z.string().nullable(),
+  requestedStart: dateString.nullable(),
+  requestedEnd: dateString.nullable(),
+  coverageStatus: z.enum(['complete', 'partial', 'unverified']),
+  coverageDetail: z.string().nullable(),
+  retrievedAt: z.string().nullable(),
+});
+
 const backtestRunDatasetSchema = z.object({
   datasetId: z.string().min(1),
   instrumentId: z.string().min(1),
@@ -321,6 +346,7 @@ const backtestRunDatasetSchema = z.object({
   windowStart: dateString,
   windowEnd: dateString,
   barCount: z.number().int().nonnegative(),
+  provider: backtestRunDatasetProviderSchema.optional(),
 });
 
 /**

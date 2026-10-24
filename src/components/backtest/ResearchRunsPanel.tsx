@@ -37,6 +37,38 @@ function savedAt(iso: string): string {
   return Number.isNaN(parsed.getTime()) ? iso : `${parsed.toISOString().replace('T', ' ').slice(0, 16)} UTC`;
 }
 
+/**
+ * The dataset's source provenance as display lines. Runs saved before the
+ * provider snapshot existed — and runs on imported CSV datasets — record no
+ * provider, and they must not be described with invented values.
+ */
+function sourceLines(run: BacktestRun): string[] {
+  const provider = run.dataset.provider;
+  if (!provider) {
+    return ['Source not recorded for this run'];
+  }
+  const identity = [provider.exchange, provider.currency, provider.timezone].filter(
+    (part): part is string => part !== null && part.trim().length > 0,
+  );
+  const lines = [`Source ${provider.provider} · ${provider.adjustment}`];
+  if (identity.length > 0) {
+    lines.push(identity.join(' · '));
+  }
+  const requested =
+    provider.requestedStart && provider.requestedEnd
+      ? `Requested ${provider.requestedStart} to ${provider.requestedEnd}`
+      : 'Requested range not recorded';
+  const coverage =
+    provider.coverageStatus === 'complete'
+      ? 'Coverage checked'
+      : provider.coverageStatus === 'partial'
+        ? 'Coverage: partial'
+        : 'Coverage unreported';
+  const retrieved = provider.retrievedAt ? `retrieved ${savedAt(provider.retrievedAt)}` : `retrieved date not recorded`;
+  lines.push(`${requested} · ${coverage} · ${retrieved}`);
+  return lines;
+}
+
 function runMatchesFilter(run: BacktestRun, query: string): boolean {
   return [
     run.name,
@@ -474,6 +506,9 @@ export function ResearchRunsPanel({
                   <span>
                     Engine {selected.engineVersion} · dataset hash {selected.dataset.contentHash}
                   </span>
+                  {sourceLines(selected).map((line) => (
+                    <span key={line}>{line}</span>
+                  ))}
                   <span className="fingerprint" title={selected.dataset.windowFingerprint}>
                     Window fingerprint {selected.dataset.windowFingerprint}
                   </span>

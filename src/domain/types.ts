@@ -395,10 +395,31 @@ export interface BacktestResult {
   };
 }
 
+export interface BacktestRunDatasetProvider {
+  /** Provider id as recorded by the download, e.g. `yahoo-finance`. */
+  provider: string;
+  /** Adjustment policy the provider declared for these prices. */
+  adjustment: string;
+  exchange: string | null;
+  currency: string | null;
+  timezone: string | null;
+  /** Range the user asked the provider for, when the download recorded it. */
+  requestedStart: DateString | null;
+  requestedEnd: DateString | null;
+  /** Provider-reported coverage of the requested range. */
+  coverageStatus: 'complete' | 'partial' | 'unverified';
+  coverageDetail: string | null;
+  /** When the bars were retrieved from the provider, if recorded. */
+  retrievedAt: string | null;
+}
+
 /**
  * Identity of the market data a saved research run consumed. The bars
  * themselves are deliberately not stored: a run is reproducible only while the
  * library still holds a dataset with this content hash and window fingerprint.
+ * The optional provider block is a save-time snapshot of the dataset's source
+ * provenance; runs saved before it existed must not be rewritten, so it stays
+ * absent there and the UI discloses that honestly.
  */
 export interface BacktestRunDataset {
   datasetId: string;
@@ -411,6 +432,7 @@ export interface BacktestRunDataset {
   windowStart: DateString;
   windowEnd: DateString;
   barCount: number;
+  provider?: BacktestRunDatasetProvider;
 }
 
 /**

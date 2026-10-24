@@ -3,6 +3,7 @@ import type {
   BacktestConfig,
   BacktestResult,
   BacktestRun,
+  BacktestRunDatasetProvider,
   BacktestTrade,
   Bar,
   Dataset,
@@ -11,6 +12,7 @@ import type {
 } from '../../domain/types';
 import { createId } from '../id';
 import { parseBacktestRun, RESEARCH_RUN_SCHEMA_VERSION } from '../workspace/schema';
+import { coverageFromDataset } from '../marketdata/coverage';
 import { BACKTEST_ASSUMPTIONS, BACKTEST_ENGINE_VERSION, runBacktest, selectBacktestWindow } from './engine';
 import { resolveRunDataset } from './run-datasets';
 
@@ -81,6 +83,31 @@ function snapshotTrades(trades: readonly BacktestTrade[]): BacktestTrade[] {
   return trades.map((trade) => ({ ...trade }));
 }
 
+/**
+ * Save-time snapshot of the dataset's source provenance. Built only from what
+ * the stored dataset itself recorded — provider metadata and the provider
+ * coverage check — never recomputed or inferred. Datasets without a provider
+ * download (imported CSVs) and runs saved before this snapshot existed carry
+ * no provider block, and the UI discloses that honestly.
+ */
+function snapshotDatasetProvider(dataset: Dataset, instrument: Instrument | undefined): BacktestRunDatasetProvider | undefined {
+  const provider = dataset.provider;
+  if (!provider) return undefined;
+  const coverage = coverageFromDataset(dataset);
+  return {
+    provider: provider.provider,
+    adjustment: provider.adjustment,
+    exchange: provider.exchangeName ?? provider.exchange,
+    currency: instrument?.currency ?? null,
+    timezone: dataset.timezone || null,
+    requestedStart: provider.requestedRange?.start ?? null,
+    requestedEnd: provider.requestedRange?.end ?? null,
+    coverageStatus: coverage?.status ?? 'unverified',
+    coverageDetail: coverage?.headline ?? null,
+    retrievedAt: provider.retrievedAt ?? null,
+  };
+}
+
 function canonicalBar(bar: Bar): string {
   return [bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume ?? ''].join('|');
 }
@@ -135,6 +162,7 @@ export async function createBacktestRun(input: CreateBacktestRunInput): Promise<
       windowStart: first.date,
       windowEnd: last.date,
       barCount: windowBars.length,
+      provider: snapshotDatasetProvider(input.dataset, input.instrument),
     },
     assumptions: [...BACKTEST_ASSUMPTIONS],
     metrics: { ...input.result.metrics },
