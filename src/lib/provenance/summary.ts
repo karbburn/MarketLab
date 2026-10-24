@@ -183,7 +183,7 @@ function buildLimitations(dataset: Dataset, coverage: CoverageReport | null): st
         ? `${label} data is unofficial and may be delayed or revised. It is not licensed for redistribution.`
         : `${label} data may be delayed or revised and is not licensed for redistribution.`,
     );
-    for (const note of provider.sourceNotes) limitations.push(note);
+    for (const note of provider.sourceNotes ?? []) limitations.push(note);
   }
 
   return limitations;
