@@ -6,6 +6,8 @@ import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
 import { planResearchRunLoad } from '../lib/backtest/research-runs';
+import { describeRunWindow } from '../lib/backtest/run-window';
+import { buildProvenanceSummary } from '../lib/provenance/summary';
 import { RULE_FIELDS, RULE_OPERATORS as OPERATORS } from '../lib/backtest/rule-catalog';
 import { createBacktestConfig } from '../state/defaults';
 import { createId } from '../lib/id';
@@ -17,6 +19,7 @@ import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 import { ResearchRunsPanel, type ResearchRunSource } from '../components/backtest/ResearchRunsPanel';
 import { ResearchRunComparison } from '../components/backtest/ResearchRunComparison';
+import { RunWindowDisclosure } from '../components/backtest/RunWindowDisclosure';
 import { ResultsReading } from '../components/backtest/ResultsReading';
 import { TradeTable } from '../components/backtest/TradeTable';
 
@@ -42,6 +45,18 @@ export function BacktestPage() {
     activeView !== null &&
     (activeView.dataset.contentHash !== loadedRun.dataset.contentHash ||
       activeView.dataset.frequency !== loadedRun.dataset.frequency);
+  // The window disclosure must describe exactly the configuration whose result
+  // is on screen, so it uses the same source as the `result` memo below.
+  const runWindow = useMemo(
+    () => (draft && bars.length > 0 ? describeRunWindow(runRequest?.config ?? draft, bars) : null),
+    [draft, runRequest, bars],
+  );
+  // Reuses the chart provenance summary so source and adjustment wording cannot
+  // drift between screens.
+  const provenance = useMemo(
+    () => (activeView ? buildProvenanceSummary(activeView.dataset, { exchange: activeView.instrument?.exchange }) : null),
+    [activeView],
+  );
   const signature = draft ? JSON.stringify(draft) : '';
   const runSignature = runRequest ? JSON.stringify(runRequest.config) : null;
 
@@ -394,6 +409,11 @@ export function BacktestPage() {
               </div>
             }
           >
+            {runWindow && (
+              <div style={{ marginBottom: 12 }}>
+                <RunWindowDisclosure report={runWindow} provenance={provenance} />
+              </div>
+            )}
             <div className="grid-4">
               <Metric label="Total return" value={formatPercent(result.metrics.totalReturnPct)} tone={result.metrics.totalReturnPct >= 0 ? 'up' : 'down'} note={`Buy and hold ${formatPercent(result.metrics.benchmarkTotalReturnPct)}`} />
               <Metric label="CAGR" value={result.metrics.cagrPct === null ? '--' : formatPercent(result.metrics.cagrPct)} />

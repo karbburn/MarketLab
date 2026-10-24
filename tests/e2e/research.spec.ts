@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { readStore, seedLibrary } from './fixtures/library';
+import { buildFixtureBars, readStore, seedLibrary } from './fixtures/library';
+
+// The fixture's session span is deterministic, so the backtest results can be
+// held to naming it with dates rather than only a session count.
+const FIRST_FIXTURE_SESSION = buildFixtureBars(1013, 100)[0]?.date ?? '';
 
 // The application bundles no data, so the research screens are tested against
 // a seeded library of imported series.
@@ -128,6 +132,37 @@ test.describe('rule-based backtest', () => {
     await expect(page.getByText('Stale')).toBeVisible();
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await expect(page.getByText('Stale')).toBeHidden();
+  });
+
+  test('names the simulated window with dates and flags a shortfall', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
+
+    // The window is stated with dates, not only a session count, and the
+    // boundaries are the stored series' own first and last sessions.
+    await expect(results).toContainText('Simulated sessions');
+    await expect(results).toContainText(`${FIRST_FIXTURE_SESSION} to 2026-10-16`);
+    // The warm-up split and the data provenance are disclosed beside the
+    // metrics rather than left implied.
+    await expect(results).toContainText('after the indicator warm-up');
+    await expect(results).toContainText('Data source');
+
+    // A requested start older than the stored series must be visible in the
+    // results instead of silently simulating a shorter window.
+    await page.getByLabel('Start date').fill('2025-01-01');
+    await expect(page.getByText('Stale')).toBeVisible();
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Stale')).toBeHidden();
+
+    const warning = results.locator('.coverage-warning');
+    await expect(warning).toContainText('Not all of the requested window is stored.');
+    await expect(warning).toContainText('The requested start 2025-01-01 is earlier than the first stored session');
+    await expect(warning).toContainText(`this run begins at ${FIRST_FIXTURE_SESSION}`);
+    // The metrics still stay visible; the warning supplements them rather
+    // than replacing the result.
+    await expect(results).toContainText('Total return');
   });
 
   test('explains recomputed results and distinguishes a loaded saved run', async ({ page }) => {
