@@ -7,13 +7,14 @@
 MarketLab implements, from first principles, the workflow a professional charting terminal gives
 you: validated OHLCV ingestion, interactive charts with indicators and drawings, risk and
 cross-asset research, historical screening, rule-based backtesting, and export or backup of
-everything you have stored. It is a static single-page application — there is no account, no
-backend, no analytics or telemetry, and every calendar, indicator and simulation is computed on
-your own device. Your data lives in the browser's IndexedDB and is never uploaded anywhere.
+everything you have stored. It is a static single-page application with a same-origin serverless
+proxy for downloads — there is no account, no analytics or telemetry, and every calendar,
+indicator and simulation is computed on your own device. Your library lives in the browser's
+IndexedDB and is never uploaded anywhere.
 
 **MarketLab ships no bundled market data.** The library starts empty and fills with history you
-download through the optional local market-data service or import from a CSV file. Nothing is
-synthesised, and no price is ever invented to fill a gap.
+download through the hosted data proxy (or the optional local service during development) or
+import from a CSV file. Nothing is synthesised, and no price is ever invented to fill a gap.
 
 MarketLab is an independent project. It is not affiliated with, endorsed by, or derived from
 TradingView or any other commercial charting platform; it reimplements a familiar terminal
@@ -61,10 +62,11 @@ TradingView or any other commercial charting platform; it reimplements a familia
   separate left axis. Series are aligned on real shared sessions and rebased to 100 at the first
   common session; nothing is forward-filled. The legend removes one series or clears all, and the
   panel foot states the method and any excluded series with reasons.
-- **Corporate-action markers** — provider-reported splits and dividends from downloaded Yahoo
-  Finance history are marked on the primary series: splits above the bar, cash dividends below.
-  The panel names the provider and states that prices are already split-adjusted (so a split
-  marker is not a price gap) and that dividends are not reinvested. Imported CSVs and older
+- **Corporate-action markers** — provider-reported splits and dividends from downloaded history
+  are marked on the primary series: splits above the bar, cash dividends below. Yahoo Finance
+  supplies these events; the optional Twelve Data fallback does not, so its downloads show no
+  markers. The panel names the provider and states that prices are already split-adjusted (so a
+  split marker is not a price gap) and that dividends are not reinvested. Imported CSVs and older
   downloads show no markers rather than guessed events.
 
 ### Indicators
@@ -153,7 +155,7 @@ session and content hash — with per-series inspection, export and deletion.
 ## Screenshots
 
 All screenshots were captured from a real provider download (AAPL, MSFT, NVDA, SPY and QQQ
-through the local market-data service), so the provenance shown in them — provider, exchange,
+through the market-data service), so the provenance shown in them - provider, exchange,
 adjustment policy and retrieval timestamp — is real rather than illustrative.
 
 **Chart workspace** — the image at the top of this file: daily AAPL bars with the crosshair
@@ -204,9 +206,25 @@ started. Nothing is pre-filled, and no placeholder prices are shown.
 
 ### Downloading real history
 
-MarketLab downloads daily bars from Yahoo Finance through a small local service that lives in
-`services/market-data/`. It is deliberately outside the app: the frontend only talks to
-`127.0.0.1`, so nothing is proxied through the site you are viewing.
+MarketLab downloads daily bars from Yahoo Finance. Yahoo does not send browser-readable CORS
+headers, so the browser cannot call it directly. On the deployed site, requests go to the
+same-origin serverless proxy in `api/market-data/`; on `localhost` or `127.0.0.1`, they go to the
+optional FastAPI service in `services/market-data/`. Either way, the browser only talks to the
+same origin or to loopback.
+
+The hosted proxy can also use Twelve Data as an optional fallback. Set
+`TWELVE_DATA_API_KEY` in the Vercel project (Production and Preview) and the proxy will try
+Yahoo first, then Twelve Data when Yahoo is throttled, unavailable or has no data for the
+symbol. The key is read only on the server; it never appears in the browser bundle, a request
+URL or an error message. Without the key the fallback is dormant and failures remain explicit.
+Each saved series records the provider that actually answered.
+
+**Using the deployed site:** open **Data → Download market data** for one symbol, or **Data →
+Download many symbols** for a batch of up to 50. No local setup, account or browser permission is
+needed. AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the batch dialog accepts
+any list you paste in.
+
+**Running locally:** start the local service if you want downloads on localhost:
 
 ```bash
 cd services/market-data
@@ -215,15 +233,10 @@ pip install -r requirements.txt
 python -m uvicorn app:app --host 127.0.0.1 --port 8787
 ```
 
-Then use **Data → Download market data** for a single symbol, or **Data → Download many symbols**
-for a batch of up to 50 — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the
-batch dialog accepts any list you paste in. Read
-[`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the error
-model and the setup details.
-
-The service is entirely optional. Without it, CSV imports, previously downloaded series and every
-other feature keep working, and download attempts fail with an explicit message instead of
-silently producing nothing.
+Read [`services/market-data/README.md`](services/market-data/README.md) for the endpoints, the
+error model and the setup details. In local development the service is optional: without it, CSV
+imports, previously downloaded series and every other feature keep working, and download attempts
+fail with an explicit message instead of silently producing nothing.
 
 ### Importing your own data
 
@@ -256,9 +269,10 @@ The rules below are enforced in code, not just in the documentation:
   first-run state with real actions in it, not a gap filled with invented prices. A browser that
   ran an earlier build still holding the old demo series has them removed on load, and only them:
   imported, downloaded and user-created records are left untouched.
-- **Unofficial source, stated plainly.** Yahoo Finance is an undocumented source. Downloads can be
-  delayed for some venues, be rate limited, or change shape without notice, and the data is not
-  licensed for redistribution.
+- **Sources stated plainly.** Yahoo Finance is an undocumented source. The optional Twelve Data
+  fallback is a commercial API whose availability depends on the configured plan and rate limits.
+  Either provider's downloads can be delayed, rate limited, or change shape without notice, and
+  the data is not licensed for redistribution.
 - **Provenance travels with the prices.** Every downloaded series stores its provider, exchange,
   adjustment policy (`splits-applied, dividends not reinvested`), retrieval timestamp and any
   provider-reported split/dividend events. Adjusted close is stored separately and never mixed
@@ -292,7 +306,8 @@ src/
     export/       CSV writers, JSON backup and browser download helpers
     indicators/   indicator implementations and registry
     learn/        field-guide content and the guide's example calculations
-    marketdata/   provider-independent client, batch queue and response normalisation
+    marketdata/   provider client, batch queue, response normalisation, Yahoo adapter,
+                  optional Twelve Data fallback and hosted fallback policy
     migration/    removal of the legacy bundled demo series
     persistence/  IndexedDB adapter with an in-memory fallback
     quant/        performance, risk, correlation and comparison metrics
@@ -302,6 +317,8 @@ src/
   pages/          one module per top-level screen
   state/          store, defaults, selectors
   styles/         design tokens and global styles
+api/
+  market-data/    same-origin Vercel edge proxy used by the deployed site
 services/
   market-data/    optional local FastAPI + yfinance service and its tests
 tests/
@@ -331,8 +348,9 @@ set of design tokens, with dark and light themes.
   write queue, and falls back to in-memory storage (saying so) when IndexedDB is unavailable.
   Exports and backups exist so a durable copy is always a click away.
 - **Hash routing.** Routes are served from the fragment, so the production build is a directory
-  of static files that needs no server rewrite rules and can be hosted anywhere. Every screen
-  has a stable address (for example `/#/chart`, `/#/learn` and `/#/data`).
+  of static files that needs no server rewrite rules. Every screen has a stable address (for
+  example `/#/chart`, `/#/learn` and `/#/data`). The Vercel deployment adds the download proxy
+  under `/api/market-data`; a purely static host still runs every other feature.
 
 ## Testing
 
@@ -359,16 +377,26 @@ the source of truth.
 The end-to-end suite drives the built app with the locally installed Google Chrome
 (`channel: 'chrome'`, no browser download) and seeds its own library, because the application
 bundles no data. The download paths stub the provider, so the suite does not depend on Yahoo
-Finance or on the local service being reachable.
+Finance, Twelve Data or the local service being reachable.
 
 ## Hosting
 
-`npm run build` produces a static `dist/` directory with no runtime configuration. Because the app
-uses hash routing and stores data per browser profile, the same build can be served from any
-static host — the deployment linked at the top of this file runs exactly this bundle.
+`npm run build` produces a static `dist/` directory. The Vercel deployment also publishes the
+edge functions in `api/market-data/`, so the deployed bundle and its download proxy share an
+origin. Because the app uses hash routing and stores data per browser profile, the static build
+can still be served from another host; downloads there need a compatible endpoint configured with
+`VITE_MARKET_DATA_URL` (or the runtime `window.__MARKETLAB_MARKET_DATA_URL__` override). Without
+one, downloads fail explicitly and CSV import keeps working.
 
-The optional market-data service is deliberately not deployed. Its CORS whitelist includes the
-deployed origin, so a user's own local service can serve the hosted application.
+The local FastAPI service is not required by the deployed site. Its CORS whitelist includes the
+deployed origin so a developer can still use it from the hosted app when debugging localhost
+behaviour.
+
+The hosted proxy needs no account and no persistent server. It runs as Vercel edge functions, so
+Render or another always-on backend is unnecessary. To enable the optional fallback, add
+`TWELVE_DATA_API_KEY` to the Vercel project's environment variables; the health route at
+`/api/market-data/health` then reports `"fallbackProvider": "twelve-data"` without exposing the
+key. Yahoo remains the primary source, and the key is never sent to the browser.
 
 ## Project status
 
@@ -388,8 +416,8 @@ no short selling, no alerting and no replay. These are product decisions, not ga
 ## Scope and limitations
 
 - Sessions are daily; there is no streaming quote feed, no tick data and no intraday timeframe.
-- Downloads depend on an unofficial provider and can fail; the app reports failures instead of
-  hiding them or substituting other data.
+- Downloads depend on external providers and can fail; the app reports failures instead of hiding
+  them or substituting other data. Twelve Data is an optional fallback, not a guarantee.
 - The backtester is long-only, single-position and per-series. It does not model portfolios,
   short selling, borrow costs or corporate actions beyond the adjusted close it stores.
 - Corporate-action markers are display annotations sourced from provider metadata. They do not

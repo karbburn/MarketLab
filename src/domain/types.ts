@@ -59,8 +59,8 @@ export interface Bar {
  */
 export type SourceKind = 'bundled-sample' | 'user-csv' | 'provider-download';
 
-/** Open set of downloadable sources; the first is Yahoo Finance via yfinance. */
-export type ProviderId = 'yahoo-finance';
+/** Downloadable sources: Yahoo Finance primary, Twelve Data optional fallback. */
+export type ProviderId = 'yahoo-finance' | 'twelve-data';
 
 export type CorporateActionType = 'split' | 'dividend';
 

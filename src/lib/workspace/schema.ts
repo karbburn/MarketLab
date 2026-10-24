@@ -175,7 +175,7 @@ export const datasetSchema = z.object({
   hasVolume: z.boolean(),
   provider: z
     .object({
-      provider: z.enum(['yahoo-finance']),
+      provider: z.enum(['yahoo-finance', 'twelve-data']),
       providerSymbol: z.string().min(1),
       exchange: z.string().nullable(),
       exchangeName: z.string().nullable(),

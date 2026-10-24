@@ -222,6 +222,20 @@ def test_history_success_normalises_rows_and_metadata(client: TestClient, monkey
     assert first["adjClose"] == 10.5
 
 
+def test_history_accepts_a_one_character_symbol(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real tickers such as F and T are one character long."""
+    stub_history(
+        monkeypatch,
+        history_frame(
+            [{"date": "2024-01-02", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1_000}]
+        ),
+        EXPECTED_METADATA,
+    )
+    response = client.get("/api/history", params={"symbol": "F", "start": "2024-01-01", "end": "2024-01-10"})
+    assert response.status_code == 200
+    assert response.json()["provider"]["providerSymbol"] == "F"
+
+
 def test_history_includes_provider_corporate_actions(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     stub_history(
         monkeypatch,

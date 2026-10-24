@@ -18,18 +18,19 @@
 
 ## Data and honesty
 
-- MarketLab ships no bundled or sample market data. The library starts empty; data comes from CSV import or the optional local provider service.
+- MarketLab ships no bundled or sample market data. The library starts empty; data comes from CSV import or a provider download through the hosted proxy (or the optional local service during development).
 - CSV import validates every series: prices must be positive, `low <= min(open, close) <= max(open, close) <= high`, sessions must be unique under an explicit duplicate policy, and missing sessions are reported as gaps, never invented.
 - Daily data is never interpolated into intraday bars. Only daily-to-weekly (Monday-based) and daily-to-monthly aggregation is offered, and aggregated series are labelled as such.
 - Backtest results are presented together with the execution model that produced them.
-- Optional real historical data: run the bundled Python service (FastAPI + yfinance, no API key) and download daily bars from Yahoo Finance via Data > Download market data. Such data is unofficial, may be delayed, and is not licensed for redistribution; every downloaded series carries its provider, exchange, adjustment policy, and retrieval timestamp.
+- Real historical data: the deployed site downloads daily bars through a same-origin serverless proxy, so it works on any device without a local process. Yahoo Finance is the primary source; when the server has `TWELVE_DATA_API_KEY`, Twelve Data is an optional fallback. Provider data may be delayed and is not licensed for redistribution; every downloaded series carries its provider, exchange, adjustment policy, retrieval timestamp, and any provider-reported corporate actions.
+- The fallback never runs without a server-side key and never sends that key to the browser. If both providers fail, the download reports the failure instead of substituting other data.
 
 ## Optional local market-data service
 
-MarketLab ships an optional, local-only service that downloads daily historical bars from Yahoo Finance without an API key. It binds to 127.0.0.1 only, requires no keys or secrets, and is not deployed anywhere; it runs on the user's own machine. Without it, the app works fully from CSV imports and datasets you have already downloaded.
+MarketLab also ships an optional, local-only FastAPI + yfinance service for development. It binds to 127.0.0.1 only and runs on the user's own machine; the deployed site does not use it. Without it, local development still works from CSV imports and datasets you have already downloaded.
 
 ## Using MarketLab with an AI agent
 
 - The app is a single-page application; all routes are hash routes under `/#/` (for example `/#/chart`, `/#/screener`, `/#/backtest`, `/#/quant`, `/#/data`, `/#/learn`, `/#/workspaces`). An agent driving a browser can navigate directly to those URLs.
 - All analysis is deterministic and reproducible from the stored series: the same dataset, indicator parameters, filters, or strategy always produce the same numbers.
-- Nothing in the app requires an account, a network connection, or any credential. There is nothing to purchase and no checkout.
+- Nothing in the app requires an account or a user credential, and there is nothing to purchase or check out. Analysis of stored data works offline; downloads need an internet connection to MarketLab's hosted proxy.

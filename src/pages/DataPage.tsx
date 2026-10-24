@@ -10,7 +10,7 @@ import { formatPrice } from '../lib/format';
 import { Metric, Panel, StatusNotice, Tag } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { requestBulkDownloadDialog, requestDownloadDialog } from '../lib/ui-events';
-import { PROVIDER_LABEL } from '../lib/marketdata/normalize';
+import { providerLabel } from '../lib/marketdata/normalize';
 
 function affectedPanels(datasetId: string, workspaces: readonly Workspace[]): number {
   return workspaces.reduce(
@@ -100,7 +100,9 @@ export function DataPage() {
                       {view.dataset.sourceKind === 'bundled-sample' ? (
                         <Tag tone="warn">Legacy demo data</Tag>
                       ) : view.dataset.sourceKind === 'provider-download' ? (
-                        <Tag tone="accent">{PROVIDER_LABEL}</Tag>
+                        <Tag tone="accent">
+                          {view.dataset.provider ? providerLabel(view.dataset.provider.provider) : 'Provider download'}
+                        </Tag>
                       ) : (
                         <Tag tone="accent">Imported CSV</Tag>
                       )}
@@ -196,7 +198,7 @@ export function DataPage() {
               <Metric label="Content hash" value={selected.dataset.contentHash.slice(0, 14)} note="Stable across identical imports" />
               {selected.dataset.provider && (
                 <>
-                  <Metric label="Provider" value={PROVIDER_LABEL} note={`${selected.dataset.provider.providerSymbol} - interval ${selected.dataset.provider.interval}`} />
+                  <Metric label="Provider" value={providerLabel(selected.dataset.provider.provider)} note={`${selected.dataset.provider.providerSymbol} - interval ${selected.dataset.provider.interval}`} />
                   <Metric label="Adjustment" value={selected.dataset.provider.adjustment} note={`Exchange ${selected.dataset.provider.exchangeName ?? selected.dataset.provider.exchange ?? 'not reported'}`} />
                   <Metric label="Retrieved" value={selected.dataset.provider.retrievedAt.slice(0, 16).replace('T', ' ')} note="Provider timestamp, UTC" />
                 </>
@@ -316,8 +318,9 @@ export function DataPage() {
           <li>Duplicate sessions are handled by the policy chosen during import: reject, keep first, or keep last.</li>
           <li>Weekend rows are flagged as a warning because most exchanges do not trade then.</li>
           <li>
-            Downloaded series carry their provider, adjustment policy and retrieval time in the inspection panel. They are
-            real but unofficial data (Yahoo Finance), can be delayed, and are not licensed for redistribution.
+            Downloaded series carry their provider, adjustment policy and retrieval time in the inspection panel. Provider
+            data can be delayed and is not licensed for redistribution; the inspection panel names the provider that
+            actually answered.
           </li>
         </ul>
       </Panel>

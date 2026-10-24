@@ -3,13 +3,18 @@ import { CloudArrowDown, GlobeSimple, Warning } from '@phosphor-icons/react';
 import type { DatasetBundle } from '../../state/store';
 import { useStore } from '../../state/store';
 import {
-  PROVIDER_LABEL,
   assetTypeFromProvider,
   buildDatasetBundle,
   describeValidationIssues,
+  providerLabel,
   validateProviderBars,
 } from '../../lib/marketdata/normalize';
-import { DEFAULT_SERVICE_URL, describeMarketDataFailure, fetchProviderHistory } from '../../lib/marketdata/client';
+import {
+  DEFAULT_SERVICE_URL,
+  describeMarketDataFailure,
+  fetchProviderHistory,
+  marketDataServiceDescription,
+} from '../../lib/marketdata/client';
 import { useProviderSymbolSearch } from '../../lib/marketdata/use-provider-search';
 import type { DuplicatePolicy } from '../../lib/validation/dataset';
 import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
@@ -37,8 +42,9 @@ function defaultEnd(): string {
 }
 
 /**
- * Dialog for downloading real daily history through the optional local
- * market-data service. Loading, empty, throttled, timeout, unavailable and
+ * Dialog for downloading real daily history through the market-data service.
+ * Localhost uses the optional local service; deployed hosts use the same-origin
+ * proxy, so no local setup is needed. Loading, empty, throttled, timeout, unavailable and
  * malformed-response states are all explicit; a download can never silently
  * produce an empty dataset. The result is first reviewed (provider, adjustment
  * policy, retrieval time, validation summary) before it is saved.
@@ -102,7 +108,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase('downloading');
-    setNotice({ kind: 'info', text: `Requesting daily history for ${clean} from ${PROVIDER_LABEL}…` });
+    setNotice({ kind: 'info', text: `Requesting daily history for ${clean}…` });
     try {
       const history = await fetchProviderHistory({ symbol: clean, start, end }, DEFAULT_SERVICE_URL, controller.signal);
       if (runIdRef.current !== runId) return;
@@ -182,9 +188,9 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
       <div className="dialog-body">
         <div className="panel-sub" style={{ marginBottom: 8 }}>
           <GlobeSimple size={13} aria-hidden />{' '}
-          {PROVIDER_LABEL} via the optional local market-data service ({DEFAULT_SERVICE_URL}). Real historical data:
-          unofficial source, may be delayed for some venues, and can fail without notice. Daily sessions only — the app
-          aggregates weekly and monthly views itself.
+          Real historical data via {marketDataServiceDescription()}. The provider is named in the review before saving;
+          it may be delayed for some venues and can fail without notice. Daily sessions only — the app aggregates weekly
+          and monthly views itself.
         </div>
 
         <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -267,7 +273,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
           <div className="panel" style={{ marginTop: 12 }}>
             <div className="panel-body">
               <div className="row tight" style={{ flexWrap: 'wrap' }}>
-                <Tag tone="accent">{PROVIDER_LABEL} download</Tag>
+                <Tag tone="accent">{providerLabel(metadata.provider)} download</Tag>
                 <Tag>{metadata.exchangeName ?? metadata.exchange ?? 'Exchange not reported'}</Tag>
                 <Tag>{review.instrument.currency}</Tag>
                 <Tag>{assetTypeFromProvider(metadata.instrumentType)}</Tag>

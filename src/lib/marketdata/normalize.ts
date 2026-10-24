@@ -22,12 +22,24 @@ import type {
   Dataset,
   DatasetProvider,
   Instrument,
+  ProviderId,
 } from '../../domain/types';
 import { createId } from '../id';
 import { validateBarEntries, type DuplicatePolicy } from '../validation/dataset';
 
-export const PROVIDER_ID = 'yahoo-finance';
+/** The primary provider; kept as a named constant for older call sites. */
+export const PROVIDER_ID: ProviderId = 'yahoo-finance';
 export const PROVIDER_LABEL = 'Yahoo Finance';
+
+export const PROVIDER_LABELS = {
+  'yahoo-finance': 'Yahoo Finance',
+  'twelve-data': 'Twelve Data',
+} as const satisfies Record<ProviderId, string>;
+
+/** Human label for a stored provider id. */
+export function providerLabel(provider: ProviderId): string {
+  return PROVIDER_LABELS[provider];
+}
 
 export interface ProviderSearchResult {
   symbol: string;
@@ -45,14 +57,14 @@ export interface ProviderBarRow {
   high: number | null;
   low: number | null;
   close: number | null;
-  /** Dividend + split adjusted close (captured for future use, not analysed yet). */
+  /** Adjusted close when the provider reports one; never inferred from OHLC. */
   adjClose: number | null;
   volume: number | null;
 }
 
 export interface ProviderHistory {
   providerMetadata: {
-    provider: string;
+    provider: ProviderId;
     providerSymbol: string;
     displaySymbol: string;
     displayName: string | null;
@@ -77,8 +89,6 @@ export interface DatasetBundle {
   dataset: Dataset;
   bars: Bar[];
 }
-
-
 
 /** Maps the provider's instrument type vocabulary onto the canonical asset types. */
 export function assetTypeFromProvider(type: string | null): AssetType {
@@ -155,8 +165,9 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
     throw new Error('The download contained no valid bars.');
   }
 
+  const label = providerLabel(metadata.provider);
   const provider: DatasetProvider = {
-    provider: PROVIDER_ID,
+    provider: metadata.provider,
     providerSymbol: metadata.providerSymbol,
     exchange: metadata.exchange,
     exchangeName: metadata.exchangeName,
@@ -177,7 +188,7 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
     currency: metadata.currency?.trim().toUpperCase() || 'USD',
     exchange: metadata.exchangeName ?? metadata.exchange ?? undefined,
     metadata: {
-      provider: PROVIDER_ID,
+      provider: metadata.provider,
       providerSymbol: metadata.providerSymbol,
       sectorNote: metadata.instrumentType ?? '',
     },
@@ -186,9 +197,9 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
   const dataset: Dataset = {
     id: nextId('ds'),
     instrumentId: instrument.id,
-    name: `${instrument.symbol} - daily (${PROVIDER_LABEL} download)`,
+    name: `${instrument.symbol} - daily (${label} download)`,
     sourceKind: 'provider-download',
-    sourceDescription: `Downloaded from ${PROVIDER_LABEL} via the local market-data service. ${metadata.adjustment}.`,
+    sourceDescription: `Downloaded from ${label} via MarketLab's market-data service. ${metadata.adjustment}.`,
     frequency: 'daily',
     // Daily session dates need no intraday timezone; storing the exchange
     // timezone documents where the session dates were derived from.

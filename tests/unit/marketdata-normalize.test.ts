@@ -13,6 +13,7 @@ import {
   assetTypeFromProvider,
   buildDatasetBundle,
   validateProviderBars,
+  type ProviderHistory,
 } from '../../src/lib/marketdata/normalize';
 import { sma } from '../../src/lib/indicators/core';
 import { totalReturnPct, maxDrawdownPct } from '../../src/lib/quant/metrics';
@@ -21,7 +22,9 @@ function barRow(date: string, open: number, high: number, low: number, close: nu
   return { date, open, high, low, close, adjClose: close, volume };
 }
 
-function metadata(overrides: Record<string, unknown> = {}) {
+function metadata(
+  overrides: Partial<ProviderHistory['providerMetadata']> = {},
+): ProviderHistory['providerMetadata'] {
   return {
     provider: 'yahoo-finance',
     providerSymbol: 'AAPL',
@@ -182,6 +185,28 @@ describe('buildDatasetBundle', () => {
     expect(dataset.provider?.sourceNotes).toEqual(['note-a']);
 
     bars.forEach((bar: Bar) => expect(isDateString(bar.date)).toBe(true));
+  });
+
+  it('keeps a Twelve Data fallback labelled as Twelve Data', () => {
+    const history = {
+      ...HISTORY,
+      providerMetadata: metadata({
+        provider: 'twelve-data',
+        exchange: 'XNAS',
+        exchangeName: 'NASDAQ',
+        instrumentType: 'Common Stock',
+        adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC); adjusted close not reported',
+        corporateActions: [],
+      }),
+    };
+    const validation = validateProviderBars(HISTORY.bars, 'keep-first');
+    const bundle = buildDatasetBundle({ history, validation, importedAt: '2026-10-19T12:00:05.000Z' });
+
+    expect(bundle.dataset.provider?.provider).toBe('twelve-data');
+    expect(bundle.instrument.metadata?.provider).toBe('twelve-data');
+    expect(bundle.dataset.name).toContain('Twelve Data download');
+    expect(bundle.dataset.sourceDescription).toContain('Downloaded from Twelve Data');
+    expect(bundle.dataset.sourceDescription).toContain('adjusted close not reported');
   });
 
   it('stores provider corporate actions and leaves their dates untouched', () => {

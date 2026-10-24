@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { CloudArrowDown, GlobeSimple, Warning } from '@phosphor-icons/react';
 import { useStore } from '../../state/store';
-import { PROVIDER_LABEL } from '../../lib/marketdata/normalize';
-import { DEFAULT_SERVICE_URL, fetchProviderHistory } from '../../lib/marketdata/client';
+import { fetchProviderHistory, marketDataServiceDescription } from '../../lib/marketdata/client';
 import { MAX_QUEUE_SYMBOLS, parseSymbolList, runDownloadQueue, type QueueItem } from '../../lib/marketdata/queue';
 import { replaceTokenWithSymbol, searchQueryForToken, tokenAtCaret } from '../../lib/marketdata/symbol-suggest';
 import { useProviderSymbolSearch } from '../../lib/marketdata/use-provider-search';
@@ -10,7 +9,7 @@ import type { DuplicatePolicy } from '../../lib/validation/dataset';
 import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
 
 /**
- * Pause kept between requests so a batch does not hammer an unofficial provider.
+ * Pause kept between requests so a batch does not hammer the data provider.
  * A throttling failure earns a longer pause because the provider is explicitly
  * asking the caller to slow down.
  */
@@ -42,8 +41,8 @@ const STATUS_LABEL: Record<QueueItem['status'], string> = {
 };
 
 /**
- * Downloads many symbols one at a time through the optional local market-data
- * service and stores each as its own dataset, which makes the whole batch
+ * Downloads many symbols one at a time through the market-data service and
+ * stores each as its own dataset, which makes the whole batch
  * available to the screener and every other research view.
  *
  * Every symbol is reported individually: a failure never aborts the batch and
@@ -172,7 +171,7 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
     setRunning(true);
     setCancelling(false);
     setSummary(null);
-    setNotice({ kind: 'info', text: `Requesting ${symbols.length} series from ${PROVIDER_LABEL}…` });
+    setNotice({ kind: 'info', text: `Requesting ${symbols.length} series…` });
 
     const result = await runDownloadQueue(
       { symbols, range: { start, end }, duplicatePolicy },
@@ -250,10 +249,10 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
     >
       <div className="dialog-body">
         <div className="panel-sub" style={{ marginBottom: 8 }}>
-          <GlobeSimple size={13} aria-hidden /> {PROVIDER_LABEL} via the optional local market-data service (
-          {DEFAULT_SERVICE_URL}). Series are fetched one at a time with a {REQUEST_PAUSE_MS / 1000}s pause between
-          requests, up to {MAX_QUEUE_SYMBOLS} symbols per batch. Daily sessions only. This is real but unofficial data
-          that can be delayed or throttled, and it is not licensed for redistribution.
+          <GlobeSimple size={13} aria-hidden /> Real historical data via {marketDataServiceDescription()}. Series are
+          fetched one at a time with a {REQUEST_PAUSE_MS / 1000}s pause between requests, up to {MAX_QUEUE_SYMBOLS}{' '}
+          symbols per batch. Daily sessions only. Provider data can be delayed or throttled, and it is not licensed for
+          redistribution; each saved series records the provider it actually came from.
         </div>
 
         <Field
@@ -312,8 +311,7 @@ export function BulkDownloadDialog({ open, onClose }: { open: boolean; onClose: 
           )}
           {unavailable && (
             <div className="field-hint">
-              Symbol suggestions could not reach the local market-data service. Tickers typed here are still requested
-              as-is.
+              Symbol suggestions could not reach the market-data service. Tickers typed here are still requested as-is.
             </div>
           )}
         </Field>

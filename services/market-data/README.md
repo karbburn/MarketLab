@@ -1,8 +1,15 @@
 # MarketLab market-data service
 
 An optional, local-only FastAPI wrapper around [`yfinance`](https://github.com/ranaroussi/yfinance)
-that gives MarketLab historical daily OHLCV downloads and symbol search without
-any API key.
+for development on the same machine. It gives MarketLab historical daily OHLCV
+downloads and symbol search without any API key.
+
+The deployed site does **not** use this service. It calls the same-origin Vercel
+edge proxy in [`api/market-data/`](../../api/market-data), which talks to Yahoo
+Finance server-side and can use Twelve Data as an optional fallback. That is why
+downloads work on a phone or another computer without installing Python or
+starting a local process. This FastAPI service is only for `localhost` /
+`127.0.0.1` development and debugging.
 
 **What this is not:** an official or guaranteed Yahoo Finance feed. Data may be
 delayed, incomplete, or change shape without notice; availability can fail
@@ -48,17 +55,20 @@ pip install -r requirements.txt
 uvicorn app:app --host 127.0.0.1 --port 8787
 ```
 
-Then in MarketLab: **Data → Download market data**. The frontend targets
-`http://127.0.0.1:8787` on the same machine. The service binds to loopback
-(`127.0.0.1`), so it is not reachable from other machines, and its CORS
-allow-list only lets MarketLab's own frontends read responses: the local dev and
-preview origins plus the project's deployed site at
+Then in MarketLab on `localhost` or `127.0.0.1`: **Data → Download market data**.
+The local frontend targets `http://127.0.0.1:8787` on the same machine. The
+service binds to loopback (`127.0.0.1`), so it is not reachable from other
+machines, and its CORS allow-list only lets MarketLab's own frontends read
+responses: the local dev and preview origins plus the project's deployed site at
 `https://marketlab.sourabhpradhan.in`. CORS is a browser read restriction, not a
 network boundary: a browser on another origin can still send a request, but it
 cannot read the response, and a local process can call the service directly
 regardless of origin. The service performs no writes and no file I/O.
-Run locally, the service lets the deployed app download real data too; no data
-ever passes through the deployment host.
+
+On a deployed hostname the browser uses the same-origin edge proxy instead; it
+never asks another device to run this service. If you want the fallback in the
+hosted proxy, set `TWELVE_DATA_API_KEY` in Vercel. The key is server-side only
+and is not used by this local FastAPI service.
 
 ## Endpoints
 
@@ -75,6 +85,18 @@ also returns `422` for query-validation failures (for example `q` outside 2-64
 characters or `limit` out of range); in that case `detail` is its standard array
 of validation entries rather than a string. Treat `422` as a client error.
 Results are cached in-process for 10 minutes.
+
+## Hosted proxy
+
+The Vercel functions in `api/market-data/` expose the same routes under
+`/api/market-data/{health,search,history}`. History uses Yahoo Finance first.
+When `TWELVE_DATA_API_KEY` is set in the Vercel project and Yahoo is throttled,
+unavailable or has no data, the proxy tries Twelve Data's `time_series`
+endpoint server-side. Twelve Data downloads are split-adjusted with dividends
+not reinvested, but the endpoint does not provide a separate adjusted close or
+corporate-action rows, so `adjClose` is null and `corporateActions` is empty.
+The response always names the provider that answered. Without the key, only
+Yahoo is used and failures stay explicit.
 
 ## Tests (deterministic; no network)
 

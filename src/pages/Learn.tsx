@@ -207,7 +207,8 @@ export function LearnPage() {
               <p>
                 MarketLab does not adjust prices itself. A downloaded dataset carries the provider's
                 adjustment policy. Yahoo Finance prices are split-adjusted and dividends are not
-                reinvested. A CSV keeps the prices you imported.
+                reinvested; the Twelve Data fallback is split-adjusted too, but does not report a
+                separate adjusted close. A CSV keeps the prices you imported.
               </p>
             </div>
             <div className="learn-callout">

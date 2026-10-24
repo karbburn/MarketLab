@@ -1,5 +1,6 @@
 import { ChartLineUp, CloudArrowDown, ListChecks, UploadSimple } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
+import { DEFAULT_SERVICE_URL, isLocalMarketDataService } from '../../lib/marketdata/client';
 import { requestBulkDownloadDialog, requestDownloadDialog, requestImportDialog } from '../../lib/ui-events';
 import { Panel } from '../ui';
 
@@ -9,10 +10,10 @@ import { Panel } from '../ui';
  * MarketLab stores no bundled market data, so a fresh library is empty on
  * purpose. This panel turns that empty state into the three real ways to fill
  * it — download real history, import a CSV, or open the chart workspace and
- * read what to do next — and says plainly what happens when the local
- * market-data service is not running.
+ * read what to do next — and says plainly which market-data path this page uses.
  */
 export function GetStartedPanel({ title = 'No market data yet' }: { title?: string }) {
+  const localService = isLocalMarketDataService();
   return (
     <Panel
       title={title}
@@ -38,21 +39,29 @@ export function GetStartedPanel({ title = 'No market data yet' }: { title?: stri
           </Link>
         </div>
         <ul className="list-reset stack field-hint">
-          <li>
-            Downloads go through the optional local market-data service on <span className="mono">http://127.0.0.1:8787</span>.
-            Start it from the <span className="mono">services/market-data</span> folder with{' '}
-            <span className="mono">uvicorn app:app --port 8787</span> and then use Data → Download market data.
-          </li>
+          {localService ? (
+            <li>
+              Downloads go through the local market-data service on{' '}
+              <span className="mono">{DEFAULT_SERVICE_URL}</span>. Start it from the{' '}
+              <span className="mono">services/market-data</span> folder with{' '}
+              <span className="mono">uvicorn app:app --port 8787</span> and then use Data → Download market data.
+            </li>
+          ) : (
+            <li>
+              Downloads go through MarketLab's hosted market-data service, so no local setup or browser permission is
+              needed. If it is unavailable, import a CSV file and everything else keeps working.
+            </li>
+          )}
           <li>
             The batch dialog takes a list of symbols — AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points — and
             reports every symbol separately, so one unavailable ticker never discards the rest of the batch.
           </li>
           <li>
-            Without that service you can still import a CSV file with <span className="mono">date, open, high, low, close</span>{' '}
-            and an optional <span className="mono">volume</span> column. Everything else keeps working.
+            CSV import accepts <span className="mono">date, open, high, low, close</span> and an optional{' '}
+            <span className="mono">volume</span> column. Everything else keeps working.
           </li>
           <li>
-            Downloaded bars are daily, come from an unofficial provider, can be delayed and are not licensed for
+            Downloaded bars are daily, come from a market-data provider, can be delayed and are not licensed for
             redistribution. They are never real-time, and a failed download is reported rather than replaced with other
             data.
           </li>

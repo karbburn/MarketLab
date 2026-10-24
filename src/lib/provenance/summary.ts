@@ -9,7 +9,7 @@
  */
 
 import type { Dataset, DatasetValidationSummary } from '../../domain/types';
-import { PROVIDER_LABEL } from '../marketdata/normalize';
+import { PROVIDER_LABEL, providerLabel } from '../marketdata/normalize';
 
 export type ProvenanceStatus = 'clean' | 'attention' | 'legacy' | 'empty';
 
@@ -162,8 +162,11 @@ function buildLimitations(dataset: Dataset): string[] {
     );
   }
   if (provider) {
+    const label = providerLabel(provider.provider);
     limitations.push(
-      `${PROVIDER_LABEL} data is unofficial and may be delayed or revised. It is not licensed for redistribution.`,
+      provider.provider === 'yahoo-finance'
+        ? `${label} data is unofficial and may be delayed or revised. It is not licensed for redistribution.`
+        : `${label} data may be delayed or revised and is not licensed for redistribution.`,
     );
     for (const note of provider.sourceNotes) limitations.push(note);
   }
@@ -184,12 +187,13 @@ function buildFields(dataset: Dataset, context: ProvenanceContext): ProvenanceFi
         ? 'Not applicable (synthetic series)'
         : 'Not reported');
 
+  const sourceLabel = provider ? providerLabel(provider.provider) : PROVIDER_LABEL;
   const fields: ProvenanceField[] = [
     {
       label: 'Source',
       value:
         dataset.sourceKind === 'provider-download'
-          ? `${PROVIDER_LABEL} download`
+          ? `${sourceLabel} download`
           : dataset.sourceKind === 'user-csv'
             ? 'Imported CSV'
             : 'Bundled demo series',
@@ -284,7 +288,7 @@ export function buildProvenanceSummary(dataset: Dataset, context: ProvenanceCont
     tone,
     sourceLabel:
       dataset.sourceKind === 'provider-download'
-        ? PROVIDER_LABEL
+        ? (dataset.provider ? providerLabel(dataset.provider.provider) : PROVIDER_LABEL)
         : dataset.sourceKind === 'user-csv'
           ? 'Imported CSV'
           : 'Legacy demo',

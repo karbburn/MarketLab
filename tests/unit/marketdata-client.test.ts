@@ -12,6 +12,7 @@ import {
   checkServiceHealth,
   fetchProviderHistory,
   fetchProviderSearch,
+  marketDataEndpoint,
 } from '../../src/lib/marketdata/client';
 
 const SERVICE = DEFAULT_SERVICE_URL;
@@ -60,9 +61,36 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('marketDataEndpoint', () => {
+  it('uses the local FastAPI /api contract for a loopback base', () => {
+    expect(marketDataEndpoint('http://127.0.0.1:8787', 'health')).toBe('http://127.0.0.1:8787/api/health');
+    expect(marketDataEndpoint('http://127.0.0.1:8787/', 'history')).toBe('http://127.0.0.1:8787/api/history');
+  });
+
+  it('uses the hosted route without repeating /api', () => {
+    expect(marketDataEndpoint('/api/market-data', 'search')).toBe('/api/market-data/search');
+    expect(marketDataEndpoint('/api/market-data/', 'history')).toBe('/api/market-data/history');
+  });
+
+  it('recognises a configured absolute hosted proxy base', () => {
+    expect(marketDataEndpoint('https://example.test/api/market-data', 'health')).toBe(
+      'https://example.test/api/market-data/health',
+    );
+  });
+
+  it('keeps the local-compatible contract for an unrecognised custom base', () => {
+    expect(marketDataEndpoint('https://example.test/market-data', 'history')).toBe(
+      'https://example.test/market-data/api/history',
+    );
+  });
+});
+
 describe('checkServiceHealth', () => {
   it('is true when the service answers ok', async () => {
-    stubFetch(async () => jsonResponse({ ok: true, provider: 'yahoo-finance' }));
+    stubFetch(async (url) => {
+      expect(String(url)).toBe(`${SERVICE}/health`);
+      return jsonResponse({ ok: true, provider: 'yahoo-finance' });
+    });
     await expect(checkServiceHealth(SERVICE)).resolves.toBe(true);
   });
 
@@ -77,7 +105,7 @@ describe('checkServiceHealth', () => {
 describe('fetchProviderSearch', () => {
   it('normalises a successful response', async () => {
     stubFetch(async (url) => {
-      expect(String(url)).toBe(`${SERVICE}/api/search?q=app&limit=8`);
+      expect(String(url)).toBe(`${SERVICE}/search?q=app&limit=8`);
       return jsonResponse({
         results: [
           { symbol: 'AAPL', name: 'Apple Inc.', exchange: 'NMS', exchangeName: 'NASDAQ', type: 'Equity' },
@@ -116,9 +144,18 @@ describe('fetchProviderSearch', () => {
 });
 
 describe('fetchProviderHistory', () => {
+  it('rejects an unsupported provider id instead of mislabelling the series', async () => {
+    stubFetch(async () => jsonResponse({
+      ...okHistoryBody,
+      provider: { ...okHistoryBody.provider, provider: 'some-other-feed' },
+    }));
+    await expect(fetchProviderHistory({ symbol: 'AAPL', start: '2024-01-01', end: '2024-01-10' }))
+      .rejects.toMatchObject({ kind: 'malformed', message: expect.stringContaining('unsupported provider id') });
+  });
+
   it('normalises a successful response with metadata and bars', async () => {
     stubFetch(async (url) => {
-      expect(String(url)).toBe(`${SERVICE}/api/history?symbol=AAPL&start=2024-01-01&end=2024-01-10`);
+      expect(String(url)).toBe(`${SERVICE}/history?symbol=AAPL&start=2024-01-01&end=2024-01-10`);
       return jsonResponse(okHistoryBody);
     });
     const history = await fetchProviderHistory({ symbol: 'AAPL', start: '2024-01-01', end: '2024-01-10' });

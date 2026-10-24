@@ -48,6 +48,7 @@ import { Segmented, Select, Tag } from '../ui';
 import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
 import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation, type ComparisonTarget } from '../../lib/chart/compare-overlays';
 import { planCorporateActionMarkers } from '../../lib/corporate-actions';
+import { providerLabel } from '../../lib/marketdata/normalize';
 import { changePercent, hoverBars } from '../../lib/chart/readout';
 import { DataProvenanceChip, DataProvenanceDialog } from './DataProvenanceChip';
 import { timeframeForShortcut } from '../../lib/shortcuts/reference';
@@ -253,8 +254,9 @@ export function ChartPanel({
       }),
     [dataset, instrument?.currency, rendered],
   );
-  const corporateActionSource =
-    dataset?.provider?.provider === 'yahoo-finance' ? 'Yahoo Finance' : 'the provider';
+  const corporateActionSource = dataset?.provider
+    ? providerLabel(dataset.provider.provider)
+    : 'the provider';
 
   // A comparison set is relative to the primary dataset. When the panel is
   // re-pointed at a different dataset, drop the old overlays rather than

@@ -80,6 +80,36 @@ describe('buildProvenanceSummary', () => {
     expect(summary.limitations.join(' ')).toContain('Unofficial, undocumented Yahoo Finance data.');
   });
 
+  it('names the fallback provider without calling it unofficial', () => {
+    const dataset = makeDataset({
+      sourceKind: 'provider-download',
+      sourceDescription: 'Downloaded from Twelve Data via MarketLab’s market-data service.',
+      timezone: 'America/New_York',
+      provider: {
+        provider: 'twelve-data',
+        providerSymbol: 'AAPL',
+        exchange: 'XNAS',
+        exchangeName: 'NASDAQ',
+        instrumentType: 'Common Stock',
+        interval: '1d',
+        adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC); adjusted close not reported',
+        retrievedAt: '2026-01-17T09:30:00.000Z',
+        timezone: 'America/New_York',
+        sourceNotes: ['The time-series response does not include corporate-action events.'],
+      },
+    });
+
+    const summary = buildProvenanceSummary(dataset);
+    expect(summary.sourceLabel).toBe('Twelve Data');
+    expect(summary.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Source', value: 'Twelve Data download' }),
+      ]),
+    );
+    expect(summary.limitations.join(' ')).toContain('Twelve Data data may be delayed');
+    expect(summary.limitations.join(' ')).not.toContain('Twelve Data data is unofficial');
+  });
+
   it('does not invent an adjustment or retrieval date for a CSV import', () => {
     const summary = buildProvenanceSummary(makeDataset(), { exchange: 'NMS' });
 

@@ -1,5 +1,10 @@
 /**
- * Browser client for the optional local market-data service.
+ * Browser client for the market-data service.
+ *
+ * The same client talks to two interchangeable deployments:
+ * - localhost/loopback uses the optional FastAPI service in `services/`.
+ * - any deployed hostname uses the same-origin proxy under `/api/market-data`,
+ *   so users on phones or other computers do not need a local service.
  *
  * Every failure mode is a typed, first-class result — there is no state in
  * which the frontend silently shows an empty chart while a download actually
@@ -7,11 +12,115 @@
  * `services/market-data/README.md`.
  */
 
-import type { CorporateAction } from '../../domain/types';
+import type { CorporateAction, ProviderId } from '../../domain/types';
 import { isDateString } from '../date';
 import type { ProviderHistory, ProviderSearchResult } from './normalize';
 
-export const DEFAULT_SERVICE_URL = 'http://127.0.0.1:8787';
+export const LOCAL_SERVICE_URL = 'http://127.0.0.1:8787';
+export const HOSTED_SERVICE_URL = '/api/market-data';
+
+declare global {
+  interface Window {
+    /**
+     * Optional runtime override used by tests and self-hosted deployments that
+     * want to point at a same-origin proxy without rebuilding the bundle.
+     */
+    __MARKETLAB_MARKET_DATA_URL__?: string;
+  }
+}
+
+export interface ResolveMarketDataServiceOptions {
+  /** Override the hostname used for local-vs-deployed detection. */
+  hostname?: string;
+  /** Override the configured service URL; an empty string disables env overrides. */
+  configuredUrl?: string | null;
+}
+
+/** True for addresses that can reach a service running on the same machine. */
+export function isLocalHostname(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase();
+  return host === 'localhost'
+    || host.endsWith('.localhost')
+    || host === '127.0.0.1'
+    || host === '::1'
+    || host === '[::1]'
+    || host === '0.0.0.0';
+}
+
+function withoutTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+/**
+ * Resolves the service base URL without touching the network.
+ *
+ * Precedence: an explicit runtime override, then `VITE_MARKET_DATA_URL`, then
+ * loopback detection. A deployed host therefore defaults to the same-origin
+ * proxy, while local development keeps using the local FastAPI service.
+ */
+export function resolveMarketDataServiceUrl(
+  options: ResolveMarketDataServiceOptions = {},
+): string {
+  const configured = options.configuredUrl !== undefined
+    ? options.configuredUrl
+    : (typeof window !== 'undefined' ? window.__MARKETLAB_MARKET_DATA_URL__ : undefined)
+      ?? import.meta.env.VITE_MARKET_DATA_URL;
+
+  if (typeof configured === 'string' && configured.trim().length > 0) {
+    return withoutTrailingSlashes(configured.trim());
+  }
+
+  const hostname = options.hostname
+    ?? (typeof window !== 'undefined' ? window.location.hostname : '');
+  return isLocalHostname(hostname) ? LOCAL_SERVICE_URL : HOSTED_SERVICE_URL;
+}
+
+/** The resolved URL for the current page. Tests may override it explicitly. */
+export const DEFAULT_SERVICE_URL = resolveMarketDataServiceUrl();
+
+/** True when the resolved URL points at the loopback FastAPI service. */
+export function isLocalMarketDataService(baseUrl: string = DEFAULT_SERVICE_URL): boolean {
+  return baseUrl.startsWith('http://127.0.0.1')
+    || baseUrl.startsWith('http://localhost')
+    || baseUrl.startsWith('http://[::1]')
+    || baseUrl.startsWith('http://0.0.0.0');
+}
+
+/**
+ * Builds one route on a service base URL.
+ *
+ * The local FastAPI contract is `/api/{route}`. The hosted proxy is mounted at
+ * `/api/market-data/{route}` and does not repeat `/api`, so the two shapes are
+ * not interchangeable. Any base that ends in `/api/market-data` (including a
+ * configured absolute proxy URL) uses the hosted shape; every other base keeps
+ * the documented local-compatible `/api/{route}` contract.
+ */
+export function marketDataEndpoint(
+  baseUrl: string,
+  route: 'health' | 'search' | 'history',
+): string {
+  const base = withoutTrailingSlashes(baseUrl);
+  return base.endsWith('/api/market-data') ? `${base}/${route}` : `${base}/api/${route}`;
+}
+
+/** Human description used by the download dialogs and first-run panel. */
+export function marketDataServiceDescription(baseUrl: string = DEFAULT_SERVICE_URL): string {
+  if (isLocalMarketDataService(baseUrl)) {
+    return `the local market-data service (${baseUrl})`;
+  }
+  if (baseUrl === HOSTED_SERVICE_URL) {
+    return "MarketLab's hosted market-data service";
+  }
+  return `MarketLab's market-data service (${baseUrl})`;
+}
+
+/** Actionable failure text that never tells deployed users to start localhost. */
+export function marketDataUnavailableMessage(baseUrl: string = DEFAULT_SERVICE_URL): string {
+  if (isLocalMarketDataService(baseUrl)) {
+    return 'The local market-data service is not reachable. Start it with `uvicorn app:app --port 8787` from `services/market-data`, then try again.';
+  }
+  return "MarketLab's hosted market-data service is not reachable. Check your internet connection and try again.";
+}
 
 export type MarketDataFailureKind =
   | 'unavailable'
@@ -52,7 +161,7 @@ export function isMarketDataThrottled(error: unknown): boolean {
 
 export async function checkServiceHealth(baseUrl: string = DEFAULT_SERVICE_URL, signal?: AbortSignal): Promise<boolean> {
   try {
-    const response = await request(`${baseUrl}/api/health`, signal ?? null);
+    const response = await request(marketDataEndpoint(baseUrl, 'health'), signal ?? null, baseUrl);
     const body = (await response.json().catch(() => null)) as { ok?: unknown } | null;
     return response.ok && body?.ok === true;
   } catch {
@@ -67,8 +176,9 @@ export async function fetchProviderSearch(
   signal?: AbortSignal,
 ): Promise<ProviderSearchResult[]> {
   const response = await request(
-    `${baseUrl}/api/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+    `${marketDataEndpoint(baseUrl, 'search')}?q=${encodeURIComponent(query)}&limit=${limit}`,
     signal ?? null,
+    baseUrl,
   );
   const body = await expectJson(response);
   assertShape(body && typeof body === 'object' && Array.isArray((body as { results?: unknown }).results), 'Search response is missing the results list.');
@@ -88,8 +198,9 @@ export async function fetchProviderHistory(
   signal?: AbortSignal,
 ): Promise<ProviderHistory> {
   const response = await request(
-    `${baseUrl}/api/history?symbol=${encodeURIComponent(input.symbol)}&start=${encodeURIComponent(input.start)}&end=${encodeURIComponent(input.end)}`,
+    `${marketDataEndpoint(baseUrl, 'history')}?symbol=${encodeURIComponent(input.symbol)}&start=${encodeURIComponent(input.start)}&end=${encodeURIComponent(input.end)}`,
     signal ?? null,
+    baseUrl,
   );
   const body = await expectJson(response);
   assertShape(
@@ -104,26 +215,31 @@ export async function fetchProviderHistory(
 
 // ---------------------------------------------------------------- internals
 
-async function request(url: string, signal: AbortSignal | null): Promise<Response> {
+async function request(
+  url: string,
+  signal: AbortSignal | null,
+  baseUrl: string = DEFAULT_SERVICE_URL,
+): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener('abort', onExternalAbort);
   try {
-    // `X-MarketLab-Client` is deliberately a non-simple header: it forces a CORS
-    // preflight even for plain GETs, so the service can declare its
-    // `Access-Control-Allow-Private-Network` opt-in. Chrome otherwise blocks a
-    // public HTTPS page from reaching a user's localhost before any preflight
-    // could happen (Private Network Access / Local Network Access policies).
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-MarketLab-Client': '1' },
-    });
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (isLocalMarketDataService(baseUrl)) {
+      // `X-MarketLab-Client` is deliberately a non-simple header: it forces a
+      // CORS preflight even for plain GETs, so the local service can declare its
+      // `Access-Control-Allow-Private-Network` opt-in. Chrome otherwise blocks a
+      // public HTTPS page from reaching a user's localhost before any preflight
+      // could happen (Private Network Access / Local Network Access policies).
+      headers['X-MarketLab-Client'] = '1';
+    }
+    return await fetch(url, { signal: controller.signal, headers });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new MarketDataError('timeout', 'The market-data service did not respond in time.');
     }
-    throw new MarketDataError('unavailable', 'The market-data service is not reachable. Start it with `uvicorn app:app --port 8787`.');
+    throw new MarketDataError('unavailable', marketDataUnavailableMessage(baseUrl));
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', onExternalAbort);
@@ -166,6 +282,11 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function normaliseProviderId(value: unknown): ProviderId | null {
+  if (value === 'yahoo-finance' || value === 'twelve-data') return value;
+  return null;
+}
+
 function normaliseSearchResult(entry: unknown): ProviderSearchResult {
   assertShape(entry && typeof entry === 'object', 'Search response contained a non-object result.');
   const raw = entry as Record<string, unknown>;
@@ -182,13 +303,14 @@ function normaliseSearchResult(entry: unknown): ProviderSearchResult {
 }
 
 function normaliseProviderMetadata(raw: Record<string, unknown>): ProviderHistory['providerMetadata'] {
-  assertShape(typeof raw.provider === 'string' && raw.provider.length > 0, 'Provider metadata is missing its id.');
+  const provider = normaliseProviderId(raw.provider);
+  assertShape(provider !== null, 'Provider metadata has an unsupported provider id.');
   assertShape(typeof raw.providerSymbol === 'string' && raw.providerSymbol.length > 0, 'Provider metadata is missing the original symbol.');
   const notes = raw.sourceNotes;
   const range = raw.rangeRequested;
   const actual = raw.rangeActual;
   return {
-    provider: raw.provider as string,
+    provider,
     providerSymbol: raw.providerSymbol as string,
     displaySymbol: typeof raw.displaySymbol === 'string' && raw.displaySymbol.length > 0 ? raw.displaySymbol : raw.providerSymbol as string,
     displayName: nullableString(raw.displayName),

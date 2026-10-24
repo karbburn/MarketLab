@@ -384,7 +384,7 @@ async def search_endpoint(
 
 @app.get("/api/history")
 async def history_endpoint(
-    symbol: str = Query(min_length=2, max_length=16),
+    symbol: str = Query(min_length=1, max_length=16),
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
 ) -> dict[str, Any]:

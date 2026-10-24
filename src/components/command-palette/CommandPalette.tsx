@@ -124,7 +124,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         kind: 'command',
         group: 'actions',
         label: 'Download market data',
-        keywords: ['download', 'provider', 'yahoo', 'symbol', 'data'],
+        keywords: ['download', 'provider', 'yahoo', 'twelve data', 'symbol', 'data'],
         run: () => requestDownloadDialog(),
       },
       {
@@ -132,7 +132,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         kind: 'command',
         group: 'actions',
         label: 'Download many symbols',
-        keywords: ['download', 'batch', 'bulk', 'provider', 'yahoo', 'symbols'],
+        keywords: ['download', 'batch', 'bulk', 'provider', 'yahoo', 'twelve data', 'symbols'],
         run: () => requestBulkDownloadDialog(),
       },
       {
@@ -418,7 +418,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             <span className="empty-title">{plan.emptyMessage}</span>
             <span className="empty-body">
               {state.datasets.length === 0
-                ? 'Datasets come from a CSV import or a download from the local market-data service.'
+                ? "Datasets come from a CSV import or a download from MarketLab's market-data service."
                 : 'Try a symbol, a view name or an action such as “import”.'}
             </span>
           </div>

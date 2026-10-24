@@ -180,6 +180,50 @@ test.describe('market data download', () => {
     await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
   });
 
+  test('uses the hosted same-origin data path when the deployment provides one', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __MARKETLAB_MARKET_DATA_URL__?: string }).__MARKETLAB_MARKET_DATA_URL__ =
+        '/api/market-data';
+    });
+
+    const requests: string[] = [];
+    await page.route('**/api/market-data/health*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, provider: 'yahoo-finance', fallbackProvider: 'twelve-data' }),
+      });
+    });
+    await page.route('**/api/market-data/history*', async (route) => {
+      requests.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(PROVIDER_PAYLOAD),
+      });
+    });
+    await page.route('**/api/market-data/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ provider: 'yahoo-finance', query: '', results: [] }),
+      });
+    });
+
+    await page.goto('/#/data');
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Download market data' });
+    await expect(dialog.getByText(/hosted market-data service/i)).toBeVisible();
+
+    await dialog.getByLabel('Symbol').fill('AAPL');
+    await dialog.getByRole('button', { name: 'Download', exact: true }).click();
+
+    await expect(dialog.getByText('Yahoo Finance download', { exact: true })).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain('/api/market-data/history?symbol=AAPL');
+    expect(requests[0]).not.toContain('127.0.0.1:8787');
+  });
+
   test('rejects an invalid symbol without contacting anything', async ({ page }) => {
     await page.goto('/#/data');
     await page.getByRole('button', { name: 'Download market data' }).click();

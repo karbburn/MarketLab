@@ -3,6 +3,7 @@ import { Plus, Trash } from '@phosphor-icons/react';
 import type { ChartConfig } from '../../domain/types';
 import type { DatasetView } from '../../state/selectors';
 import { comparisonEligibility, type ComparisonPreparation } from '../../lib/chart/compare-overlays';
+import { providerLabel } from '../../lib/marketdata/normalize';
 import { resolveTimeframe } from '../../lib/timeframe';
 import { requestDownloadDialog, requestImportDialog } from '../../lib/ui-events';
 import { useStore } from '../../state/store';
@@ -163,7 +164,10 @@ export function CompareDialog({
                     <div style={{ display: 'grid', gap: 1 }}>
                       <span className="row tight">
                         <span className="mono">{view.instrument?.symbol ?? view.dataset.name}</span>
-                        <SourceTag sourceKind={view.dataset.sourceKind} />
+                        <SourceTag
+                          sourceKind={view.dataset.sourceKind}
+                          provider={view.dataset.provider?.provider ?? null}
+                        />
                       </span>
                       <span className="panel-sub">
                         {excluded
@@ -205,8 +209,16 @@ const METHOD_NOTE =
   'Comparison series are rebased to 100 at the first session shared by every selected series, aligned on exchange ' +
   'session dates and never forward-filled. The primary price axis stays in price units; the comparison index has its own axis.';
 
-function SourceTag({ sourceKind }: { sourceKind: 'bundled-sample' | 'user-csv' | 'provider-download' }) {
-  if (sourceKind === 'provider-download') return <Tag tone="accent">Yahoo download</Tag>;
+function SourceTag({
+  sourceKind,
+  provider,
+}: {
+  sourceKind: 'bundled-sample' | 'user-csv' | 'provider-download';
+  provider: import('../../domain/types').ProviderId | null;
+}) {
+  if (sourceKind === 'provider-download') {
+    return <Tag tone="accent">{provider ? `${providerLabel(provider)} download` : 'Provider download'}</Tag>;
+  }
   if (sourceKind === 'user-csv') return <Tag>CSV import</Tag>;
   return <Tag tone="warn">Legacy sample</Tag>;
 }
