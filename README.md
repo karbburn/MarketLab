@@ -97,7 +97,11 @@ periods) are empty rather than zero.
   chart and a trade log you can export. Execution assumptions are printed next to the results.
 - **Saved research runs** — store an immutable snapshot of a backtest: the configuration, the
   dataset identity and a SHA-256 fingerprint of the exact window, the execution assumptions,
-  metrics and trades. Browse runs in a filterable, newest-first library; selecting one opens its
+  metrics and trades. Provider-download runs also record the data's source provenance at save
+  time: the provider and its declared price adjustment, exchange, currency, timezone, the
+  window actually requested, the coverage check against it and the retrieval date. Runs saved
+  before this existed (and runs on imported CSVs) show "Not recorded" rather than invented
+  values. Browse runs in a filterable, newest-first library; selecting one opens its
   snapshot. Rename a run's display label at any time: it is metadata only and never alters the
   recorded configuration, dataset fingerprint, assumptions, metrics or trades. Inspect a run
   later, re-run it to verify the outputs, export it as a versioned JSON manifest (no market data),

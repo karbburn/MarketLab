@@ -184,6 +184,35 @@ test.describe('rule-based backtest', () => {
     await expect(results).toContainText('Simulated sessions');
   });
 
+  test('records provider provenance in a saved run from a provider download', async ({ page }) => {
+    // The run shares the library used by the partial-coverage test, so the
+    // inspection surfaces both the provider identity and the honest coverage.
+    await seedLibrary(page, buildPartialCoverageLibrary());
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run');
+
+    await expect(panel.getByText(/Source yahoo-finance · splits-applied, dividends not reinvested/)).toBeVisible();
+    await expect(panel.getByText(/NasdaqGS · USD · UTC/)).toBeVisible();
+    await expect(panel.getByText('Requested 2015-01-02 to 2026-10-16 · Coverage: partial · retrieved 2026-10-16 00:00 UTC')).toBeVisible();
+  });
+
+  test('marks source provenance as not recorded in runs on imported CSVs', async ({ page }) => {
+    // The default seeded library is imported CSV data: a run must not claim a
+    // provider it never had, so it says the source was not recorded instead.
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run');
+
+    await expect(panel.getByText('Source not recorded for this run')).toBeVisible();
+  });
+
   test('explains recomputed results and distinguishes a loaded saved run', async ({ page }) => {
     await page.goto('/#/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();

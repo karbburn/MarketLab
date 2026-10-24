@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryAdapter, type PersistenceAdapter } from '../../src/lib/persistence/db';
 import { loadState } from '../../src/state/store';
 import type { BacktestRun } from '../../src/domain/types';
+import { RESEARCH_RUN_SCHEMA_VERSION } from '../../src/lib/workspace/schema';
 
 const FINGERPRINT = `sha256:${'a'.repeat(64)}`;
 
@@ -73,7 +74,9 @@ function invalidRun(): Record<string, unknown> {
 }
 
 function futureRun(): Record<string, unknown> {
-  return { ...validRun('run-future'), name: 'From a newer build', schemaVersion: 2 };
+  // Always one version ahead of this build, so the fixture stays a genuinely
+  // future record as the global schema version advances.
+  return { ...validRun('run-future'), name: 'From a newer build', schemaVersion: RESEARCH_RUN_SCHEMA_VERSION + 1 };
 }
 
 describe('loadState research-run validation', () => {
