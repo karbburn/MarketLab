@@ -9,6 +9,7 @@ import {
   verifyBacktestRun,
   type ResearchRunVerification,
 } from '../../lib/backtest/research-runs';
+import { indexInstrumentsById, resolveRunDataset } from '../../lib/backtest/run-datasets';
 import { downloadTextFile, readFileAsText } from '../../lib/export/download';
 import { formatPercent, formatPrice } from '../../lib/format';
 import { describeStrategyRules } from '../../lib/backtest/rule-catalog';
@@ -111,7 +112,15 @@ export function ResearchRunsPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runs = useMemo(() => sortResearchRuns(state.backtestRuns), [state.backtestRuns]);
+  const instrumentsById = useMemo(() => indexInstrumentsById(state.instruments), [state.instruments]);
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null;
+  // The selected run's dataset resolves through its stored id first; when the
+  // record is gone, a unique content-identical sibling still supports
+  // verification and loading. Same rule as comparison and load planning.
+  const selectedDatasetIdBasis = useMemo(
+    () => (selected ? resolveRunDataset(selected, state.datasets, instrumentsById) : null),
+    [selected, state.datasets, instrumentsById],
+  );
   const activeVerification = selected && verification?.runId === selected.id ? verification.value : null;
   const filteredRuns = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -199,7 +208,8 @@ export function ResearchRunsPanel({
     if (busy) return;
     setBusy('verify');
     try {
-      const dataset = state.datasets.find((entry) => entry.id === run.dataset.datasetId);
+      const resolution = resolveRunDataset(run, state.datasets, instrumentsById);
+      const dataset = resolution.dataset ?? undefined;
       const value = await verifyBacktestRun({
         run,
         dataset,
@@ -473,11 +483,13 @@ export function ResearchRunsPanel({
                   <button
                     type="button"
                     className="button sm"
-                    disabled={busy !== null || !onLoadConfig || !state.datasets.some((entry) => entry.id === selected.dataset.datasetId)}
+                    disabled={busy !== null || !onLoadConfig || selectedDatasetIdBasis?.dataset === null}
                     title={
-                      state.datasets.some((entry) => entry.id === selected.dataset.datasetId)
-                        ? 'Load this run\u2019s configuration into the strategy editor'
-                        : 'The dataset this run used is not in the library'
+                      !selectedDatasetIdBasis || selectedDatasetIdBasis.dataset === null
+                        ? 'The dataset this run used is not in the library and no identical-content series is stored'
+                        : selectedDatasetIdBasis.basis === 'matching-content'
+                          ? 'Load this run\u2019s configuration into the strategy editor. The stored dataset was re-imported under a new library id; the editor targets the identical stored series'
+                          : 'Load this run\u2019s configuration into the strategy editor'
                     }
                     onClick={() => onLoadConfig?.(selected)}
                   >

@@ -20,7 +20,7 @@ import { normaliseCompareSelections } from '../lib/workspace/compare-selections'
 import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
-import { planResearchRunSave, withResearchRunName } from '../lib/backtest/research-runs';
+import { planResearchRunSave, withResearchRunName, RESEARCH_RUN_SCHEMA_VERSION } from '../lib/backtest/research-runs';
 import { parseBacktestRun } from '../lib/workspace/schema';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
@@ -181,6 +181,42 @@ export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot
 
   let preferences = preferencesRecords[0] ? stripPreferenceId(preferencesRecords[0]) : DEFAULT_PREFERENCES;
 
+  // Records are validated on every write, but storage can also carry a run that
+  // predates a validation rule or was corrupted out-of-band. Future-version
+  // records are only quarantined (a newer build may need them); anything else
+  // that fails the schema is dropped from state and from storage, mirroring
+  // how the migration removes records it can never serve.
+  const validatedRuns: BacktestRun[] = [];
+  let droppedRunCount = 0;
+  let futureRunCount = 0;
+  const droppedRunIds: string[] = [];
+  for (const record of backtestRuns) {
+    const parsed = parseBacktestRun(record);
+    if (parsed.ok) {
+      validatedRuns.push(parsed.value);
+      continue;
+    }
+    const version = (record as { schemaVersion?: unknown }).schemaVersion;
+    if (typeof version === 'number' && Number.isInteger(version) && version > RESEARCH_RUN_SCHEMA_VERSION) {
+      futureRunCount += 1;
+      continue;
+    }
+    droppedRunCount += 1;
+    droppedRunIds.push(record.id);
+  }
+  if (droppedRunIds.length > 0) {
+    // One best-effort transaction; a failure here leaves the records on disk
+    // undropped and the next load retries, which stays safe because the
+    // snapshot below already excludes them either way.
+    try {
+      await adapter.transaction(['researchRuns'], async (tx) => {
+        for (const runId of droppedRunIds) await tx.remove('researchRuns', runId);
+      }, { notify: false });
+    } catch {
+      // Excluded from state regardless; persistence cleanup is retried next load.
+    }
+  }
+
   // Remove the bundled demo series, if an earlier build left them behind.
   const cleanup = removeSyntheticData({ instruments, datasets, workspaces, watchlists, screeners, backtests });
   if (cleanup.changed) {
@@ -256,10 +292,30 @@ export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot
       screeners: nextScreeners,
       backtests: nextBacktests,
       chartTemplates,
-      backtestRuns,
+      backtestRuns: validatedRuns,
     },
-    notice: cleanup.changed ? describeCleanup(cleanup) : null,
+    notice: buildLoadNotice(cleanup.changed ? describeCleanup(cleanup) : null, droppedRunCount, futureRunCount),
   };
+}
+
+function buildLoadNotice(cleanupNotice: string | null, droppedRunCount: number, futureRunCount: number): string | null {
+  const parts: string[] = [];
+  if (cleanupNotice) parts.push(cleanupNotice);
+  if (droppedRunCount > 0) {
+    parts.push(
+      droppedRunCount === 1
+        ? '1 saved research run could not be validated with this build and was removed from the library.'
+        : `${droppedRunCount} saved research runs could not be validated with this build and were removed from the library.`,
+    );
+  }
+  if (futureRunCount > 0) {
+    parts.push(
+      futureRunCount === 1
+        ? '1 saved research run was written by a newer version of MarketLab and is kept on disk but hidden here.'
+        : `${futureRunCount} saved research runs were written by a newer version of MarketLab and are kept on disk but hidden here.`,
+    );
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {

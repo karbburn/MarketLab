@@ -331,6 +331,78 @@ test.describe('rule-based backtest', () => {
     await expect(page.locator('.research-working-copy')).toHaveCount(0);
   });
 
+  test('pairs a run with a re-imported content-identical series', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await panel.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body')).toContainText('Saved research run "Untitled strategy"');
+
+    // Reproduce the exact state after a user re-downloads a series and removes
+    // the earlier import: the stored dataset id disappears, but a sibling
+    // record with the same bars, instrument and frequency survives under a new
+    // id. The run record is untouched.
+    await page.evaluate(() => {
+      return new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('marketlab', 3);
+        open.onerror = () => reject(open.error ?? new Error('Could not open the database'));
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['datasets', 'bars'], 'readwrite');
+          const datasets = tx.objectStore('datasets');
+          const bars = tx.objectStore('bars');
+          const originalRequest = datasets.get('ds_aapl');
+          originalRequest.onsuccess = () => {
+            const original = originalRequest.result as Record<string, unknown> | undefined;
+            const barsRequest = bars.get('ds_aapl');
+            barsRequest.onsuccess = () => {
+              const originalBars = barsRequest.result as { id: string; bars: unknown[] } | undefined;
+              if (!original || !originalBars) {
+                reject(new Error('The fixture dataset ds_aapl was not found.'));
+                return;
+              }
+              datasets.put({ ...original, id: 'ds_aapl2', name: 'AAPL - daily (re-imported)' });
+              bars.put({ id: 'ds_aapl2', bars: originalBars.bars });
+              datasets.delete('ds_aapl');
+              bars.delete('ds_aapl');
+            };
+            barsRequest.onerror = () => reject(barsRequest.error ?? new Error('Could not read the bars'));
+          };
+          originalRequest.onerror = () => reject(originalRequest.error ?? new Error('Could not read the dataset'));
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error ?? new Error('Could not write the sibling records'));
+        };
+      });
+    });
+    await page.reload();
+
+    const reloaded = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await expect(reloaded.getByRole('list', { name: 'Saved research runs' })).toContainText('Untitled strategy');
+
+    // The stored id is gone, but the run's inputs resolve through their content
+    // identity, so the run stays verifiable instead of being mislabelled as
+    // missing its dataset.
+    await reloaded.getByRole('button', { name: 'Rerun and verify' }).click();
+    await expect(reloaded.getByText('Verified', { exact: true })).toBeVisible();
+
+    // Loading the run re-points the draft at the sibling series and says so.
+    const loadButton = reloaded.getByRole('button', { name: 'Load into editor' });
+    await expect(loadButton).toBeEnabled();
+    await loadButton.click();
+    // The re-point is disclosed, not hidden behind the generic load message.
+    const toasts = page.locator('.toast-body');
+    await expect(toasts.first()).toContainText('re-imported under a new library id');
+    await expect(toasts.last()).toContainText('Loaded the configuration from research run "Untitled strategy"');
+
+    // The draft runs against the sibling, not the deleted id.
+    const workingCopy = page.locator('.research-working-copy');
+    await expect(workingCopy).toContainText('Working copy');
+  });
+
   test('compares two saved research runs without changing either record', async ({ page }) => {
     await page.goto('/#/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();

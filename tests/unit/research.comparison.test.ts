@@ -284,13 +284,32 @@ describe('research run comparison identity and warnings', () => {
 
   it('discloses missing datasets without blocking the saved snapshot', () => {
     const comparison = compareResearchRuns(savedRun(), savedRun({ id: 'run-b' }), {
-      availableDatasetIds: [],
+      resolvableRunIds: [],
     });
     expect(comparison.missingDatasetSides).toEqual(['A', 'B']);
     expect(comparison.inputsComparable).toBe(true);
     expect(comparison.findings.some((finding) => finding.id === 'dataset-missing-A')).toBe(true);
     expect(comparison.summary.label).toBe('Snapshot-only inputs');
     expect(comparison.metrics[0]?.leftValue).toBe(12.5);
+  });
+
+  it('treats a run whose dataset resolves to content-identical siblings as checkable', () => {
+    // The stored id is gone, but the run resolves through its content identity,
+    // so neither side is reported missing and no false warning is raised.
+    const comparison = compareResearchRuns(savedRun(), savedRun({ id: 'run-b' }), {
+      resolvableRunIds: ['run-a', 'run-b'],
+    });
+    expect(comparison.missingDatasetSides).toEqual([]);
+    expect(comparison.findings.some((finding) => finding.id.startsWith('dataset-missing'))).toBe(false);
+    expect(comparison.summary.label).toBe('Like-for-like inputs');
+  });
+
+  it('still reports a missing dataset when the run cannot resolve to any series', () => {
+    const comparison = compareResearchRuns(savedRun(), savedRun({ id: 'run-b' }), {
+      resolvableRunIds: ['run-b'],
+    });
+    expect(comparison.missingDatasetSides).toEqual(['A']);
+    expect(comparison.summary.label).toBe('Snapshot-only inputs');
   });
 
   it('warns when identical inputs and settings record different outputs', () => {
@@ -309,7 +328,7 @@ describe('research run comparison identity and warnings', () => {
     const left = savedRun();
     const right = savedRun({ id: 'run-b', metrics: { totalReturnPct: 30 }, config: { positionSizePct: 60 } });
     const before = JSON.stringify([left, right]);
-    compareResearchRuns(left, right, { availableDatasetIds: ['ds-1'] });
+    compareResearchRuns(left, right, { resolvableRunIds: ['run-a'] });
     compareRunConfigs(left, right);
     compareRunAssumptions(left, right);
     expect(JSON.stringify([left, right])).toBe(before);

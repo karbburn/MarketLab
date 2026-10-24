@@ -6,6 +6,7 @@ import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
 import { planResearchRunLoad } from '../lib/backtest/research-runs';
+import { indexInstrumentsById } from '../lib/backtest/run-datasets';
 import { describeRunWindow } from '../lib/backtest/run-window';
 import { buildProvenanceSummary } from '../lib/provenance/summary';
 import { coverageFromDataset } from '../lib/marketdata/coverage';
@@ -88,7 +89,8 @@ export function BacktestPage() {
   const loadRunConfig = useCallback((run: BacktestRun) => {
     const plan = planResearchRunLoad(
       run,
-      views.map((view) => view.dataset.id),
+      state.datasets,
+      indexInstrumentsById(state.instruments),
       createId('backtest'),
     );
     if (!plan.ok) {
@@ -101,8 +103,14 @@ export function BacktestPage() {
     setSelectedSavedId('');
     setLoadedFrom({ id: run.id, name: run.name });
     requestRun(plan.config);
+    if (plan.repointed) {
+      actions.notify(
+        'info',
+        `The dataset of this run was re-imported under a new library id; the editor targets the identical stored series.`,
+      );
+    }
     actions.notify('info', `Loaded the configuration from research run "${run.name}".`);
-  }, [views, actions, requestRun]);
+  }, [state.datasets, state.instruments, actions, requestRun]);
 
   const updateRule = (side: 'entry' | 'exit', ruleId: string, updater: (rule: StrategyRule) => StrategyRule) => {
     updateDraft((current) => ({

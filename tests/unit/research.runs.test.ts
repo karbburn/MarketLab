@@ -99,6 +99,10 @@ function instrument(): Instrument {
   return { id: 'inst-1', symbol: 'TST', displayName: 'Test', assetType: 'equity', currency: 'USD' };
 }
 
+function indexInstruments(): Map<string, Instrument> {
+  return new Map([[instrument().id, instrument()]]);
+}
+
 async function savedRun(overrides: { bars?: Bar[]; config?: BacktestConfig; dataset?: Dataset } = {}): Promise<BacktestRun> {
   const bars = overrides.bars ?? buildsBars();
   const config = overrides.config ?? strategy();
@@ -390,7 +394,7 @@ describe('withResearchRunName', () => {
 describe('planResearchRunLoad', () => {
   it('returns an editable copy with a fresh id and no aliased rules', async () => {
     const run = await savedRun();
-    const plan = planResearchRunLoad(run, ['ds-1'], 'bt-copy');
+    const plan = planResearchRunLoad(run, [dataset()], indexInstruments(), 'bt-copy');
 
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
@@ -399,6 +403,7 @@ describe('planResearchRunLoad', () => {
     expect(plan.config.entry).toEqual(run.config.entry);
     expect(plan.config.entry).not.toBe(run.config.entry);
     expect(plan.config.entry[0]).not.toBe(run.config.entry[0]);
+    expect(plan.repointed).toBeNull();
 
     // Mutating the draft cannot reach into the saved run.
     plan.config.entry[0]!.window = 999;
@@ -407,19 +412,72 @@ describe('planResearchRunLoad', () => {
 
   it('refuses to load when the run dataset is not in the library', async () => {
     const run = await savedRun();
-    const plan = planResearchRunLoad(run, ['another-dataset'], 'bt-copy');
+    const plan = planResearchRunLoad(run, [dataset({ id: 'another-dataset', contentHash: 'fnv1a-other' })], indexInstruments(), 'bt-copy');
     expect(plan.ok).toBe(false);
-    if (!plan.ok) expect(plan.message).toContain('not in the library');
+    if (!plan.ok) expect(plan.message).toContain('cannot be loaded');
   });
 
   it('points the draft at the run dataset identity, not a stale config id', async () => {
     const run = await savedRun();
     const stale = { ...run, config: { ...run.config, datasetId: 'ds-stale' } };
-    const plan = planResearchRunLoad(stale, ['ds-1'], 'bt-copy');
+    const plan = planResearchRunLoad(stale, [dataset()], indexInstruments(), 'bt-copy');
     expect(plan.ok).toBe(true);
     if (plan.ok) {
       expect(plan.config.datasetId).toBe('ds-1');
+      expect(plan.repointed).toBeNull();
       expect(plan.config.entry).toEqual(run.config.entry);
+    }
+  });
+
+  it('re-points the draft at a unique content-identical sibling and discloses it', async () => {
+    const run = await savedRun();
+    const sibling = dataset({ id: 'ds-2', instrumentId: 'inst-2', name: 'Re-imported series' });
+    const instruments = new Map([
+      ['inst-1', instrument()],
+      ['inst-2', { ...instrument(), id: 'inst-2' }],
+    ]);
+    const plan = planResearchRunLoad(run, [sibling], instruments, 'bt-copy');
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.config.datasetId).toBe('ds-2');
+      expect(plan.repointed).toEqual({ savedDatasetId: 'ds-1', targetDatasetId: 'ds-2' });
+    }
+  });
+
+  it('refuses an ambiguous pair of content-identical siblings instead of picking one', async () => {
+    const run = await savedRun();
+    const siblings = [dataset({ id: 'ds-2', instrumentId: 'inst-2' }), dataset({ id: 'ds-3', instrumentId: 'inst-2', name: 'Second copy' })];
+    const instruments = new Map([
+      ['inst-1', instrument()],
+      ['inst-2', { ...instrument(), id: 'inst-2' }],
+    ]);
+    const plan = planResearchRunLoad(run, siblings, instruments, 'bt-copy');
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.message).toContain('cannot be loaded');
+  });
+
+  it('refuses content-identical bars when the instrument identity differs', async () => {
+    const run = await savedRun();
+    // Same bars, but the only stored series belongs to a different instrument
+    // (the index-versus-fund guard from the backup merge rules).
+    const sibling = dataset({ id: 'ds-2', instrumentId: 'inst-2' });
+    const instruments = new Map([['inst-2', { ...instrument(), id: 'inst-2', symbol: 'OTHER' }]]);
+    const plan = planResearchRunLoad(run, [sibling], instruments, 'bt-copy');
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.message).toContain('cannot be loaded');
+  });
+
+  it('re-points through the pinned instrument id even when the symbol is unrecorded', async () => {
+    const run = await savedRun();
+    // A legacy run without a recorded symbol can still be resolved by the
+    // pinned instrument id, content hash and frequency together.
+    const symbolless = { ...run, dataset: { ...run.dataset, instrumentSymbol: '' } };
+    const sibling = dataset({ id: 'ds-2', instrumentId: 'inst-1', name: 'Re-imported series' });
+    const plan = planResearchRunLoad(symbolless, [sibling], indexInstruments(), 'bt-copy');
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.config.datasetId).toBe('ds-2');
+      expect(plan.repointed).toEqual({ savedDatasetId: 'ds-1', targetDatasetId: 'ds-2' });
     }
   });
 });

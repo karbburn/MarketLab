@@ -334,8 +334,13 @@ export interface ResearchRunComparison {
 }
 
 export interface CompareResearchRunsOptions {
-  /** Dataset ids currently in the local library. Omit when availability is unknown. */
-  availableDatasetIds?: readonly string[];
+  /**
+   * Run ids whose dataset can currently be resolved in the library: the stored
+   * dataset id is present, or the record resolves to a unique
+   * content-identical sibling (see `resolveRunDataset`). Omit when
+   * availability is unknown.
+   */
+  resolvableRunIds?: readonly string[];
 }
 
 function datasetIdentityDifferences(left: BacktestRun, right: BacktestRun): string[] {
@@ -403,11 +408,11 @@ export function compareResearchRuns(
   const metricsMatch = runMetricsMatch(left, right);
   const inputsComparable = sameDatasetContent && sameWindow && sameEngine && assumptions.same;
 
-  const available = options.availableDatasetIds ? new Set(options.availableDatasetIds) : null;
+  const resolvable = options.resolvableRunIds ? new Set(options.resolvableRunIds) : null;
   const missingDatasetSides: Array<'A' | 'B'> = [];
-  if (available) {
-    if (!available.has(left.dataset.datasetId)) missingDatasetSides.push('A');
-    if (!sameRecord && !available.has(right.dataset.datasetId)) missingDatasetSides.push('B');
+  if (resolvable) {
+    if (!resolvable.has(left.id)) missingDatasetSides.push('A');
+    if (!sameRecord && !resolvable.has(right.id)) missingDatasetSides.push('B');
   }
 
   const findings: ComparisonFinding[] = [];

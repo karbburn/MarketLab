@@ -12,6 +12,7 @@ import type {
 import { createId } from '../id';
 import { parseBacktestRun, RESEARCH_RUN_SCHEMA_VERSION } from '../workspace/schema';
 import { BACKTEST_ASSUMPTIONS, BACKTEST_ENGINE_VERSION, runBacktest, selectBacktestWindow } from './engine';
+import { resolveRunDataset } from './run-datasets';
 
 export { RESEARCH_RUN_SCHEMA_VERSION };
 
@@ -445,22 +446,47 @@ export function withResearchRunName(run: BacktestRun, name: string): BacktestRun
  *
  * The returned configuration is a deep copy with a fresh id, so the editor can
  * never alias the immutable run and saving it creates a new record. Loading is
- * refused when the run's dataset is gone: showing its rules against a different
+ * refused when the run's dataset is gone from the library and no
+ * content-identical sibling is available: showing its rules against a different
  * series would imply a reproduction that cannot happen.
+ *
+ * When the stored dataset id is absent but a unique content-identical sibling
+ * is available (same bars, same instrument identity and frequency, per
+ * `resolveRunDataset`), the draft targets that sibling and `repointed` names
+ * the substitution so the caller can disclose it. The run's dataset block is
+ * canonical: a stale `config.datasetId` carried by an older backup never wins.
  */
+export interface ResearchRunLoadRepoint {
+  savedDatasetId: string;
+  targetDatasetId: string;
+}
+
 export type ResearchRunLoadPlan =
-  | { ok: true; config: BacktestConfig }
+  | { ok: true; config: BacktestConfig; repointed: ResearchRunLoadRepoint | null }
   | { ok: false; message: string };
 
 export function planResearchRunLoad(
   run: BacktestRun,
-  availableDatasetIds: readonly string[],
+  datasets: readonly Dataset[],
+  instrumentsById: ReadonlyMap<string, Instrument>,
   nextConfigId: string,
 ): ResearchRunLoadPlan {
-  if (!availableDatasetIds.includes(run.dataset.datasetId)) {
+  if (datasets.some((dataset) => dataset.id === run.dataset.datasetId)) {
+    return {
+      ok: true,
+      config: {
+        ...snapshotConfig(run.config),
+        id: nextConfigId,
+        datasetId: run.dataset.datasetId,
+      },
+      repointed: null,
+    };
+  }
+  const resolution = resolveRunDataset(run, datasets, instrumentsById);
+  if (resolution.basis !== 'matching-content' || resolution.dataset === null) {
     return {
       ok: false,
-      message: `The dataset "${run.dataset.datasetName}" is not in the library, so research run "${run.name}" cannot be loaded.`,
+      message: `The dataset "${run.dataset.datasetName}" this run used is not in the library, and no stored series verifiably represents its inputs, so research run "${run.name}" cannot be loaded.`,
     };
   }
   return {
@@ -468,10 +494,8 @@ export function planResearchRunLoad(
     config: {
       ...snapshotConfig(run.config),
       id: nextConfigId,
-      // The run's dataset identity is canonical. Older backups could carry a
-      // stale config.datasetId after a deduplicated restore; the draft must
-      // point at the series that was actually re-pointed and verified.
-      datasetId: run.dataset.datasetId,
+      datasetId: resolution.dataset.id,
     },
+    repointed: { savedDatasetId: run.dataset.datasetId, targetDatasetId: resolution.dataset.id },
   };
 }

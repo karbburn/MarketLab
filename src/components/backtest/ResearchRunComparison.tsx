@@ -12,6 +12,7 @@ import {
   type ResearchRunInputInspection,
 } from '../../lib/backtest/run-comparison';
 import { useStore } from '../../state/store';
+import { indexInstrumentsById, resolveRunDataset } from '../../lib/backtest/run-datasets';
 import { EmptyState, Field, Panel, Select, Tag, type TagTone } from '../ui';
 
 const SUMMARY_TONE: Record<ResearchRunComparison['summary']['severity'], TagTone | undefined> = {
@@ -182,10 +183,22 @@ export function ResearchRunComparison() {
     (selectedAId !== '' && !runs.some((run) => run.id === selectedAId)) ||
     (selectedBId !== '' && !runs.some((run) => run.id === selectedBId));
 
-  const availableDatasetIds = useMemo(() => state.datasets.map((dataset) => dataset.id), [state.datasets]);
+  // A run's dataset resolves through its stored id first; when that id is gone,
+  // a unique content-identical sibling still supports checking the inputs. This
+  // uses the same identity rule as verification, so the comparison screen never
+  // calls a verifiable run uncheckable, and never calls a changed series
+  // checked.
+  const instrumentsById = useMemo(() => indexInstrumentsById(state.instruments), [state.instruments]);
+  const resolvableRunIds = useMemo(
+    () =>
+      runs
+        .filter((run) => resolveRunDataset(run, state.datasets, instrumentsById).dataset !== null)
+        .map((run) => run.id),
+    [runs, state.datasets, instrumentsById],
+  );
   const comparison = useMemo(
-    () => (runA && runB ? compareResearchRuns(runA, runB, { availableDatasetIds }) : null),
-    [runA, runB, availableDatasetIds],
+    () => (runA && runB ? compareResearchRuns(runA, runB, { resolvableRunIds }) : null),
+    [runA, runB, resolvableRunIds],
   );
 
   // A check is only shown when it was produced for this exact selection and
@@ -196,7 +209,7 @@ export function ResearchRunComparison() {
     const selected = runA.id === runB.id ? [runA] : [runA, runB];
     return selected
       .map((run) => {
-        const dataset = state.datasets.find((entry) => entry.id === run.dataset.datasetId);
+        const dataset = resolveRunDataset(run, state.datasets, instrumentsById).dataset;
         const bars = dataset ? state.barsByDataset[dataset.id] : undefined;
         return [
           run.id,
@@ -207,8 +220,7 @@ export function ResearchRunComparison() {
         ].join(':');
       })
       .join('|');
-  }, [runA, runB, state.datasets, state.barsByDataset]);
-
+  }, [runA, runB, state.datasets, state.barsByDataset, instrumentsById]);
   const inputChecks =
     inputCheckState.signature === inputCheckSignature ? inputCheckState.checks : {};
 
@@ -218,7 +230,7 @@ export function ResearchRunComparison() {
     const selected = runA.id === runB.id ? [runA] : [runA, runB];
     void Promise.all(
       selected.map(async (run) => {
-        const dataset = state.datasets.find((entry) => entry.id === run.dataset.datasetId);
+        const dataset = resolveRunDataset(run, state.datasets, instrumentsById).dataset ?? undefined;
         return [
           run.id,
           await inspectResearchRunInputs({
@@ -241,7 +253,7 @@ export function ResearchRunComparison() {
               run.id,
               {
                 status: 'unavailable',
-                datasetAvailable: state.datasets.some((entry) => entry.id === run.dataset.datasetId),
+                datasetAvailable: resolveRunDataset(run, state.datasets, instrumentsById).dataset !== null,
                 inputsChanged: false,
                 engineChanged: run.engineVersion !== BACKTEST_ENGINE_VERSION,
                 windowFingerprint: null,
@@ -256,7 +268,7 @@ export function ResearchRunComparison() {
     return () => {
       cancelled = true;
     };
-  }, [runA, runB, state.datasets, state.barsByDataset, inputCheckSignature]);
+  }, [runA, runB, state.datasets, state.barsByDataset, instrumentsById, inputCheckSignature]);
 
   const swap = () => {
     if (!runA || !runB) return;
