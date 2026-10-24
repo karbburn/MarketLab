@@ -108,6 +108,15 @@ periods) are empty rather than zero.
   or import one. Re-running never overwrites the saved result. If the dataset is gone the run says
   so; if its prices changed the run reports changed inputs and only simulates on today's data when
   you explicitly ask.
+- **Batch export and import** — tick any number of saved runs and export them as one
+  `marketlab.research-runs.json` file. It is a `research-run-batch` container (its own
+  `batchVersion`, no top-level `manifestVersion`) whose `runs` array holds unmodified version-1
+  individual manifests, each exactly what a single-run export writes. Like a single manifest it
+  carries no bars and says `containsInputData: false`, so it can never recreate a missing dataset.
+  Import reports one outcome per entry — imported, already saved, repeated in the file, over the
+  50-run cap, or invalid — and applies the same rules as the single-run path: nothing is
+  overwritten or pruned, valid entries import even when a sibling is malformed, and accepted runs
+  are written atomically or not at all. Importing a single version-1 manifest is unchanged.
 - **Compare saved runs** — put any two snapshots side by side: names and dates, recorded metrics
   and absolute deltas, strategy configuration, dataset identity, window, engine version and
   execution assumptions. Input checks hash the saved window without running either strategy, and
