@@ -222,7 +222,7 @@ export function AppShell() {
           </span>
           <div style={{ display: 'grid' }}>
             <span className="shell-brand-name">MarketLab</span>
-            <span className="shell-brand-sub">Local terminal</span>
+            <span className="shell-brand-sub">Charts, screening, backtesting</span>
           </div>
         </div>
 
