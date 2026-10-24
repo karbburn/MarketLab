@@ -183,8 +183,25 @@ describe('buildDatasetBundle', () => {
     expect(dataset.provider?.retrievedAt).toBe('2026-10-19T12:00:00+00:00');
     expect(dataset.provider?.timezone).toBe('America/New_York');
     expect(dataset.provider?.sourceNotes).toEqual(['note-a']);
+    // The requested window travels with the dataset so a shortfall stays visible
+    // after the dialog closes, a reload, or a backup restore.
+    expect(dataset.provider?.requestedRange).toEqual({ start: '2024-01-01', end: '2024-01-31' });
 
     bars.forEach((bar: Bar) => expect(isDateString(bar.date)).toBe(true));
+  });
+
+  it('omits an unusable requested range instead of recording a guess', () => {
+    const validation = validateProviderBars(HISTORY.bars, 'keep-first');
+    const bundle = buildDatasetBundle({
+      history: {
+        ...HISTORY,
+        providerMetadata: metadata({ rangeRequested: { start: '2024-02-31', end: '2024-01-01' } }),
+      },
+      validation,
+      importedAt: '2026-10-19T12:00:05.000Z',
+    });
+
+    expect(bundle.dataset.provider?.requestedRange).toBeUndefined();
   });
 
   it('keeps a Twelve Data fallback labelled as Twelve Data', () => {

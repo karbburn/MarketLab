@@ -98,6 +98,13 @@ export interface DatasetProvider {
   retrievedAt: string;
   /** Exchange timezone name (e.g. `America/New_York`) when reported. */
   timezone: string | null;
+  /**
+   * The window the user asked the provider for. Absent on downloads stored
+   * before coverage was recorded; when present it lets provenance show that a
+   * provider returned less than was requested instead of implying the stored
+   * first/last session was the whole ask.
+   */
+  requestedRange?: { start: string; end: string };
   /** Provider-stated limitations of this download, verbatim. */
   sourceNotes: readonly string[];
   /**

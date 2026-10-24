@@ -275,8 +275,11 @@ The rules below are enforced in code, not just in the documentation:
   the data is not licensed for redistribution.
 - **Provenance travels with the prices.** Every downloaded series stores its provider, exchange,
   adjustment policy (`splits-applied, dividends not reinvested`), retrieval timestamp and any
-  provider-reported split/dividend events. Adjusted close is stored separately and never mixed
-  into OHLC computations.
+  provider-reported split/dividend events. The requested date range is stored too: if a provider
+  returns less than was asked for, the pre-save review says so and the shortfall remains visible in
+  the chart provenance panel. The stored OHLC is already split-adjusted and dividends
+  are not reinvested; no separate adjusted-close series is stored, and nothing is mixed into OHLC
+  computations.
 - **Corporate actions are reported, not inferred.** Split and dividend markers come only from the
   provider's action columns. A split marker records the provider event date; because the OHLC is
   split-adjusted, it does not imply a price gap. Dividend markers are cash per share and are not
@@ -419,7 +422,8 @@ no short selling, no alerting and no replay. These are product decisions, not ga
 - Downloads depend on external providers and can fail; the app reports failures instead of hiding
   them or substituting other data. Twelve Data is an optional fallback, not a guarantee.
 - The backtester is long-only, single-position and per-series. It does not model portfolios,
-  short selling, borrow costs or corporate actions beyond the adjusted close it stores.
+  short selling, borrow costs, dividends or other corporate actions; prices are split-adjusted as
+  reported by the provider.
 - Corporate-action markers are display annotations sourced from provider metadata. They do not
   change OHLC, indicator inputs, screens or backtest calculations.
 - A saved research run identifies its inputs with the dataset content hash and a SHA-256

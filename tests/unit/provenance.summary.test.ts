@@ -214,4 +214,112 @@ describe('buildProvenanceSummary', () => {
       expect.arrayContaining([expect.objectContaining({ label: 'Coverage', value: 'No stored sessions' })]),
     );
   });
+
+  it('flags a download that covers less than was requested', () => {
+    const summary = buildProvenanceSummary(
+      makeDataset({
+        sourceKind: 'provider-download',
+        sourceDescription: 'Downloaded from Twelve Data via MarketLab’s market-data service.',
+        firstDate: '2006-12-06',
+        lastDate: '2026-10-22',
+        rowCount: 5000,
+        provider: {
+          provider: 'twelve-data',
+          providerSymbol: 'BRK.B',
+          exchange: 'XNYS',
+          exchangeName: 'NYSE',
+          instrumentType: 'Common Stock',
+          interval: '1d',
+          adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC); adjusted close not reported',
+          retrievedAt: '2026-10-24T09:30:00.000Z',
+          timezone: 'America/New_York',
+          requestedRange: { start: '1995-01-01', end: '2026-10-23' },
+          sourceNotes: ['At most 5,000 bars are returned per request.'],
+        },
+        validation: { acceptedRows: 5000 },
+      }),
+    );
+
+    expect(summary.status).toBe('attention');
+    expect(summary.issues.map((issue) => issue.code)).toEqual(['range-shortfall']);
+    const [issue] = summary.issues;
+    expect(issue?.label).toBe('Requested range not covered');
+    // Calendar days missing at the start plus the single missing day at the end.
+    expect(issue?.count).toBeGreaterThan(4000);
+    expect(issue?.detail).toContain('5,000 bars');
+    expect(summary.limitations.join(' ')).toContain('2006-12-06 to 2026-10-22');
+    expect(summary.limitations.join(' ')).toContain('Sessions outside the returned window are not part of this dataset.');
+    expect(summary.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Coverage',
+          value: '2006-12-06 to 2026-10-22',
+          note: expect.stringContaining('requested 1995-01-01 to 2026-10-23'),
+        }),
+      ]),
+    );
+  });
+
+  it('stays clean when the requested range was fully covered', () => {
+    const summary = buildProvenanceSummary(
+      makeDataset({
+        sourceKind: 'provider-download',
+        sourceDescription: 'Downloaded from Yahoo Finance via MarketLab’s market-data service.',
+        provider: {
+          provider: 'yahoo-finance',
+          providerSymbol: 'AAPL',
+          exchange: 'NMS',
+          exchangeName: 'NasdaqGS',
+          instrumentType: 'EQUITY',
+          interval: '1d',
+          adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
+          retrievedAt: '2026-01-17T09:30:00.000Z',
+          timezone: 'America/New_York',
+          requestedRange: { start: '2026-01-02', end: '2026-01-16' },
+          sourceNotes: ['Unofficial, undocumented Yahoo Finance data.'],
+        },
+      }),
+    );
+
+    expect(summary.status).toBe('clean');
+    expect(summary.issues).toEqual([]);
+    expect(summary.limitations.join(' ')).not.toContain('Sessions outside the returned window');
+    expect(summary.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Coverage',
+          note: expect.stringContaining('requested 2026-01-02 to 2026-01-16'),
+        }),
+      ]),
+    );
+  });
+
+  it('does not claim coverage for a download stored before the request was recorded', () => {
+    const summary = buildProvenanceSummary(
+      makeDataset({
+        sourceKind: 'provider-download',
+        sourceDescription: 'Downloaded from Yahoo Finance via MarketLab’s market-data service.',
+        provider: {
+          provider: 'yahoo-finance',
+          providerSymbol: 'AAPL',
+          exchange: 'NMS',
+          exchangeName: 'NasdaqGS',
+          instrumentType: 'EQUITY',
+          interval: '1d',
+          adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
+          retrievedAt: '2026-01-17T09:30:00.000Z',
+          timezone: 'America/New_York',
+          sourceNotes: [],
+        },
+      }),
+    );
+
+    expect(summary.status).toBe('clean');
+    expect(summary.issues).toEqual([]);
+    expect(summary.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Coverage', note: '10 stored sessions' }),
+      ]),
+    );
+  });
 });

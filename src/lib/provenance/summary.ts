@@ -10,6 +10,7 @@
 
 import type { Dataset, DatasetValidationSummary } from '../../domain/types';
 import { PROVIDER_LABEL, providerLabel } from '../marketdata/normalize';
+import { coverageFromDataset, type CoverageReport } from '../marketdata/coverage';
 
 export type ProvenanceStatus = 'clean' | 'attention' | 'legacy' | 'empty';
 
@@ -21,6 +22,7 @@ export interface ProvenanceIssue {
     | 'weekday-gaps'
     | 'order-corrections'
     | 'weekend-rows'
+    | 'range-shortfall'
     | 'other-warning';
   label: string;
   count: number;
@@ -82,10 +84,20 @@ function warningLabel(code: string): string {
 /** Warnings already represented by a first-class counter are not repeated. */
 const COUNTER_WARNING_CODES = new Set(['session-gaps', 'missing-volume', 'sort-order']);
 
-function buildIssues(dataset: Dataset): ProvenanceIssue[] {
+function buildIssues(dataset: Dataset, coverage: CoverageReport | null): ProvenanceIssue[] {
   const validation: DatasetValidationSummary = dataset.validation;
   const issues: ProvenanceIssue[] = [];
 
+  if (coverage?.status === 'partial') {
+    issues.push({
+      code: 'range-shortfall',
+      label: 'Requested range not covered',
+      count: coverage.missingStartDays + coverage.missingEndDays,
+      detail:
+        'Calendar days of the requested window that the provider did not return, summed across both ends. ' +
+        coverage.notes.join(' '),
+    });
+  }
   if (validation.rejectedRows > 0) {
     issues.push({
       code: 'rejected-rows',
@@ -141,12 +153,15 @@ function buildIssues(dataset: Dataset): ProvenanceIssue[] {
   return issues;
 }
 
-function buildLimitations(dataset: Dataset): string[] {
+function buildLimitations(dataset: Dataset, coverage: CoverageReport | null): string[] {
   const limitations: string[] = [];
   const provider = dataset.provider;
 
   if (dataset.sourceKind === 'bundled-sample') {
     limitations.push('Synthetic demo series. It is not real market data and must not be used for research conclusions.');
+  }
+  if (coverage?.limitation) {
+    limitations.push(coverage.limitation);
   }
   if (dataset.validation.gapCount > 0) {
     limitations.push(WEEKDAY_GAP_LIMITATION);
@@ -174,7 +189,11 @@ function buildLimitations(dataset: Dataset): string[] {
   return limitations;
 }
 
-function buildFields(dataset: Dataset, context: ProvenanceContext): ProvenanceField[] {
+function buildFields(
+  dataset: Dataset,
+  context: ProvenanceContext,
+  coverage: CoverageReport | null,
+): ProvenanceField[] {
   const provider = dataset.provider;
   const exchange =
     provider?.exchangeName ?? provider?.exchange ?? context.exchange ?? 'Not reported';
@@ -208,7 +227,10 @@ function buildFields(dataset: Dataset, context: ProvenanceContext): ProvenanceFi
     {
       label: 'Coverage',
       value: dataset.rowCount > 0 ? `${dataset.firstDate} to ${dataset.lastDate}` : 'No stored sessions',
-      note: countLabel(dataset.rowCount, 'stored session', 'stored sessions'),
+      note:
+        coverage?.requested
+          ? `${countLabel(dataset.rowCount, 'stored session', 'stored sessions')}; requested ${coverage.requested.start} to ${coverage.requested.end}`
+          : countLabel(dataset.rowCount, 'stored session', 'stored sessions'),
     },
     {
       label: 'Imported',
@@ -249,8 +271,9 @@ function buildCounts(dataset: Dataset): ProvenanceCount[] {
 }
 
 export function buildProvenanceSummary(dataset: Dataset, context: ProvenanceContext = {}): ProvenanceSummary {
-  const issues = buildIssues(dataset);
-  const limitations = buildLimitations(dataset);
+  const coverage = coverageFromDataset(dataset);
+  const issues = buildIssues(dataset, coverage);
+  const limitations = buildLimitations(dataset, coverage);
   const hasRows = dataset.rowCount > 0 && dataset.validation.acceptedRows > 0;
   const legacy = dataset.sourceKind === 'bundled-sample';
 
@@ -297,7 +320,7 @@ export function buildProvenanceSummary(dataset: Dataset, context: ProvenanceCont
       dataset.rowCount > 0
         ? `${dataset.firstDate} to ${dataset.lastDate} (${countLabel(dataset.rowCount, 'session', 'sessions')})`
         : 'No stored sessions',
-    fields: buildFields(dataset, context),
+    fields: buildFields(dataset, context, coverage),
     counts: buildCounts(dataset),
     issues,
     limitations,

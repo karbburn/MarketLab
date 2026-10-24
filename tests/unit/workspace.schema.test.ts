@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWorkspace } from '../../src/lib/workspace/schema';
+import { datasetSchema, parseWorkspace } from '../../src/lib/workspace/schema';
 import { CHART_TYPES } from '../../src/domain/types';
 import { CHART_TYPE_OPTIONS } from '../../src/lib/chartTypes';
 
@@ -136,5 +136,77 @@ describe('chart type coverage', () => {
     const charts = workspace.charts as Array<Record<string, unknown>>;
     (charts[0] as Record<string, unknown>).chartType = 'hlc-area';
     expect(parseWorkspace(workspace).ok).toBe(false);
+  });
+});
+
+describe('dataset provider coverage field', () => {
+  function datasetWithProvider(provider: Record<string, unknown> | undefined): Record<string, unknown> {
+    return {
+      id: 'ds-1',
+      instrumentId: 'inst-1',
+      name: 'AAPL - daily (Yahoo Finance download)',
+      sourceKind: 'provider-download',
+      sourceDescription: 'Downloaded from Yahoo Finance via MarketLab’s market-data service.',
+      frequency: 'daily',
+      timezone: 'America/New_York',
+      firstDate: '2026-09-14',
+      lastDate: '2026-09-17',
+      rowCount: 4,
+      importedAt: '2026-09-18T00:00:00.000Z',
+      contentHash: 'fnv1a-test',
+      hasVolume: true,
+      ...(provider ? { provider } : {}),
+      validation: {
+        acceptedRows: 4,
+        rejectedRows: 0,
+        duplicateRows: 0,
+        missingVolumeRows: 0,
+        gapCount: 0,
+        sortCorrections: 0,
+        rejected: [],
+        warnings: [],
+      },
+    };
+  }
+
+  const PROVIDER = {
+    provider: 'yahoo-finance',
+    providerSymbol: 'AAPL',
+    exchange: 'NMS',
+    exchangeName: 'NasdaqGS',
+    instrumentType: 'EQUITY',
+    interval: '1d',
+    adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
+    retrievedAt: '2026-09-18T00:00:00.000Z',
+    timezone: 'America/New_York',
+    sourceNotes: [],
+    corporateActions: [],
+  };
+
+  it('keeps a recorded requested range through a save/restore round trip', () => {
+    const parsed = datasetSchema.safeParse(
+      datasetWithProvider({ ...PROVIDER, requestedRange: { start: '2026-09-14', end: '2026-09-17' } }),
+    );
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.provider?.requestedRange).toEqual({
+      start: '2026-09-14',
+      end: '2026-09-17',
+    });
+  });
+
+  it('accepts a dataset stored before coverage was recorded', () => {
+    const parsed = datasetSchema.safeParse(datasetWithProvider(PROVIDER));
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.provider?.requestedRange).toBeUndefined();
+  });
+
+  it('rejects an impossible requested date instead of trusting the shape', () => {
+    const parsed = datasetSchema.safeParse(
+      datasetWithProvider({ ...PROVIDER, requestedRange: { start: '2026-02-31', end: '2026-09-17' } }),
+    );
+
+    expect(parsed.success).toBe(false);
   });
 });
