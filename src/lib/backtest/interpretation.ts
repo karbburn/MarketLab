@@ -28,6 +28,10 @@ export interface Interpretation {
 
 export interface InterpretationInput {
   metrics: BacktestResult['metrics'];
+  /**
+   * Sessions the equity curve and trade metrics cover, i.e. after indicator
+   * warm-up, not the number of sessions stored in the window.
+   */
   sessionCount: number;
   frequency: Frequency;
 }
@@ -174,7 +178,7 @@ export function interpretBacktest(input: InterpretationInput): Interpretation {
   ];
 
   const sampleParts: string[] = [
-    `This run covers ${sessionCount} stored session${sessionCount === 1 ? '' : 's'} and ${metrics.tradeCount} closed trade${
+    `This run covers ${sessionCount} evaluated session${sessionCount === 1 ? '' : 's'} and ${metrics.tradeCount} closed trade${
       metrics.tradeCount === 1 ? '' : 's'
     }.`,
   ];

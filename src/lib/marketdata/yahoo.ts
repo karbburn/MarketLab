@@ -41,13 +41,24 @@ const SYMBOL_PATTERN = /^[A-Za-z0-9._^=:-]{1,16}$/;
 
 export type YahooFailureStatus = 400 | 404 | 429 | 502 | 503;
 
+export interface YahooProviderErrorOptions {
+  /**
+   * False when a second provider cannot plausibly answer the same request, so
+   * the hosted proxy must not spend a paid Twelve Data credit on it. Defaults
+   * to true; caller-input failures are excluded separately by status.
+   */
+  fallbackEligible?: boolean;
+}
+
 export class YahooProviderError extends Error {
   readonly status: YahooFailureStatus;
+  readonly fallbackEligible: boolean;
 
-  constructor(status: YahooFailureStatus, message: string) {
+  constructor(status: YahooFailureStatus, message: string, options: YahooProviderErrorOptions = {}) {
     super(message);
     this.name = 'YahooProviderError';
     this.status = status;
+    this.fallbackEligible = options.fallbackEligible ?? true;
   }
 }
 
@@ -183,8 +194,10 @@ export async function fetchYahooHistory(
   fetchImpl: typeof fetch = fetch,
 ): Promise<YahooHistoryPayload> {
   const urls = CHART_HOSTS.map((host) => yahooChartUrl(input.symbol, input.start, input.end, host));
-  const payload = await fetchFirstJson(urls, fetchImpl);
-  return normaliseYahooChart(payload, input);
+  // Parsing happens per host, inside the retry loop: a 200 response that
+  // carries a provider-level error (throttling is reported this way) must still
+  // get the alternate host before the caller is told the free path failed.
+  return fetchFirstParsed(urls, fetchImpl, (payload) => normaliseYahooChart(payload, input));
 }
 
 export async function fetchYahooSearch(
@@ -192,7 +205,7 @@ export async function fetchYahooSearch(
   fetchImpl: typeof fetch = fetch,
 ): Promise<YahooSearchPayload> {
   const urls = SEARCH_HOSTS.map((host) => yahooSearchUrl(input.query, input.limit, host));
-  const payload = await fetchFirstJson(urls, fetchImpl);
+  const payload = await fetchFirstParsed(urls, fetchImpl, (value) => value);
   return normaliseYahooSearch(payload, input.query, input.limit);
 }
 
@@ -345,16 +358,21 @@ export function errorResponse(error: unknown): Response {
 
 // ---------------------------------------------------------------- internals
 
-async function fetchFirstJson(urls: readonly string[], fetchImpl: typeof fetch): Promise<unknown> {
+async function fetchFirstParsed<T>(
+  urls: readonly string[],
+  fetchImpl: typeof fetch,
+  parse: (payload: unknown) => T,
+): Promise<T> {
   let lastError: YahooProviderError | null = null;
   for (const url of urls) {
     try {
-      return await fetchJson(url, fetchImpl);
+      return parse(await fetchJson(url, fetchImpl));
     } catch (error) {
       const mapped = error instanceof YahooProviderError
         ? error
         : new YahooProviderError(502, 'The provider request failed.');
-      // A missing symbol is definitive; retrying the second host cannot help.
+      // A rejected request or a missing symbol is definitive: both hosts serve
+      // the same backend, so retrying cannot produce a different answer.
       if (mapped.status === 400 || mapped.status === 404) throw mapped;
       lastError = mapped;
     }
@@ -388,6 +406,18 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
 }
 
 function httpError(status: number): YahooProviderError {
+  if (status === 400) {
+    // Yahoo answers HTTP 400 when it cannot serve the symbol and range at all
+    // (for example a window that starts before the instrument listed or ends in
+    // the future). The caller's request is well formed, so this is reported as
+    // "no data" rather than as a bad request, and it is not offered to a paid
+    // fallback: a second provider cannot supply sessions that do not exist.
+    return new YahooProviderError(
+      404,
+      'The provider rejected this symbol and date range as unserviceable (HTTP 400); no sessions are available for it.',
+      { fallbackEligible: false },
+    );
+  }
   if (status === 404) {
     return new YahooProviderError(404, 'No data is available for this symbol and range.');
   }

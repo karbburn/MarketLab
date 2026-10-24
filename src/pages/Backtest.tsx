@@ -8,6 +8,7 @@ import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
 import { planResearchRunLoad } from '../lib/backtest/research-runs';
 import { describeRunWindow } from '../lib/backtest/run-window';
 import { buildProvenanceSummary } from '../lib/provenance/summary';
+import { coverageFromDataset } from '../lib/marketdata/coverage';
 import { RULE_FIELDS, RULE_OPERATORS as OPERATORS } from '../lib/backtest/rule-catalog';
 import { createBacktestConfig } from '../state/defaults';
 import { createId } from '../lib/id';
@@ -55,6 +56,13 @@ export function BacktestPage() {
   // drift between screens.
   const provenance = useMemo(
     () => (activeView ? buildProvenanceSummary(activeView.dataset, { exchange: activeView.instrument?.exchange }) : null),
+    [activeView],
+  );
+  // A download can return less than it was asked for even when the strategy has
+  // no explicit dates. The Results panel discloses that separately from the
+  // run's own window, so a shorter series is never implied to be complete.
+  const datasetCoverage = useMemo(
+    () => (activeView ? coverageFromDataset(activeView.dataset) : null),
     [activeView],
   );
   const signature = draft ? JSON.stringify(draft) : '';
@@ -411,7 +419,7 @@ export function BacktestPage() {
           >
             {runWindow && (
               <div style={{ marginBottom: 12 }}>
-                <RunWindowDisclosure report={runWindow} provenance={provenance} />
+                <RunWindowDisclosure report={runWindow} provenance={provenance} coverage={datasetCoverage} />
               </div>
             )}
             <div className="grid-4">

@@ -93,6 +93,15 @@ describe('interpretBacktest', () => {
     expect(reading(larger, 'win-rate')?.caveat).toBeUndefined();
   });
 
+  it('counts evaluated sessions, not every stored session in the window', () => {
+    // `sessionCount` is the equity-curve length, which excludes indicator
+    // warm-up, so calling those sessions "stored" would overstate the sample.
+    const result = interpret({}, 251);
+
+    expect(result.sampleNote).toContain('This run covers 251 evaluated sessions');
+    expect(result.sampleNote).not.toContain('stored session');
+  });
+
   it('uses the dataset frequency for annualisation', () => {
     const daily = interpret();
     expect(daily.caveats.join(' ')).toContain('252 periods per year');

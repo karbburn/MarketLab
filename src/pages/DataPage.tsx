@@ -11,6 +11,7 @@ import { Metric, Panel, StatusNotice, Tag } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { requestBulkDownloadDialog, requestDownloadDialog } from '../lib/ui-events';
 import { providerLabel } from '../lib/marketdata/normalize';
+import { coverageFromDataset } from '../lib/marketdata/coverage';
 
 function affectedPanels(datasetId: string, workspaces: readonly Workspace[]): number {
   return workspaces.reduce(
@@ -47,6 +48,12 @@ export function DataPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const selected = views.find((view) => view.dataset.id === selectedId) ?? null;
+  // Inspection must answer the same question as the download review: did the
+  // provider return the window that was asked for? It is derived from the
+  // stored dataset, so older downloads without a requested range stay
+  // `unverified` rather than being called complete.
+  const selectedCoverage = selected ? coverageFromDataset(selected.dataset) : null;
+  const selectedRequestedRange = selected?.dataset.provider?.requestedRange ?? null;
   const previewHead = selected ? selected.bars.slice(0, 12) : [];
   // Only add the tail when it cannot overlap the head, so no session is printed
   // twice and the omitted count can never go negative.
@@ -201,9 +208,29 @@ export function DataPage() {
                   <Metric label="Provider" value={providerLabel(selected.dataset.provider.provider)} note={`${selected.dataset.provider.providerSymbol} - interval ${selected.dataset.provider.interval}`} />
                   <Metric label="Adjustment" value={selected.dataset.provider.adjustment} note={`Exchange ${selected.dataset.provider.exchangeName ?? selected.dataset.provider.exchange ?? 'not reported'}`} />
                   <Metric label="Retrieved" value={selected.dataset.provider.retrievedAt.slice(0, 16).replace('T', ' ')} note="Provider timestamp, UTC" />
+                  <Metric
+                    label="Requested range"
+                    value={selectedRequestedRange ? `${selectedRequestedRange.start} to ${selectedRequestedRange.end}` : 'Not recorded'}
+                    note={selectedRequestedRange ? 'Window sent to the provider' : 'Stored before the requested range was recorded'}
+                  />
+                  <Metric
+                    label="Returned range"
+                    value={`${selected.dataset.firstDate} to ${selected.dataset.lastDate}`}
+                    note={`${selected.dataset.rowCount.toLocaleString('en-US')} stored session(s)`}
+                  />
                 </>
               )}
             </div>
+            {selectedCoverage?.status === 'partial' && (
+              <div className="coverage-warning" role="status">
+                <strong>{selectedCoverage.headline}</strong>
+                <ul>
+                  {selectedCoverage.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {selected.dataset.validation.warnings.length > 0 && (
               <ul className="list-reset stack field-hint" style={{ marginTop: 10 }}>
                 {selected.dataset.validation.warnings.map((warning) => (

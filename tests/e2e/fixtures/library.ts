@@ -326,6 +326,39 @@ export function buildCorporateActionLibrary(): FixtureRecords {
   return records;
 }
 
+/**
+ * A provider-download library whose stored series is far shorter than the
+ * window that was requested. The strategy defaults carry no dates, so this is
+ * the case where the download shortfall used to disappear: the run looks
+ * complete because its own window never asked for the missing years.
+ */
+export function buildPartialCoverageLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_aapl');
+  if (!dataset) return records;
+
+  dataset.sourceKind = 'provider-download';
+  dataset.name = 'AAPL - daily (Yahoo Finance download)';
+  dataset.sourceDescription =
+    'Downloaded from Yahoo Finance via the local market-data service. splits-applied, dividends not reinvested (as-traded OHLC).';
+  dataset.provider = {
+    provider: 'yahoo-finance',
+    providerSymbol: 'AAPL',
+    exchange: 'NMS',
+    exchangeName: 'NasdaqGS',
+    instrumentType: 'EQUITY',
+    interval: '1d',
+    adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
+    retrievedAt: '2026-10-16T00:00:00.000Z',
+    timezone: 'America/New_York',
+    // Requested eleven years; the fixture holds roughly fifteen months.
+    requestedRange: { start: '2015-01-02', end: '2026-10-16' },
+    sourceNotes: ['Unofficial, undocumented Yahoo Finance data; may be delayed for some venues.'],
+    corporateActions: [],
+  };
+  return records;
+}
+
 function findFridayThenMonday(series: FixtureBar[]): { friday: string; monday: string } | null {
   // Prefer a pair near the end so it falls inside the chart's default visible
   // range; `index + 4` guarantees the following week still has a Friday bar.

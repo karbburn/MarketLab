@@ -121,7 +121,8 @@ periods) are empty rather than zero.
   data is never interpolated into intraday bars.
 - **Provenance** — every downloaded series stores its provider, exchange, adjustment policy,
   retrieval time and provider-reported corporate actions, and shows the source in the data
-  library, the inspection panel and the chart legend.
+  library, the inspection panel and the chart legend. If the provider returned less than the
+  requested range, the inspection panel and the backtest Results say so.
 - **Export and backup** — datasets, quant summaries, screener results, backtest trades and the
   equity curve as CSV; a saved research run as a versioned JSON manifest; the whole workspace,
   including templates and saved runs, as a versioned JSON backup that can be merged into or
@@ -219,6 +220,14 @@ symbol. The key is read only on the server; it never appears in the browser bund
 URL or an error message. Without the key the fallback is dormant and failures remain explicit.
 Each saved series records the provider that actually answered.
 
+The policy is narrower than "anything Yahoo failed to answer". Both free Yahoo hosts are tried
+first, including when Yahoo returns a throttling error inside an otherwise successful response.
+A rejected window (Yahoo answers HTTP 400 for a range it cannot serve, such as one that starts
+before the instrument listed) is reported as *no data* rather than as a service failure, and it
+does not spend a paid Twelve Data credit on a second opinion. When both providers fail, the
+error only calls a condition shared ("both throttling", "both timed out") when both actually
+reported it; otherwise it reports each failure separately.
+
 **Using the deployed site:** open **Data → Download market data** for one symbol, or **Data →
 Download many symbols** for a batch of up to 50. No local setup, account or browser permission is
 needed. AAPL, MSFT, NVDA, SPY and QQQ are sensible starting points, and the batch dialog accepts
@@ -276,10 +285,11 @@ The rules below are enforced in code, not just in the documentation:
 - **Provenance travels with the prices.** Every downloaded series stores its provider, exchange,
   adjustment policy (`splits-applied, dividends not reinvested`), retrieval timestamp and any
   provider-reported split/dividend events. The requested date range is stored too: if a provider
-  returns less than was asked for, the pre-save review says so and the shortfall remains visible in
-  the chart provenance panel. The stored OHLC is already split-adjusted and dividends
-  are not reinvested; no separate adjusted-close series is stored, and nothing is mixed into OHLC
-  computations.
+  returns less than was asked for, the pre-save review says so, and the shortfall stays visible in
+  the inspection panel and in the backtest Results — including for a strategy with no date
+  bounds, where the run's own window would otherwise look complete. The stored OHLC is already
+  split-adjusted and dividends are not reinvested; no separate adjusted-close series is stored,
+  and nothing is mixed into OHLC computations.
 - **Corporate actions are reported, not inferred.** Split and dividend markers come only from the
   provider's action columns. A split marker records the provider event date; because the OHLC is
   split-adjusted, it does not imply a price gap. Dividend markers are cash per share and are not

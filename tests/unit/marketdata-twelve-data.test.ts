@@ -24,6 +24,21 @@ import {
 
 const REQUEST = { symbol: 'AAPL', start: '2024-02-01', end: '2024-02-10' };
 
+const YAHOO_CHART_PAYLOAD = {
+  chart: {
+    result: [
+      {
+        meta: { symbol: 'AAPL', exchangeTimezoneName: 'America/New_York' },
+        timestamp: [1_707_402_600],
+        indicators: {
+          quote: [{ open: [10], high: [12], low: [9], close: [11.5], volume: [1_200] }],
+        },
+      },
+    ],
+    error: null,
+  },
+};
+
 const TWELVE_DATA_PAYLOAD = {
   meta: {
     symbol: 'AAPL',
@@ -204,6 +219,97 @@ describe('hosted fallback policy', () => {
     expect(isTwelveDataFallbackEligible(new YahooProviderError(400, 'bad symbol'))).toBe(false);
     expect(isTwelveDataFallbackEligible(new YahooProviderError(429, 'throttled'))).toBe(true);
     expect(isTwelveDataFallbackEligible(new YahooProviderError(404, 'not found'))).toBe(true);
+    // A request the primary provider says it cannot serve is reported to the
+    // caller as "no data" but must not spend a paid credit.
+    expect(
+      isTwelveDataFallbackEligible(
+        new YahooProviderError(404, 'unserviceable window', { fallbackEligible: false }),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not spend a paid credit when Yahoo says the window is unserviceable', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      return new Response('', { status: 400 });
+    });
+
+    await expect(
+      fetchHostedHistory(REQUEST, { twelveDataApiKey: 'test-key' }),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining('HTTP 400'),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls.every((url) => url.includes('finance.yahoo.com'))).toBe(true);
+  });
+
+  it('retries the free alternate host before falling back to Twelve Data', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      if (url.includes('query1.finance.yahoo.com')) {
+        // A provider-level error carried by a 200 response used to end the
+        // free path immediately and hand the request to the paid provider.
+        return jsonResponse({ chart: { result: null, error: { code: '429', description: 'Too Many Requests' } } });
+      }
+      if (url.includes('query2.finance.yahoo.com')) return jsonResponse(YAHOO_CHART_PAYLOAD);
+      return jsonResponse(TWELVE_DATA_PAYLOAD);
+    });
+
+    const payload = await fetchHostedHistory(REQUEST, { twelveDataApiKey: 'test-key' });
+
+    expect(payload.provider.provider).toBe('yahoo-finance');
+    expect(calls).toHaveLength(2);
+    expect(calls.some((url) => url.includes('api.twelvedata.com'))).toBe(false);
+  });
+
+  it('does not call a mixed throttle and key rejection "throttling"', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.includes('finance.yahoo.com')) return jsonResponse({ detail: 'slow down' }, 429);
+      return jsonResponse({ status: 'error', code: 401, message: 'apikey is invalid' });
+    });
+
+    const failure = await fetchHostedHistory(REQUEST, { twelveDataApiKey: 'test-key' })
+      .then(() => null)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(YahooProviderError);
+    expect((failure as YahooProviderError).status).toBe(502);
+    expect((failure as YahooProviderError).message).not.toContain('Both market-data providers are throttling');
+    expect((failure as YahooProviderError).message).toContain('Twelve Data rejected the server API key');
+  });
+
+  it('does not call a timeout plus a missing series "both timed out"', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.includes('finance.yahoo.com')) {
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+      return jsonResponse({ status: 'error', code: 404, message: 'symbol not found' });
+    });
+
+    const failure = await fetchHostedHistory(REQUEST, { twelveDataApiKey: 'test-key' })
+      .then(() => null)
+      .catch((error: unknown) => error);
+
+    expect((failure as YahooProviderError).status).toBe(502);
+    expect((failure as YahooProviderError).message).toContain('Both market-data providers failed');
+    expect((failure as YahooProviderError).message).not.toContain('Both market-data providers timed out');
+  });
+
+  it('never repeats the API key in a combined failure message', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.includes('finance.yahoo.com')) return jsonResponse({ detail: 'not found' }, 404);
+      return jsonResponse({ status: 'error', code: 429, message: 'apikey test-key has run out of credits' });
+    });
+
+    const failure = await fetchHostedHistory(REQUEST, { twelveDataApiKey: 'test-key' })
+      .then(() => null)
+      .catch((error: unknown) => error);
+
+    expect((failure as YahooProviderError).message).not.toContain('test-key');
   });
 
   it('reports both failures when neither provider has the series', async () => {

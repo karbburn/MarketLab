@@ -338,6 +338,38 @@ describe('fetchYahooHistory', () => {
     await expect(fetchYahooHistory(request)).rejects.toMatchObject({ status: 404 });
     expect(calls).toHaveLength(1);
   });
+
+  it('retries the alternate host when a 200 response carries a throttling error', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      return calls.length === 1
+        ? jsonResponse({ chart: { result: null, error: { code: '429', description: 'Too Many Requests' } } })
+        : jsonResponse(CHART_PAYLOAD);
+    });
+
+    const payload = await fetchYahooHistory(request);
+    expect(payload.bars).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain('query2.finance.yahoo.com');
+  });
+
+  it('reports an unserviceable window as no data without retrying', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      // Yahoo answers HTTP 400 with an empty body when the window cannot be
+      // served (for example one that starts before the instrument listed).
+      return new Response('', { status: 400 });
+    });
+
+    await expect(fetchYahooHistory(request)).rejects.toMatchObject({
+      status: 404,
+      fallbackEligible: false,
+      message: expect.stringContaining('HTTP 400'),
+    });
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe('fetchYahooSearch', () => {

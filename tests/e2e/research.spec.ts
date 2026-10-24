@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { buildFixtureBars, readStore, seedLibrary } from './fixtures/library';
+import { buildFixtureBars, buildPartialCoverageLibrary, readStore, seedLibrary } from './fixtures/library';
 
 // The fixture's session span is deterministic, so the backtest results can be
 // held to naming it with dates rather than only a session count.
@@ -163,6 +163,25 @@ test.describe('rule-based backtest', () => {
     // The metrics still stay visible; the warning supplements them rather
     // than replacing the result.
     await expect(results).toContainText('Total return');
+  });
+
+  test('discloses a dataset that returned less than its download request', async ({ page }) => {
+    // Default strategies carry no dates, so a short download would otherwise be
+    // invisible: the requested window and the simulated window would both look
+    // like the stored series.
+    await seedLibrary(page, buildPartialCoverageLibrary());
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
+    await expect(results).toContainText('Stored coverage');
+
+    const warning = results.locator('.coverage-warning');
+    await expect(warning).toContainText('The stored dataset does not cover its whole download request.');
+    await expect(warning).toContainText('request starting 2015-01-02');
+    // The run's own window is fully covered, so the warning must be about the
+    // dataset, not about the strategy's dates.
+    await expect(results).toContainText('Simulated sessions');
   });
 
   test('explains recomputed results and distinguishes a loaded saved run', async ({ page }) => {

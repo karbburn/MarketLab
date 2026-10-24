@@ -2,9 +2,10 @@
  * Hosted history policy: Yahoo first, optional Twelve Data fallback.
  *
  * The fallback is dormant unless the server has `TWELVE_DATA_API_KEY`. It never
- * runs for invalid caller input, and it never runs after a successful Yahoo
- * response. When both providers fail, the error names both failures rather than
- * presenting a partial result or a fabricated empty series.
+ * runs for invalid caller input, for a window the primary provider says it
+ * cannot serve, or after a successful Yahoo response. When both providers fail,
+ * the error names both failures rather than presenting a partial result or a
+ * fabricated empty series.
  */
 
 import {
@@ -23,7 +24,7 @@ export interface HostedHistoryOptions {
 
 /** True when a second provider could plausibly satisfy the request. */
 export function isTwelveDataFallbackEligible(error: unknown): boolean {
-  return error instanceof YahooProviderError && error.status !== 400;
+  return error instanceof YahooProviderError && error.status !== 400 && error.fallbackEligible;
 }
 
 export async function fetchHostedHistory(
@@ -74,13 +75,16 @@ function combinedProviderError(
       `No data found for symbol ${symbol} in either Yahoo Finance or Twelve Data.`,
     );
   }
-  if (yahooStatus === 429 || twelveDataStatus === 429) {
+  // A shared condition is claimed only when both providers actually reported it.
+  // Labelling a Yahoo throttle plus a Twelve Data key rejection as "both
+  // throttling" would tell the user to retry a request that cannot succeed.
+  if (yahooStatus === 429 && twelveDataStatus === 429) {
     return new YahooProviderError(
       429,
       'Both market-data providers are throttling requests. Wait a moment and try again.',
     );
   }
-  if (yahooStatus === 503 || twelveDataStatus === 503) {
+  if (yahooStatus === 503 && twelveDataStatus === 503) {
     return new YahooProviderError(
       503,
       `Both market-data providers timed out. Yahoo Finance: ${messageOf(yahooError)} Twelve Data: ${messageOf(twelveDataError)}`,

@@ -1,3 +1,4 @@
+import type { CoverageReport } from '../../lib/marketdata/coverage';
 import type { RunWindowReport } from '../../lib/backtest/run-window';
 import type { ProvenanceSummary } from '../../lib/provenance/summary';
 
@@ -6,13 +7,24 @@ import type { ProvenanceSummary } from '../../lib/provenance/summary';
  * window". Numbers come from `describeRunWindow` (the engine's own window and
  * warm-up helpers) and the provenance from `buildProvenanceSummary`, so this
  * block introduces no second source of truth and no new calculation.
+ *
+ * Two different shortfalls are kept apart on purpose:
+ *
+ * - the run's requested dates fall outside the stored series (the config);
+ * - the stored series itself is shorter than the download it came from.
+ *
+ * The second one is invisible in the date inputs: a dataset downloaded with no
+ * explicit range still records the provider's requested window, and a provider
+ * that returns fewer sessions must not let a run look like it covered them.
  */
 export function RunWindowDisclosure({
   report,
   provenance,
+  coverage,
 }: {
   report: RunWindowReport;
   provenance: ProvenanceSummary | null;
+  coverage: CoverageReport | null;
 }) {
   const warnings = report.notes.filter((note) => note.tone === 'warn');
   const infos = report.notes.filter((note) => note.tone === 'info');
@@ -52,10 +64,23 @@ export function RunWindowDisclosure({
           </ul>
         </div>
       )}
+      {coverage?.status === 'partial' && (
+        <div className="coverage-warning" role="status">
+          <strong>The stored dataset does not cover its whole download request.</strong>
+          <ul>
+            {coverage.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {provenance && (
         <div>
           <p className="field-hint">
             <span className="field-label">Data source</span> {provenance.sourceLabel}
+          </p>
+          <p className="field-hint">
+            <span className="field-label">Stored coverage</span> {provenance.coverage}
           </p>
           {adjustment && (
             <p className="field-hint">

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { seedLibrary } from './fixtures/library';
+import { buildPartialCoverageLibrary, seedLibrary } from './fixtures/library';
 
 const GOOD_CSV = [
   'date,open,high,low,close,volume',
@@ -118,5 +118,38 @@ test.describe('data library', () => {
     await expect(page.getByText('Dataset removed.')).toBeVisible();
     await expect(page.locator('table.data tbody tr')).toHaveCount(5);
     await expect(page.locator('.shell-nav')).toContainText('5 datasets loaded');
+  });
+});
+
+test.describe('provider coverage in inspection', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedLibrary(page);
+  });
+
+  test('shows the requested range beside the returned one and flags the shortfall', async ({ page }) => {
+    await seedLibrary(page, buildPartialCoverageLibrary());
+    await page.goto('/#/data?dataset=ds_aapl');
+
+    const inspection = page.locator('.panel').filter({ hasText: 'Inspection - AAPL' }).first();
+    await expect(inspection).toBeVisible();
+
+    // The review dialog already showed this; a saved dataset must not lose it.
+    await expect(inspection).toContainText('Requested range');
+    await expect(inspection).toContainText('2015-01-02 to 2026-10-16');
+    await expect(inspection).toContainText('Returned range');
+    await expect(inspection).toContainText('2026-10-16');
+
+    await expect(inspection.locator('.coverage-warning')).toContainText(
+      'request starting 2015-01-02',
+    );
+  });
+
+  test('does not claim coverage for a dataset stored before the range was recorded', async ({ page }) => {
+    // The default fixture is an imported CSV with no provider metadata at all,
+    // so the inspection must not invent a requested range for it.
+    await page.goto('/#/data?dataset=ds_aapl');
+    const inspection = page.locator('.panel').filter({ hasText: 'Inspection - AAPL' }).first();
+    await expect(inspection).toContainText('Accepted rows');
+    await expect(inspection).not.toContainText('Requested range');
   });
 });
