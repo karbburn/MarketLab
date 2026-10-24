@@ -9,6 +9,8 @@ import { WATCHLIST_CONTEXT_SESSIONS, watchlistContext } from '../lib/watchlist-c
 import { EmptyState, Panel, Segmented, Select, Tag, TextInput, Switch } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { ChartPanel } from '../components/chart/ChartPanel';
+import { ShortcutReferenceDialog } from '../components/shortcuts/ShortcutReferenceDialog';
+import { SHORTCUT_GROUPS, isTypingTarget, layoutForShortcut } from '../lib/shortcuts/reference';
 
 const LINK_PROPERTIES: Array<{ id: LinkProperty; label: string; note: string }> = [
   { id: 'symbol', label: 'Symbol', note: 'Panel symbol and dataset follow the focused panel' },
@@ -36,6 +38,7 @@ export function ChartWorkspacePage() {
   const [watchlistByWorkspace, setWatchlistByWorkspace] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const visibleCharts = useMemo(
     () => (workspace ? workspace.charts.slice(0, chartCountForLayout(workspace.layout)) : []),
@@ -118,6 +121,25 @@ export function ChartWorkspacePage() {
       ),
     }));
   }, [workspace, focusedChart, actions]);
+
+  // Layout shortcuts are workspace-wide rather than per panel. Alt+Shift+number
+  // is used instead of Alt+number because Firefox reserves the latter for tab
+  // switching; the event is still prevented so a platform menu cannot appear on
+  // top of the workspace.
+  useEffect(() => {
+    if (!workspace) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+      if (document.querySelector('.dialog')) return;
+      const layout = layoutForShortcut(event);
+      if (!layout) return;
+      event.preventDefault();
+      if (layout === workspace.layout) return;
+      void actions.updateWorkspace(workspace.id, (current) => withLayout(current, layout));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [actions, workspace]);
 
   if (!workspace) {
     return (
@@ -516,19 +538,44 @@ export function ChartWorkspacePage() {
             </div>
           </Panel>
 
-          <Panel title="Shortcuts">
-            <ul className="list-reset stack field-hint">
-              <li>Drag on empty chart space to pan, scroll to zoom.</li>
-              <li>Pick a drawing tool, then click once for a level or twice for a two-point shape.</li>
-              <li>Select a drawing and drag an endpoint to reshape it; its prices and date appear on the axes. Magnet snap pulls endpoints onto nearby OHLC values.</li>
-              <li>With a drawing selected, press [ or ] to choose an endpoint and use the arrow keys to nudge it; hold Shift for five sessions or ten price steps.</li>
-              <li>The text tool opens a field where you click; double-click a label to change it.</li>
-              <li>Escape cancels a half-drawn shape and returns to the pointer tool.</li>
-              <li>Delete removes the selected drawing, Ctrl+Z undoes and Ctrl+Shift+Z redoes.</li>
-            </ul>
+          <Panel
+            title="Shortcuts"
+            actions={
+              <button type="button" className="button ghost sm" onClick={() => setShortcutsOpen(true)}>
+                Full reference
+              </button>
+            }
+          >
+            <div className="stack">
+              {SHORTCUT_GROUPS.map((group) => (
+                <div key={group.id} className="stack" style={{ gap: 3 }}>
+                  <span className="field-label">{group.label}</span>
+                  <ul className="list-reset stack field-hint">
+                    {group.entries.map((entry) => (
+                      <li key={entry.id}>
+                        <span className="shortcut-inline-keys">
+                          {entry.keys.map((key) => (
+                            <kbd key={key} className="shortcut-kbd">
+                              {key}
+                            </kbd>
+                          ))}
+                        </span>
+                        {entry.description}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <span className="field-hint">
+                Drag on empty chart space to pan, scroll to zoom. Magnet snap pulls drawing endpoints onto nearby
+                OHLC values.
+              </span>
+            </div>
           </Panel>
         </div>
       </div>
+
+      <ShortcutReferenceDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }

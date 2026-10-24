@@ -130,6 +130,34 @@ test.describe('rule-based backtest', () => {
     await expect(page.getByText('Stale')).toBeHidden();
   });
 
+  test('explains recomputed results and distinguishes a loaded saved run', async ({ page }) => {
+    await page.goto('/#/backtest');
+    await page.getByRole('button', { name: 'Start a new strategy' }).click();
+
+    const reading = page.locator('.panel').filter({ hasText: 'Reading these results' }).first();
+    await expect(reading).toContainText('Recomputed in this browser from the current stored dataset.');
+    await expect(reading).toContainText('This run covers');
+    await expect(reading).toContainText('What this does not tell you');
+    await expect(reading).toContainText('not by itself evidence of a better strategy');
+    await expect(reading).toContainText(
+      'Past behaviour on one instrument over one window is not a forecast.',
+    );
+
+    const runs = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
+    await expect(page.getByText('Stale')).toBeHidden();
+    await runs.getByRole('button', { name: 'Save run' }).click();
+    await expect(page.locator('.toast-body').last()).toContainText('Saved research run');
+
+    // Loading the snapshot creates a fresh recomputation; the saved metrics are
+    // not silently replaced, and the reading says so.
+    await page.getByRole('button', { name: 'New strategy' }).click();
+    await runs.getByRole('button', { name: 'Load into editor' }).click();
+
+    await expect(reading).toContainText('Recomputed now from the loaded configuration.');
+    await expect(reading).toContainText('The saved run');
+    await expect(reading).toContainText('keeps the metrics it recorded');
+  });
+
   test('keeps the remove control on the rule row at desktop width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/#/backtest');

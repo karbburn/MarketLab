@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CloudArrowDown, DownloadSimple, Eye, ListChecks } from '@phosphor-icons/react';
 import type { Workspace } from '../domain/types';
 import { useStore } from '../state/store';
@@ -6,7 +7,7 @@ import { datasetViews } from '../state/selectors';
 import { downloadTextFile } from '../lib/export/download';
 import { barsToCsv, validationToCsv } from '../lib/export/csv';
 import { formatPrice } from '../lib/format';
-import { Metric, Panel, Tag } from '../components/ui';
+import { Metric, Panel, StatusNotice, Tag } from '../components/ui';
 import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { requestBulkDownloadDialog, requestDownloadDialog } from '../lib/ui-events';
 import { PROVIDER_LABEL } from '../lib/marketdata/normalize';
@@ -32,7 +33,17 @@ function affectedDrawings(datasetId: string, workspaces: readonly Workspace[]): 
 export function DataPage() {
   const { state, actions } = useStore();
   const views = useMemo(() => datasetViews(state), [state]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selected dataset lives in the URL so a chart provenance dialog can link
+  // straight to the matching inspection panel, and the selection survives a
+  // reload or a shared link. An unknown id falls through to no selection.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get('dataset') || null;
+  const setSelectedId = (id: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('dataset', id);
+    else next.delete('dataset');
+    setSearchParams(next, { replace: true });
+  };
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const selected = views.find((view) => view.dataset.id === selectedId) ?? null;
@@ -131,6 +142,7 @@ export function DataPage() {
                               className="button ghost sm danger"
                               onClick={() => {
                                 setConfirmDeleteId(null);
+                                if (selectedId === view.dataset.id) setSelectedId(null);
                                 void actions.deleteDataset(view.dataset.id);
                               }}
                             >
@@ -154,6 +166,13 @@ export function DataPage() {
           </div>
         )}
       </Panel>
+
+      {selectedId !== null && !selected && (
+        <StatusNotice kind="warning">
+          Dataset "{selectedId}" is not stored in this browser. It may have been deleted or belong to a different
+          profile.
+        </StatusNotice>
+      )}
 
       {selected && (
         <>

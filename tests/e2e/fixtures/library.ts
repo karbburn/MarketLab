@@ -210,6 +210,48 @@ export function buildFixtureLibrary(): FixtureRecords {
 }
 
 /**
+ * A library whose primary dataset carries validation findings: rejected rows,
+ * a duplicate session, missing volume and weekday gaps. Used to prove the chart
+ * provenance chip switches to a warning state and reports the real counters.
+ */
+export function buildIssueLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_aapl');
+  const barRecord = records.bars.find((entry) => entry.id === 'ds_aapl');
+  if (!dataset || !barRecord) return records;
+  const series = barRecord.bars as FixtureBar[];
+  // Make the missing-volume count match the stored bars.
+  for (const bar of series.slice(0, 3)) bar.volume = null;
+  dataset.validation = {
+    acceptedRows: series.length,
+    rejectedRows: 2,
+    duplicateRows: 1,
+    missingVolumeRows: 3,
+    gapCount: 4,
+    sortCorrections: 1,
+    rejected: [{ rowNumber: 12, reason: 'High (99) is below max(open, close) for 2025-06-02.' }],
+    warnings: [
+      {
+        code: 'session-gaps',
+        message: '4 expected weekday session(s) are missing between the first and last date. Gaps are shown as gaps and never filled.',
+        count: 4,
+      },
+      {
+        code: 'missing-volume',
+        message: '3 row(s) have no volume value. Volume stays unavailable for those bars.',
+        count: 3,
+      },
+      {
+        code: 'weekend-rows',
+        message: '1 row(s) fall on a weekend. They are retained as-is; the app never fabricates trading sessions.',
+        count: 1,
+      },
+    ],
+  };
+  return records;
+}
+
+/**
  * A library where one stored series shares a single session with the primary.
  * Used to prove that the comparison reports insufficient shared history
  * instead of drawing a one-point line or forward-filling.

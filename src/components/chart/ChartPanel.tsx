@@ -49,6 +49,8 @@ import { CHART_TYPE_OPTIONS } from '../../lib/chartTypes';
 import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation, type ComparisonTarget } from '../../lib/chart/compare-overlays';
 import { planCorporateActionMarkers } from '../../lib/corporate-actions';
 import { changePercent, hoverBars } from '../../lib/chart/readout';
+import { DataProvenanceChip, DataProvenanceDialog } from './DataProvenanceChip';
+import { timeframeForShortcut } from '../../lib/shortcuts/reference';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
@@ -136,6 +138,9 @@ export function ChartPanel({
   // from leaking across selections without a state-synchronising effect.
   const [activeAnchor, setActiveAnchor] = useState<{ drawingId: string; index: number } | null>(null);
   const [anchorAnnouncement, setAnchorAnnouncement] = useState('');
+  // Keyboard chart actions have no visible focus change, so the status region
+  // reports the result for screen-reader users and for the E2E suite.
+  const [chartAnnouncement, setChartAnnouncement] = useState('');
   const [readout, setReadout] = useState<CrosshairReading>({ date: null, price: null, index: null });
   // The pointer owns the readout while it is over this panel. A mirrored
   // crosshair only fills it when the pointer is elsewhere, so refs keep the
@@ -157,6 +162,7 @@ export function ChartPanel({
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
   const [drawingManagerOpen, setDrawingManagerOpen] = useState(false);
   // While a drawing is being dragged or edited the local copy leads; the stored
   // workspace state remains the source of truth at rest.
@@ -991,6 +997,27 @@ export function ChartPanel({
         else undo();
         return;
       }
+      // Chart-wide keys come before the drawing-only branch so they work with or
+      // without a selection. Modified keys stay with the browser and with the
+      // undo/redo bindings above; Shift is allowed because some layouts need it
+      // to type a digit.
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+        const nextTimeframe = dataset
+          ? timeframeForShortcut(event.key, dataset.frequency, event.code)
+          : null;
+        if (nextTimeframe && dataset && nextTimeframe !== chart.timeframe) {
+          event.preventDefault();
+          setChartAnnouncement(`Timeframe changed to ${timeframeLabel(nextTimeframe, dataset.frequency)}.`);
+          void actions.updateChart(workspaceId, chart.id, (config) => ({ ...config, timeframe: nextTimeframe }));
+          return;
+        }
+        if (event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          setChartAnnouncement('Chart fitted to content.');
+          controllerRef.current?.fitContent();
+          return;
+        }
+      }
       // Endpoint editing is keyboard-accessible: [ and ] choose an endpoint and
       // the arrows nudge it. Buttons keep their native arrow behaviour and the
       // object list has its own keyboard model, so both are left alone.
@@ -1022,7 +1049,11 @@ export function ChartPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeAnchorIndex,
+    actions,
+    chart.id,
+    chart.timeframe,
     closeDrawingManager,
+    dataset,
     drawingManagerOpen,
     focused,
     nudgeActiveAnchor,
@@ -1032,6 +1063,7 @@ export function ChartPanel({
     selectedDrawing,
     selectedDrawingId,
     undo,
+    workspaceId,
   ]);
 
   const { hoverBar, previousBar } = hoverBars(rendered, readout.index);
@@ -1183,6 +1215,9 @@ export function ChartPanel({
             <span className="visually-hidden" role="status" aria-live="polite">
               {anchorAnnouncement}
             </span>
+            <span className="visually-hidden" role="status" aria-live="polite">
+              {chartAnnouncement}
+            </span>
             <div className="chart-legend">
               <div className="legend-row">
                 <strong className="chart-symbol">{instrument?.symbol ?? '--'}</strong>
@@ -1191,6 +1226,16 @@ export function ChartPanel({
                 <span>{dataset ? timeframeLabel(chart.timeframe, dataset.frequency) : '--'}</span>
                 <span className="faint">|</span>
                 <span>{instrument?.exchange ?? dataset?.timezone ?? '--'}</span>
+                {dataset && (
+                  <>
+                    <span className="faint">|</span>
+                    <DataProvenanceChip
+                      dataset={dataset}
+                      exchange={instrument?.exchange}
+                      onOpen={() => setProvenanceOpen(true)}
+                    />
+                  </>
+                )}
                 {instrument?.metadata?.synthetic === true && <Tag tone="warn">Demo data</Tag>}
               </div>
               {hoverBar && (
@@ -1413,6 +1458,15 @@ export function ChartPanel({
         chart={chart}
         workspaceId={workspaceId}
       />
+
+      {dataset && (
+        <DataProvenanceDialog
+          dataset={dataset}
+          exchange={instrument?.exchange}
+          open={provenanceOpen}
+          onClose={() => setProvenanceOpen(false)}
+        />
+      )}
     </div>
   );
 }

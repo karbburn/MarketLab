@@ -15,6 +15,7 @@ import {
   List,
   X,
   MagnifyingGlass,
+  Keyboard,
 } from '@phosphor-icons/react';
 import { useStore } from '../state/store';
 import { Toaster } from './ui';
@@ -24,9 +25,11 @@ import { ImportDialog } from './data/ImportDialog';
 import { DownloadDialog } from './data/DownloadDialog';
 import { BulkDownloadDialog } from './data/BulkDownloadDialog';
 import { CommandPalette } from './command-palette/CommandPalette';
+import { ShortcutReferenceDialog } from './shortcuts/ShortcutReferenceDialog';
 import { BULK_DOWNLOAD_DATA_EVENT, DOWNLOAD_DATA_EVENT, IMPORT_DATA_EVENT } from '../lib/ui-events';
 import { APP_ROUTES, NAV_GROUP_PATHS, appRouteTitle } from '../lib/navigation';
 import { isPaletteShortcut, isMacPlatform, shortcutLabel } from '../lib/command-palette/platform';
+import { isHelpShortcut, isTypingTarget } from '../lib/shortcuts/reference';
 
 interface NavEntry {
   to: string;
@@ -82,6 +85,7 @@ export function AppShell() {
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const narrow = useNarrowNav();
   const navRef = useRef<HTMLElement>(null);
   const navToggleRef = useRef<HTMLButtonElement>(null);
@@ -179,6 +183,22 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // `?` is a deliberate MarketLab binding, not a claim about TradingView (where
+  // the same key opens Indicators). It must never steal a typed question mark
+  // or stack on top of an existing dialog.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isHelpShortcut(event)) return;
+      if (isTypingTarget(event.target)) return;
+      if (document.querySelector('.dialog')) return;
+      event.preventDefault();
+      setNavOpen(false);
+      setShortcutsOpen(true);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
     <div className={shellClassName}>
       {navOpen && (
@@ -266,6 +286,18 @@ export function AppShell() {
           {state.adapterKind === 'memory' && <span className="tag warn">Storage unavailable: changes will not persist</span>}
           <button
             type="button"
+            className="button ghost icon"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            onClick={() => {
+              setNavOpen(false);
+              setShortcutsOpen(true);
+            }}
+          >
+            <Keyboard size={15} />
+          </button>
+          <button
+            type="button"
             className="button ghost sm palette-trigger"
             aria-label={`Open the command palette (${paletteHint})`}
             title={`Search views, actions and datasets (${paletteHint})`}
@@ -304,6 +336,7 @@ export function AppShell() {
 
       <Toaster />
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+      <ShortcutReferenceDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <DownloadDialog open={downloadOpen} onClose={() => setDownloadOpen(false)} />
       <BulkDownloadDialog open={bulkDownloadOpen} onClose={() => setBulkDownloadOpen(false)} />

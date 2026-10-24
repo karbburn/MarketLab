@@ -17,6 +17,7 @@ import { GetStartedPanel } from '../components/data/GetStartedPanel';
 import { LineChart, type ChartSeries } from '../components/charts/LineChart';
 import { ResearchRunsPanel, type ResearchRunSource } from '../components/backtest/ResearchRunsPanel';
 import { ResearchRunComparison } from '../components/backtest/ResearchRunComparison';
+import { ResultsReading } from '../components/backtest/ResultsReading';
 import { TradeTable } from '../components/backtest/TradeTable';
 
 export function BacktestPage() {
@@ -406,6 +407,15 @@ export function BacktestPage() {
               <Metric label="Exposure" value={formatPercent(result.metrics.exposurePct)} note="Share of sessions holding a position" />
             </div>
           </Panel>
+
+          <ResultsReading
+            metrics={result.metrics}
+            sessionCount={result.equityCurve.length}
+            frequency={frequency}
+            savedRunName={loadedRun?.name ?? null}
+            savedRunCreatedAt={loadedRun?.createdAt ?? null}
+            inputsChanged={loadedInputsDiffer}
+          />
 
           <div className="grid-2">
             <Panel title="Equity versus buy and hold" subtitle="Percent change from the initial capital">
