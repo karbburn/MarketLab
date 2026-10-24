@@ -380,18 +380,24 @@ export interface BacktestTrade {
 export interface BacktestResult {
   trades: BacktestTrade[];
   equityCurve: Array<{ date: DateString; equity: number; benchmark: number; drawdown: number }>;
+  /**
+   * A metric is `null` when the run could not define it, never `0`. A window
+   * the engine cannot simulate has no return, volatility, drawdown, exposure
+   * or buy-and-hold return; a window with a single equity step has no sample
+   * volatility. Zero is reserved for a measured zero.
+   */
   metrics: {
-    totalReturnPct: number;
+    totalReturnPct: number | null;
     cagrPct: number | null;
-    annualisedVolatilityPct: number;
-    maxDrawdownPct: number;
+    annualisedVolatilityPct: number | null;
+    maxDrawdownPct: number | null;
     sharpe: number | null;
     tradeCount: number;
     winRatePct: number | null;
     profitFactor: number | null;
     averageTradePct: number | null;
-    exposurePct: number;
-    benchmarkTotalReturnPct: number;
+    exposurePct: number | null;
+    benchmarkTotalReturnPct: number | null;
   };
 }
 

@@ -114,14 +114,14 @@ async function savedRun(data: Dataset = dataset()): Promise<BacktestRun> {
   });
 }
 
-describe('research run schema v2', () => {
-  it('declares schema version 2', () => {
-    expect(RESEARCH_RUN_SCHEMA_VERSION).toBe(2);
+describe('research run schema v3', () => {
+  it('declares schema version 3', () => {
+    expect(RESEARCH_RUN_SCHEMA_VERSION).toBe(3);
   });
 
   it('snapshots provider provenance at save time', async () => {
     const run = await savedRun();
-    expect(run.schemaVersion).toBe(2);
+    expect(run.schemaVersion).toBe(3);
     expect(run.dataset.provider).toEqual({
       provider: 'yahoo-finance',
       adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC)',
@@ -159,6 +159,38 @@ describe('research run schema v2', () => {
     const run = await savedRun(data);
     expect(run.dataset.provider).toBeUndefined();
     expect(parseBacktestRun(JSON.parse(JSON.stringify(run))).ok).toBe(true);
+  });
+
+  it('accepts a v2 numeric run and round-trips v3 null metrics', async () => {
+    const run = await savedRun();
+
+    const numeric = structuredClone(run);
+    numeric.schemaVersion = 2;
+    numeric.metrics.totalReturnPct = 1.5;
+    numeric.metrics.annualisedVolatilityPct = 2.5;
+    numeric.metrics.maxDrawdownPct = -3.5;
+    numeric.metrics.exposurePct = 40;
+    numeric.metrics.benchmarkTotalReturnPct = 0.5;
+    expect(parseBacktestRun(numeric).ok).toBe(true);
+
+    const nulled = structuredClone(run);
+    nulled.metrics.totalReturnPct = null;
+    nulled.metrics.annualisedVolatilityPct = null;
+    nulled.metrics.maxDrawdownPct = null;
+    nulled.metrics.exposurePct = null;
+    nulled.metrics.benchmarkTotalReturnPct = null;
+    const parsed = parseBacktestRun(nulled);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.metrics.totalReturnPct).toBeNull();
+      expect(parsed.value.metrics.annualisedVolatilityPct).toBeNull();
+      expect(parsed.value.metrics.maxDrawdownPct).toBeNull();
+      expect(parsed.value.metrics.exposurePct).toBeNull();
+      expect(parsed.value.metrics.benchmarkTotalReturnPct).toBeNull();
+      // A measured trade count stays a number even when the curve metrics are
+      // undefined.
+      expect(parsed.value.metrics.tradeCount).toBe(run.metrics.tradeCount);
+    }
   });
 
   it('parses a legacy v1 record unchanged and quarantines a future version', () => {

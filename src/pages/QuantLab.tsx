@@ -5,8 +5,9 @@ import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { betaAlpha, historicalVarPct, simpleReturns, summarise } from '../lib/quant/metrics';
 import {
-  alignOnCommonDates,
+  alignComparableSeries,
   correlationMatrix,
+  describeComparisonBasis,
   normalisedPerformance,
   rollingDrawdownPct,
   rollingVolatilityPct,
@@ -39,49 +40,53 @@ export function QuantLabPage() {
     const summary = summarise(primary.bars, primary.dataset.frequency);
     const returns = simpleReturns(primary.bars.map((bar) => bar.close));
     let beta: ReturnType<typeof betaAlpha> | null = null;
+    let comparison: ReturnType<typeof alignComparableSeries> | null = null;
     if (benchmark) {
-      const aligned = alignOnCommonDates([primary.bars, benchmark.bars]);
-      if (aligned.closes.length === 2) {
-        const assetReturns = simpleReturns(aligned.closes[0] as number[]);
-        const benchmarkReturns = simpleReturns(aligned.closes[1] as number[]);
-        beta = betaAlpha(assetReturns, benchmarkReturns, primary.dataset.frequency);
+      // Compare on a common period, not on shared dates: a daily series against
+      // a weekly one must not pair 1-session returns with 5-session returns.
+      comparison = alignComparableSeries([
+        { bars: primary.bars, frequency: primary.dataset.frequency },
+        { bars: benchmark.bars, frequency: benchmark.dataset.frequency },
+      ]);
+      if (comparison.status === 'ok' && comparison.basis && comparison.aligned.closes.length === 2) {
+        const assetReturns = simpleReturns(comparison.aligned.closes[0] as number[]);
+        const benchmarkReturns = simpleReturns(comparison.aligned.closes[1] as number[]);
+        // Alpha is annualised at the comparison frequency, which can be coarser
+        // than the primary dataset's own frequency.
+        beta = betaAlpha(assetReturns, benchmarkReturns, comparison.basis.frequency);
       }
     }
-    return { summary, returns, beta };
+    return { summary, returns, beta, comparison };
   }, [primary, benchmark]);
 
   const performance = useMemo(() => {
-    const empty = { series: [] as ChartSeries[], dates: [] as string[], unavailable: false };
+    const empty = {
+      series: [] as ChartSeries[],
+      dates: [] as string[],
+      unavailable: false,
+      incompatible: false,
+      basis: null as string | null,
+    };
     if (!primary) return empty;
-    const sources = benchmark ? [primary.bars, benchmark.bars] : [primary.bars];
-    const aligned = alignOnCommonDates(sources);
+    const inputs = benchmark
+      ? [
+          { bars: primary.bars, frequency: primary.dataset.frequency },
+          { bars: benchmark.bars, frequency: benchmark.dataset.frequency },
+        ]
+      : [{ bars: primary.bars, frequency: primary.dataset.frequency }];
+    const alignment = alignComparableSeries(inputs);
+    if (alignment.status === 'incompatible-frequencies') return { ...empty, incompatible: true };
+    const basis = alignment.basis ? describeComparisonBasis(alignment.basis, alignment.frequencies) : null;
+    const aligned = alignment.aligned;
     if (aligned.dates.length === 0) {
-      // A selected benchmark with no shared sessions is reported explicitly;
+      // A selected benchmark with no shared period is reported explicitly;
       // plotting the primary series alone would silently drop the benchmark.
-      if (benchmark) return empty;
-      const dates = primary.bars.map((bar) => bar.date);
-      const normalised = normalisedPerformance(
-        dates,
-        primary.bars.map((bar) => bar.close),
-      );
-      if (normalised.values.length === 0) return { ...empty, unavailable: true };
-      return {
-        series: [
-          {
-            id: primary.dataset.id,
-            label: primary.instrument?.symbol ?? primary.dataset.name,
-            color: PALETTE[0] as string,
-            points: normalised.values.map((value, index) => ({ x: index, y: value })),
-          },
-        ],
-        dates,
-        unavailable: false,
-      };
+      return { ...empty, basis };
     }
     const normalised = aligned.closes.map((closes) => normalisedPerformance(aligned.dates, closes));
     // A non-positive first shared close makes the whole index meaningless, so it
     // is reported as unavailable instead of drawing an empty line.
-    if (normalised.some((entry) => entry.values.length === 0)) return { ...empty, unavailable: true };
+    if (normalised.some((entry) => entry.values.length === 0)) return { ...empty, unavailable: true, basis };
     return {
       series: normalised.map((entry, index) => {
         const source = index === 0 ? primary : benchmark;
@@ -92,10 +97,12 @@ export function QuantLabPage() {
           points: entry.values.map((value, pointIndex) => ({ x: pointIndex, y: value })),
         };
       }),
-      // The labels come from the plotted sessions, not from the primary
+      // The labels come from the plotted periods, not from the primary
       // series, which can be longer than the shared window.
       dates: aligned.dates,
       unavailable: false,
+      incompatible: false,
+      basis,
     };
   }, [primary, benchmark]);
 
@@ -129,10 +136,22 @@ export function QuantLabPage() {
   const matrix = useMemo(() => {
     const selected = views.filter((view) => matrixIds.includes(view.dataset.id));
     if (selected.length < 2) return null;
-    const aligned = alignOnCommonDates(selected.map((view) => view.bars));
+    // A mixed selection is correlated on the coarsest period every series can
+    // supply, never by intersecting raw session dates.
+    const alignment = alignComparableSeries(
+      selected.map((view) => ({ bars: view.bars, frequency: view.dataset.frequency })),
+    );
+    if (alignment.status === 'incompatible-frequencies') return { incompatible: true as const };
+    const aligned = alignment.aligned;
     if (aligned.dates.length < MIN_CORRELATION_SESSIONS) return null;
     const labels = selected.map((view) => view.instrument?.symbol ?? view.dataset.name);
-    return { labels, values: correlationMatrix(labels, aligned.closes).values, sessions: aligned.dates.length };
+    return {
+      incompatible: false as const,
+      labels,
+      values: correlationMatrix(labels, aligned.closes).values,
+      periods: aligned.dates.length,
+      basis: alignment.basis ? describeComparisonBasis(alignment.basis, alignment.frequencies) : '',
+    };
   }, [views, matrixIds]);
   const matrixSelectionCount = views.filter((view) => matrixIds.includes(view.dataset.id)).length;
 
@@ -219,7 +238,9 @@ export function QuantLabPage() {
                 note={
                   metrics.beta?.beta == null
                     ? benchmark
-                      ? 'Beta unavailable for this overlap'
+                      ? metrics.comparison?.status === 'incompatible-frequencies'
+                        ? 'Weekly and monthly series cannot share a period'
+                        : 'Beta unavailable for this overlap'
                       : 'Select a benchmark to compute'
                     : metrics.beta.rSquared == null
                       ? 'R squared unavailable for this overlap'
@@ -233,22 +254,31 @@ export function QuantLabPage() {
             <Panel
               title="Normalised performance"
               subtitle={
-                performance.unavailable
-                  ? 'Baseline unavailable'
-                  : benchmark && performance.series.length === 0
-                    ? `No overlapping sessions with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
-                    : 'Percent change from the first common session'
+                performance.incompatible
+                  ? 'These series cannot share a comparison period'
+                  : performance.unavailable
+                    ? 'Baseline unavailable'
+                    : benchmark && performance.series.length === 0
+                      ? `No overlapping periods with ${benchmark.instrument?.symbol ?? benchmark.dataset.name}`
+                      : performance.basis
+                        ? `Compared on ${performance.basis}: percent change from the first common period`
+                        : 'Percent change from the first common period'
               }
             >
-              {performance.unavailable ? (
+              {performance.incompatible ? (
+                <EmptyState
+                  title="No common period"
+                  body="One series is stored weekly and the other monthly. A stored weekly bar is not aggregated into a month because that would invent a month-end, so the two series cannot be compared on a common basis."
+                />
+              ) : performance.unavailable ? (
                 <EmptyState
                   title="Baseline unavailable"
                   body="The first shared close is not a usable positive price, so this series cannot be indexed to 0 without inventing a value."
                 />
               ) : benchmark && performance.series.length === 0 ? (
                 <EmptyState
-                  title="No overlapping sessions"
-                  body={`${symbols} and ${benchmark.instrument?.symbol ?? benchmark.dataset.name} share no sessions, so there is nothing to compare.`}
+                  title="No overlapping periods"
+                  body={`${symbols} and ${benchmark.instrument?.symbol ?? benchmark.dataset.name} share no periods, so there is nothing to compare.`}
                 />
               ) : (
                 <LineChart
@@ -287,10 +317,12 @@ export function QuantLabPage() {
         title="Correlation matrix"
         subtitle={
           matrix
-            ? `${matrix.sessions} shared sessions across ${matrix.labels.length} series`
+            ? matrix.incompatible
+              ? 'Weekly and monthly series cannot share a comparison period'
+              : `${matrix.periods} shared periods across ${matrix.labels.length} series, compared on ${matrix.basis}`
             : matrixSelectionCount < 2
               ? 'Select two or more series'
-              : 'Two or more series need three shared returns (four shared sessions)'
+              : 'Two or more series need three shared returns (four shared periods)'
         }
       >
         <div className="stack">
@@ -318,7 +350,7 @@ export function QuantLabPage() {
               Clear
             </button>
           </div>
-          {matrix ? (
+          {matrix && !matrix.incompatible ? (
             <div className="table-wrap">
               <table className="data">
                 <thead>
@@ -345,9 +377,14 @@ export function QuantLabPage() {
                 </tbody>
               </table>
             </div>
+          ) : matrix?.incompatible ? (
+            <span className="field-hint">
+              A weekly and a monthly series share no common period, so their returns cannot be correlated. Select series
+              whose frequencies can be aligned: daily with any frequency, or weekly with weekly.
+            </span>
           ) : (
             <span className="field-hint">
-              Select at least two series with four or more shared sessions to build the matrix.
+              Select at least two series with four or more shared periods to build the matrix.
             </span>
           )}
         </div>
@@ -396,16 +433,16 @@ export function QuantLabPage() {
       {metrics && primary && (
         <Panel title="Method notes">
           <ul className="list-reset stack field-hint">
-            <li>Returns are simple session-over-session changes in close. No dividends, splits or fees are implied.</li>
-            <li>Annualisation uses the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year. CAGR uses calendar years between the first and last session, and is withheld for spans of 30 days or less.</li>
+            <li>Returns are simple period-over-period changes in close. No dividends, splits or fees are implied.</li>
+            <li>Per-series metrics annualise at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year. CAGR uses calendar years between the first and last session, and is withheld for spans of 30 days or less.</li>
             <li>
               VaR and CVaR are historical (non-parametric) and need at least 20 returns.
               {historicalVarPct(metrics.returns, 0.95) === null ? ' This series is below that threshold, so both are withheld.' : ''}
             </li>
             <li>Maximum drawdown is close-to-close, not an intraday peak-to-trough measure.</li>
-            <li>Multi-series comparison uses only dates present in every selected series. Nothing is forward-filled or interpolated.</li>
-            <li>Correlation is Pearson on session simple returns, computed on the shared sessions only. A correlation is withheld when either series is too short or has zero variance, including the diagonal.</li>
-            <li>Beta and alpha use aligned session returns with a zero risk-free rate. Beta is covariance over benchmark variance, not a regression with an intercept, and alpha is annualised at the dataset frequency.</li>
+            <li>Multi-series comparison uses only periods present in every selected series. Daily bars are aggregated up to a common weekly or monthly period and native weekly/monthly bars are matched by the period they cover. Nothing is forward-filled or interpolated, and a weekly with a monthly series is refused rather than mixed.</li>
+            <li>Correlation is Pearson on shared-period simple returns. A correlation is withheld when either series is too short or has zero variance, including the diagonal.</li>
+            <li>Beta and alpha use aligned period returns with a zero risk-free rate. Beta is covariance over benchmark variance, not a regression with an intercept, and alpha is annualised at the comparison frequency, which can be coarser than the primary dataset.</li>
             <li>
               <Link to="/learn?section=risk">Read the full method, including when a metric is withheld</Link>
             </li>

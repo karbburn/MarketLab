@@ -33,7 +33,8 @@ test.describe('quant lab', () => {
     await page.getByRole('button', { name: 'Select all' }).click();
 
     const matrix = page.locator('.panel').filter({ hasText: 'Correlation matrix' }).first();
-    await expect(matrix).toContainText('shared sessions');
+    await expect(matrix).toContainText('shared periods');
+    await expect(matrix).toContainText('compared on daily');
     // The diagonal of a real correlation matrix is exactly 1.00.
     await expect(matrix.locator('tbody tr').first()).toContainText('1.00');
   });

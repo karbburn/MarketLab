@@ -111,6 +111,20 @@ describe('describeRunWindow', () => {
     expect(report.evaluatedSessions).toBe(0);
     expect(report.evaluatedStart).toBeNull();
     expect(report.notes.some((note) => note.text.includes('no session is evaluated'))).toBe(true);
+    expect(report.notes.map((note) => note.code)).toContain('warmup-consumed-window');
+  });
+
+  it('mirrors the engine guard for a window shorter than three sessions', () => {
+    const cfg = config({ startDate: '2020-01-20', endDate: '2020-01-21' });
+    const report = describeRunWindow(cfg, bars);
+    const result = runBacktest(bars, cfg);
+    expect(report.storedSessions).toBe(2);
+    expect(report.evaluatedSessions).toBe(0);
+    expect(report.evaluatedStart).toBeNull();
+    expect(report.notes.map((note) => note.code)).toContain('too-few-sessions');
+    // The disclosure must not promise a session the engine refuses to simulate.
+    expect(result.equityCurve).toEqual([]);
+    expect(report.evaluatedSessions).toBe(result.equityCurve.length);
   });
 
   it('reports an empty window with a warn note and null dates', () => {
@@ -120,5 +134,19 @@ describe('describeRunWindow', () => {
     expect(report.evaluatedStart).toBeNull();
     expect(report.notes.filter((note) => note.tone === 'warn')).toHaveLength(1);
     expect(report.notes[0]?.text).toContain('No stored session falls inside');
+    expect(report.notes[0]?.code).toBe('no-stored-sessions');
+  });
+
+  it('gives shortfall, warm-up and empty windows distinct note codes', () => {
+    const shortfall = describeRunWindow(config({ startDate: '2019-01-01' }), bars);
+    const warmup = describeRunWindow(config({ startDate: '2020-01-21', endDate: '2020-01-23' }), bars);
+    const empty = describeRunWindow(config({ startDate: '2025-01-01', endDate: '2025-01-05' }), bars);
+    const shortfallCodes = shortfall.notes.map((note) => note.code);
+    const warmupCodes = warmup.notes.map((note) => note.code);
+    const emptyCodes = empty.notes.map((note) => note.code);
+    expect(shortfallCodes).toContain('requested-start-shortfall');
+    expect(warmupCodes).toContain('warmup-consumed-window');
+    expect(emptyCodes).toEqual(['no-stored-sessions']);
+    expect(new Set([...shortfallCodes, ...warmupCodes, ...emptyCodes]).size).toBeGreaterThanOrEqual(3);
   });
 });

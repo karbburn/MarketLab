@@ -5,6 +5,10 @@ export interface RuleFieldOption {
   label: string;
   needsSecondary: boolean;
   implicitThreshold: boolean;
+  /** Label for `secondaryWindow`; null when the rule has no second period. */
+  secondaryLabel: string | null;
+  /** Evaluator default for `secondaryWindow` when the stored rule omits it. */
+  secondaryDefault: 'double' | 'nine' | null;
 }
 
 /**
@@ -12,14 +16,26 @@ export interface RuleFieldOption {
  * rule is described with the same wording it was edited with.
  */
 export const RULE_FIELDS: readonly RuleFieldOption[] = [
-  { value: 'price-vs-sma', label: 'Price vs SMA (%)', needsSecondary: false, implicitThreshold: false },
-  { value: 'price-vs-ema', label: 'Price vs EMA (%)', needsSecondary: false, implicitThreshold: false },
-  { value: 'sma-cross', label: 'SMA cross', needsSecondary: true, implicitThreshold: true },
-  { value: 'macd-cross', label: 'MACD cross', needsSecondary: true, implicitThreshold: true },
-  { value: 'rsi', label: 'RSI level', needsSecondary: false, implicitThreshold: false },
-  { value: 'breakout-high', label: 'Breakout above high', needsSecondary: false, implicitThreshold: true },
-  { value: 'breakout-low', label: 'Breakdown below low', needsSecondary: false, implicitThreshold: true },
+  { value: 'price-vs-sma', label: 'Price vs SMA (%)', needsSecondary: false, implicitThreshold: false, secondaryLabel: null, secondaryDefault: null },
+  { value: 'price-vs-ema', label: 'Price vs EMA (%)', needsSecondary: false, implicitThreshold: false, secondaryLabel: null, secondaryDefault: null },
+  { value: 'sma-cross', label: 'SMA cross', needsSecondary: true, implicitThreshold: true, secondaryLabel: 'Slow SMA window', secondaryDefault: 'double' },
+  { value: 'macd-cross', label: 'MACD cross', needsSecondary: true, implicitThreshold: true, secondaryLabel: 'Signal window', secondaryDefault: 'nine' },
+  { value: 'rsi', label: 'RSI level', needsSecondary: false, implicitThreshold: false, secondaryLabel: null, secondaryDefault: null },
+  { value: 'breakout-high', label: 'Breakout above high', needsSecondary: false, implicitThreshold: true, secondaryLabel: null, secondaryDefault: null },
+  { value: 'breakout-low', label: 'Breakdown below low', needsSecondary: false, implicitThreshold: true, secondaryLabel: null, secondaryDefault: null },
 ];
+
+/**
+ * The second period a rule is actually evaluated with, including the engine's
+ * per-field default when the stored rule omits it. Keeps the editor from
+ * displaying `2 x window` for MACD, whose signal default is 9.
+ */
+export function secondaryWindowValue(rule: StrategyRule): number | null {
+  const meta = RULE_FIELDS.find((entry) => entry.value === rule.field);
+  if (!meta?.secondaryDefault) return null;
+  if (rule.secondaryWindow != null) return rule.secondaryWindow;
+  return meta.secondaryDefault === 'nine' ? 9 : rule.window * 2;
+}
 
 export const RULE_OPERATORS: ReadonlyArray<{ value: ScreenerOperator; label: string }> = [
   { value: 'crosses-above', label: 'crosses above' },
@@ -43,12 +59,12 @@ export function describeStrategyRule(rule: StrategyRule): string {
     case 'price-vs-ema':
       return `Price vs ${rule.window}-session EMA ${operator} ${rule.value}%`;
     case 'sma-cross': {
-      const slow = rule.secondaryWindow ?? rule.window * 2;
+      const slow = secondaryWindowValue(rule) ?? rule.window * 2;
       return `${rule.window}-session SMA ${operator} ${slow}-session SMA`;
     }
     case 'macd-cross': {
       const slow = rule.window * 2 + 2;
-      const signal = rule.secondaryWindow ?? 9;
+      const signal = secondaryWindowValue(rule) ?? 9;
       return `MACD (${rule.window}, ${slow}, ${signal}) ${operator} its signal line`;
     }
     case 'rsi':

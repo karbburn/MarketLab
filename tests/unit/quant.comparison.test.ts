@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { Bar } from '../../src/domain/types';
 import {
+  alignComparableSeries,
   alignOnCommonDates,
+  comparisonBasis,
   correlationMatrix,
+  describeComparisonBasis,
   normalisedPerformance,
   rollingVolatilityPct,
 } from '../../src/lib/quant/comparison';
@@ -128,6 +131,88 @@ describe('alignOnCommonDates with aggregated buckets', () => {
     const aligned = alignOnCommonDates([primary, candidate]);
     expect(aligned.dates).toEqual(['2024-01-05']);
     expect(aligned.closes).toEqual([[104], [202]]);
+  });
+});
+
+describe('comparisonBasis', () => {
+  it('picks the coarsest frequency every series can supply', () => {
+    expect(comparisonBasis(['daily', 'daily'])).toEqual({ timeframe: '1D', frequency: 'daily' });
+    expect(comparisonBasis(['daily', 'weekly'])).toEqual({ timeframe: '1W', frequency: 'weekly' });
+    expect(comparisonBasis(['daily', 'monthly', 'daily'])).toEqual({ timeframe: '1M', frequency: 'monthly' });
+  });
+
+  it('refuses a weekly with a monthly series rather than mixing periods', () => {
+    expect(comparisonBasis(['weekly', 'monthly'])).toBeNull();
+    expect(comparisonBasis([])).toBeNull();
+  });
+
+  it('describes an aggregated basis and a native one differently', () => {
+    const weekly = comparisonBasis(['daily', 'weekly']);
+    expect(weekly).not.toBeNull();
+    expect(describeComparisonBasis(weekly as NonNullable<typeof weekly>, ['daily', 'weekly'])).toContain('aggregated');
+    expect(describeComparisonBasis(weekly as NonNullable<typeof weekly>, ['weekly', 'weekly'])).toBe('weekly');
+  });
+});
+
+describe('alignComparableSeries', () => {
+  // 2024-01-01..05 is ISO week 2024-W01; 2024-01-08..12 is 2024-W02.
+  const daily = bars(
+    ['2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05', '2024-01-08', '2024-01-09', '2024-01-10', '2024-01-11', '2024-01-12'],
+    [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+  );
+  const weekly = bars(['2024-01-05', '2024-01-12'], [200, 210]);
+
+  it('aggregates daily bars up and aligns them with a weekly series on weekly buckets', () => {
+    const alignment = alignComparableSeries([
+      { bars: daily, frequency: 'daily' },
+      { bars: weekly, frequency: 'weekly' },
+    ]);
+    expect(alignment.status).toBe('ok');
+    expect(alignment.basis).toEqual({ timeframe: '1W', frequency: 'weekly' });
+    // Both sources are evaluated on two weekly closes, not on five daily ones
+    // matched against a weekly point.
+    expect(alignment.aligned.dates).toEqual(['2024-01-05', '2024-01-12']);
+    expect(alignment.aligned.closes[0]).toEqual([104, 109]);
+    expect(alignment.aligned.closes[1]).toEqual([200, 210]);
+  });
+
+  it('matches native weekly series whose final sessions differ by the ISO week they cover', () => {
+    const thursdays = bars(['2024-01-04', '2024-01-11'], [10, 11]);
+    const fridays = bars(['2024-01-05', '2024-01-12'], [20, 22]);
+    const alignment = alignComparableSeries([
+      { bars: thursdays, frequency: 'weekly' },
+      { bars: fridays, frequency: 'weekly' },
+    ]);
+    expect(alignment.status).toBe('ok');
+    expect(alignment.aligned.dates).toEqual(['2024-01-04', '2024-01-11']);
+    expect(alignment.aligned.closes).toEqual([[10, 11], [20, 22]]);
+  });
+
+  it('refuses a weekly and a monthly pair and reports no alignment', () => {
+    const monthly = bars(['2024-01-31'], [300]);
+    const alignment = alignComparableSeries([
+      { bars: weekly, frequency: 'weekly' },
+      { bars: monthly, frequency: 'monthly' },
+    ]);
+    expect(alignment.status).toBe('incompatible-frequencies');
+    expect(alignment.basis).toBeNull();
+    expect(alignment.aligned.dates).toEqual([]);
+  });
+
+  it('keeps same-frequency daily alignment unchanged', () => {
+    const other = bars(['2024-01-02', '2024-01-03'], [50, 60]);
+    const alignment = alignComparableSeries([
+      { bars: daily, frequency: 'daily' },
+      { bars: other, frequency: 'daily' },
+    ]);
+    expect(alignment.basis).toEqual({ timeframe: '1D', frequency: 'daily' });
+    expect(alignment.aligned).toEqual(alignOnCommonDates([daily, other]));
+  });
+
+  it('reports no series when given none', () => {
+    const alignment = alignComparableSeries([]);
+    expect(alignment.status).toBe('no-series');
+    expect(alignment.basis).toBeNull();
   });
 });
 

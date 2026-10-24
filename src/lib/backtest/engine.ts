@@ -49,7 +49,7 @@ export const BACKTEST_ASSUMPTIONS: readonly string[] = [
   "If a session's range touches both the stop and the target, the stop is assumed to fill first. That is the conservative choice.",
   'A stop is a sell stop: it fills at the stop price, except when the session opens through it, in which case it fills at the open. The target is booked at the target price even if the session gaps above it. Adverse slippage applies to both.',
   'A position still open at the final session is closed at the last close and labelled end-of-data. No forward return is invented.',
-  'Volatility, the Sharpe ratio and exposure are annualised at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year.',
+  'Volatility and the Sharpe ratio are annualised at the dataset frequency: 252 daily, 52 weekly or 12 monthly sessions per year. Exposure is not annualised: it is the share of evaluated sessions holding a position.',
   'The buy-and-hold benchmark uses the same initial capital over the same window with no costs.',
   'Only long positions are simulated. Short selling is not modelled.',
 ];
@@ -235,11 +235,13 @@ function closePosition(
   const exitNotional = position.quantity * exitPrice;
   const exitCommission = exitNotional * commissionRate;
   const proceeds = exitNotional - exitCommission;
-  // Gross PnL ignores all costs; net PnL is proceeds minus the entry notional and
-  // the entry commission that was already deducted from cash.
+  // Gross PnL is measured from the slipped entry price to the pre-slippage exit
+  // price, so entry slippage is already reflected in it. Net PnL is proceeds
+  // minus the entry notional and the entry commission deducted from cash.
   const grossPnl = position.quantity * (rawPrice - position.entryPrice);
-  // Costs include the exit slippage as well as both commissions, so the display
-  // invariant `netPnl === grossPnl - costs` holds exactly.
+  // Costs add the exit slippage and both commissions (entry slippage is in the
+  // entry price above), so the display invariant `netPnl === grossPnl - costs`
+  // holds exactly and no friction is counted twice.
   const exitSlippage = position.quantity * rawPrice * slippageRate;
   const costs = position.entryCosts + exitCommission + exitSlippage;
   const netPnl = proceeds - entryNotional - position.entryCosts;
@@ -292,11 +294,13 @@ function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   }
 
   const sd = sampleStdDev(dailyReturns);
-  const annualisedVolatilityPct = sd === null ? 0 : sd * Math.sqrt(periods) * 100;
+  // Fewer than two returns leaves the sample deviation undefined. Reporting 0
+  // would claim the equity curve did not move, which is a different statement.
+  const annualisedVolatilityPct = sd === null ? null : sd * Math.sqrt(periods) * 100;
   const meanReturn = mean(dailyReturns);
   const annualisedReturnPct = meanReturn === null ? null : meanReturn * periods * 100;
   const sharpe =
-    annualisedReturnPct === null || annualisedVolatilityPct === 0
+    annualisedReturnPct === null || annualisedVolatilityPct === null || annualisedVolatilityPct === 0
       ? null
       : annualisedReturnPct / annualisedVolatilityPct;
 
@@ -316,35 +320,39 @@ function computeMetrics(input: MetricInput): BacktestResult['metrics'] {
   const benchmarkTotalReturnPct =
     benchmarkStart && benchmarkEnd && benchmarkStart.benchmark !== 0
       ? (benchmarkEnd.benchmark / benchmarkStart.benchmark - 1) * 100
-      : 0;
+      : null;
 
   return {
     totalReturnPct,
     cagrPct,
     annualisedVolatilityPct,
-    maxDrawdownPct: maxDrawdownPct(equityCurve.map((point) => point.equity)) ?? 0,
+    maxDrawdownPct: maxDrawdownPct(equityCurve.map((point) => point.equity)),
     sharpe,
     tradeCount: trades.length,
     winRatePct: trades.length ? (wins.length / trades.length) * 100 : null,
     profitFactor: grossLoss === 0 ? null : grossProfit / grossLoss,
     averageTradePct: trades.length ? trades.reduce((acc, trade) => acc + trade.returnPct, 0) / trades.length : null,
-    exposurePct: input.totalBars ? (input.exposedBars / input.totalBars) * 100 : 0,
+    exposurePct: input.totalBars ? (input.exposedBars / input.totalBars) * 100 : null,
     benchmarkTotalReturnPct,
   };
 }
 
+/**
+ * Metrics for a window the engine cannot simulate at all. Every statistic that
+ * depends on an equity curve is `null`; only the trade count is a measured zero.
+ */
 function emptyMetrics(): BacktestResult['metrics'] {
   return {
-    totalReturnPct: 0,
+    totalReturnPct: null,
     cagrPct: null,
-    annualisedVolatilityPct: 0,
-    maxDrawdownPct: 0,
+    annualisedVolatilityPct: null,
+    maxDrawdownPct: null,
     sharpe: null,
     tradeCount: 0,
     winRatePct: null,
     profitFactor: null,
     averageTradePct: null,
-    exposurePct: 0,
-    benchmarkTotalReturnPct: 0,
+    exposurePct: null,
+    benchmarkTotalReturnPct: null,
   };
 }

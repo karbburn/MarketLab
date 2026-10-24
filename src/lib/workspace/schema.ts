@@ -286,21 +286,26 @@ export const backtestConfigSchema = z.object({
  * are non-strict a v2 record read by an older build silently strips the new
  * keys. Fingerprints, verification and the manifest envelope (still version 1)
  * are untouched by this change.
+ *
+ * Schema version 3 allows the five curve-dependent metrics to be `null`. v1 and
+ * v2 records stored a number there and parse unchanged; a v3 record with a null
+ * is rejected by an older build at the version check instead of failing inside
+ * the metric shape.
  */
-export const RESEARCH_RUN_SCHEMA_VERSION = 2;
+export const RESEARCH_RUN_SCHEMA_VERSION = 3;
 
 const backtestMetricsSchema = z.object({
-  totalReturnPct: z.number().finite(),
+  totalReturnPct: z.number().finite().nullable(),
   cagrPct: z.number().finite().nullable(),
-  annualisedVolatilityPct: z.number().finite(),
-  maxDrawdownPct: z.number().finite(),
+  annualisedVolatilityPct: z.number().finite().nullable(),
+  maxDrawdownPct: z.number().finite().nullable(),
   sharpe: z.number().finite().nullable(),
   tradeCount: z.number().int().nonnegative(),
   winRatePct: z.number().finite().nullable(),
   profitFactor: z.number().finite().nullable(),
   averageTradePct: z.number().finite().nullable(),
-  exposurePct: z.number().finite(),
-  benchmarkTotalReturnPct: z.number().finite(),
+  exposurePct: z.number().finite().nullable(),
+  benchmarkTotalReturnPct: z.number().finite().nullable(),
 });
 
 const backtestTradeSchema = z.object({

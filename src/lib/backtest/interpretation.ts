@@ -48,25 +48,33 @@ function withheldValue(): string {
 export function interpretBacktest(input: InterpretationInput): Interpretation {
   const { metrics, sessionCount, frequency } = input;
   const periods = periodsPerYear(frequency);
-  const difference = metrics.totalReturnPct - metrics.benchmarkTotalReturnPct;
-  const strategyDirection = metrics.totalReturnPct >= 0 ? 'returned' : 'lost';
-  const benchmarkDirection = metrics.benchmarkTotalReturnPct >= 0 ? 'returned' : 'lost';
+  const hasCurve = metrics.totalReturnPct !== null && metrics.benchmarkTotalReturnPct !== null;
+  const difference = hasCurve
+    ? (metrics.totalReturnPct as number) - (metrics.benchmarkTotalReturnPct as number)
+    : null;
+  const strategyDirection = (metrics.totalReturnPct ?? 0) >= 0 ? 'returned' : 'lost';
+  const benchmarkDirection = (metrics.benchmarkTotalReturnPct ?? 0) >= 0 ? 'returned' : 'lost';
 
-  const headline =
-    `The strategy ${strategyDirection} ${formatPercent(Math.abs(metrics.totalReturnPct))} over the window; ` +
-    `buy-and-hold ${benchmarkDirection} ${formatPercent(Math.abs(metrics.benchmarkTotalReturnPct))}.`;
+  const headline = hasCurve
+    ? `The strategy ${strategyDirection} ${formatPercent(Math.abs(metrics.totalReturnPct as number))} over the window; ` +
+      `buy-and-hold ${benchmarkDirection} ${formatPercent(Math.abs(metrics.benchmarkTotalReturnPct as number))}.`
+    : 'No equity curve was produced, so return, drawdown, volatility and exposure are withheld.';
 
   const readings: MetricReading[] = [
     {
       id: 'total-return',
       label: 'Total return',
-      value: formatPercent(metrics.totalReturnPct),
+      value: metrics.totalReturnPct === null ? withheldValue() : formatPercent(metrics.totalReturnPct),
       reading:
-        `The simulated equity changed by ${formatSignedPercent(metrics.totalReturnPct)} from the initial capital. ` +
-        `Buy-and-hold of the same series changed by ${formatSignedPercent(metrics.benchmarkTotalReturnPct)} over the same window. ` +
-        `The difference is ${signedPoints(difference)}.`,
-      caveat:
-        'The difference describes this window only. It is not evidence of skill, persistence or a repeatable edge.',
+        metrics.totalReturnPct === null || metrics.benchmarkTotalReturnPct === null
+          ? 'Total return is withheld because the engine could not simulate an equity curve over this window. ' +
+            'No zero is reported in its place.'
+          : `The simulated equity changed by ${formatSignedPercent(metrics.totalReturnPct)} from the initial capital. ` +
+            `Buy-and-hold of the same series changed by ${formatSignedPercent(metrics.benchmarkTotalReturnPct)} over the same window. ` +
+            `The difference is ${signedPoints(difference as number)}.`,
+      caveat: hasCurve
+        ? 'The difference describes this window only. It is not evidence of skill, persistence or a repeatable edge.'
+        : undefined,
     },
     {
       id: 'cagr',
@@ -84,19 +92,28 @@ export function interpretBacktest(input: InterpretationInput): Interpretation {
     {
       id: 'max-drawdown',
       label: 'Max drawdown',
-      value: formatPercent(metrics.maxDrawdownPct),
-      reading: `The deepest close-to-close decline from a running equity peak was ${formatPercent(
-        Math.abs(metrics.maxDrawdownPct),
-      )}.`,
-      caveat: 'A positive total return can still include this loss along the way.',
+      value: metrics.maxDrawdownPct === null ? withheldValue() : formatPercent(metrics.maxDrawdownPct),
+      reading:
+        metrics.maxDrawdownPct === null
+          ? 'Max drawdown is withheld because the engine could not simulate an equity curve over this window.'
+          : `The deepest close-to-close decline from a running equity peak was ${formatPercent(
+              Math.abs(metrics.maxDrawdownPct),
+            )}.`,
+      caveat: metrics.maxDrawdownPct === null ? undefined : 'A positive total return can still include this loss along the way.',
     },
     {
       id: 'volatility',
       label: 'Volatility',
-      value: formatPercent(metrics.annualisedVolatilityPct),
-      reading: `Annualised volatility is ${formatPercent(
-        metrics.annualisedVolatilityPct,
-      )}, calculated from ${sessionCount} session marks at the dataset frequency. It measures the size of the swings, not their direction.`,
+      value:
+        metrics.annualisedVolatilityPct === null ? withheldValue() : formatPercent(metrics.annualisedVolatilityPct),
+      reading:
+        metrics.annualisedVolatilityPct === null
+          ? `Annualised volatility is withheld because ${sessionCount} evaluated session${
+              sessionCount === 1 ? '' : 's'
+            } produced fewer than two equity returns to measure a sample deviation from.`
+          : `Annualised volatility is ${formatPercent(
+              metrics.annualisedVolatilityPct,
+            )}, calculated from ${sessionCount} session marks at the dataset frequency. It measures the size of the swings, not their direction.`,
       caveat: `Annualisation assumes ${periods} periods per year for a ${frequency} dataset.`,
     },
     {
@@ -170,10 +187,13 @@ export function interpretBacktest(input: InterpretationInput): Interpretation {
     {
       id: 'exposure',
       label: 'Exposure',
-      value: formatPercent(metrics.exposurePct),
-      reading: `The strategy held a position on ${formatPercent(
-        metrics.exposurePct,
-      )} of the sessions. The remaining sessions are flat apart from any costs already paid.`,
+      value: metrics.exposurePct === null ? withheldValue() : formatPercent(metrics.exposurePct),
+      reading:
+        metrics.exposurePct === null
+          ? 'Exposure is withheld because the engine could not simulate any evaluated session over this window.'
+          : `The strategy held a position on ${formatPercent(
+              metrics.exposurePct,
+            )} of the sessions. The remaining sessions are flat apart from any costs already paid.`,
     },
   ];
 
@@ -200,7 +220,7 @@ export function interpretBacktest(input: InterpretationInput): Interpretation {
     'The numbers assume the fills, costs, sizing and long-only rules described in the execution model. Different assumptions would change them.',
     'Only long positions are simulated. Short selling is not modelled.',
     'Metrics are recomputed from the current stored dataset. A saved research run keeps the values recorded when it was saved.',
-    `Volatility, Sharpe and exposure are annualised with ${periods} periods per year for a ${frequency} dataset.`,
+    `Volatility and Sharpe are annualised with ${periods} periods per year for a ${frequency} dataset; exposure is the share of evaluated sessions holding a position, not an annualised figure.`,
   ];
 
   return {

@@ -587,8 +587,16 @@ export function ResearchRunsPanel({
                         </span>
                         <span className="research-run-item-metrics">
                           <span className="research-run-item-metric">
-                            <strong className={run.metrics.totalReturnPct >= 0 ? 'num up' : 'num down'}>
-                              {formatPercent(run.metrics.totalReturnPct)}
+                            <strong
+                              className={
+                                run.metrics.totalReturnPct === null
+                                  ? 'num'
+                                  : run.metrics.totalReturnPct >= 0
+                                    ? 'num up'
+                                    : 'num down'
+                              }
+                            >
+                              {run.metrics.totalReturnPct === null ? '--' : formatPercent(run.metrics.totalReturnPct)}
                             </strong>
                             <span>Return</span>
                           </span>
@@ -677,14 +685,32 @@ export function ResearchRunsPanel({
                 <div className="grid-4">
                   <Metric
                     label="Total return"
-                    value={formatPercent(selected.metrics.totalReturnPct)}
-                    tone={selected.metrics.totalReturnPct >= 0 ? 'up' : 'down'}
-                    note={`Buy and hold ${formatPercent(selected.metrics.benchmarkTotalReturnPct)}`}
+                    value={
+                      selected.metrics.totalReturnPct === null
+                        ? '--'
+                        : formatPercent(selected.metrics.totalReturnPct)
+                    }
+                    tone={
+                      selected.metrics.totalReturnPct === null
+                        ? undefined
+                        : selected.metrics.totalReturnPct >= 0
+                          ? 'up'
+                          : 'down'
+                    }
+                    note={
+                      selected.metrics.benchmarkTotalReturnPct === null
+                        ? 'Buy and hold unavailable'
+                        : `Buy and hold ${formatPercent(selected.metrics.benchmarkTotalReturnPct)}`
+                    }
                   />
                   <Metric
                     label="Max drawdown"
-                    value={formatPercent(selected.metrics.maxDrawdownPct)}
-                    tone="down"
+                    value={
+                      selected.metrics.maxDrawdownPct === null
+                        ? '--'
+                        : formatPercent(selected.metrics.maxDrawdownPct)
+                    }
+                    tone={selected.metrics.maxDrawdownPct === null ? undefined : 'down'}
                   />
                   <Metric label="Trades" value={String(selected.metrics.tradeCount)} />
                   <Metric
