@@ -109,6 +109,35 @@ describe('assessCoverage', () => {
     expect(report.limitation).not.toContain('ceiling');
   });
 
+  it('does not blame the ceiling for a paginated dataset that exceeds the cap', () => {
+    // A multi-window fetch can legitimately return more rows than the old
+    // one-request ceiling. Its row count says nothing about a truncated
+    // window, so the cause stays unattributed.
+    const report = assessCoverage({
+      provider: 'twelve-data',
+      requested: LONG_REQUEST,
+      actual: TRUNCATED_ACTUAL,
+      rowCount: TWELVE_DATA_MAX_OUTPUTSIZE + 3000,
+    });
+
+    expect(report.status).toBe('partial');
+    expect(report.atProviderCap).toBe(false);
+    expect(report.notes[0]).not.toContain('ceiling');
+    expect(report.notes[0]).toContain('MarketLab cannot tell which');
+  });
+
+  it('labels a completed paginated dataset above the former one-request cap as complete', () => {
+    const report = assessCoverage({
+      provider: 'twelve-data',
+      requested: { start: '1980-12-12', end: '2026-10-23' },
+      actual: { start: '1980-12-12', end: '2026-10-23' },
+      rowCount: 11559,
+    });
+
+    expect(report.status).toBe('complete');
+    expect(report.atProviderCap).toBe(false);
+  });
+
   it('reports a missing tail without blaming the provider', () => {
     const report = assessCoverage({
       provider: 'yahoo-finance',

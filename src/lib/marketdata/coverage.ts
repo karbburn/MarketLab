@@ -3,8 +3,11 @@
  *
  * A provider can answer a request with fewer sessions than were asked for. The
  * consequential case is a per-request bar ceiling: Twelve Data returns at most
- * 5,000 daily bars, so a long request silently loses its earliest years unless
- * the app compares what was requested with what came back.
+ * 5,000 daily bars. Since long-history pagination arrived (the adapter fetches
+ * such ranges as bounded windows and never stores a windowed result), the cap
+ * mainly matters for datasets saved before that change, where the rows came
+ * back in exactly one capped request. The app compares what was requested with
+ * what came back either way.
  *
  * Two claims are kept apart deliberately:
  *
@@ -69,7 +72,12 @@ export interface CoverageReport {
   missingEndDays: number;
   /** The provider's documented bar ceiling, or null when it has none. */
   providerCap: number | null;
-  /** True when the row count reached the provider ceiling. */
+  /**
+   * True when the row count equals the provider ceiling exactly, the signature
+   * of a single capped request. Post-pagination row counts can legitimately
+   * exceed the cap, and a larger count says nothing about which window was
+   * truncated, so a threshold comparison would mis-attribute the cause.
+   */
   atProviderCap: boolean;
   /** Heading for the review panel; null when there is nothing to disclose. */
   headline: string | null;
@@ -125,7 +133,7 @@ export function assessCoverage(input: CoverageInput): CoverageReport {
   const requested = readRange(input.requested);
   const actual = { start: input.actual.start, end: input.actual.end };
   const providerCap = PROVIDER_OUTPUT_CAPS[input.provider] ?? null;
-  const atProviderCap = providerCap !== null && input.rowCount >= providerCap;
+  const atProviderCap = providerCap !== null && input.rowCount === providerCap;
   const actualStart = utcDay(actual.start);
   const actualEnd = utcDay(actual.end);
 

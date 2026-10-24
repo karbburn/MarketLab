@@ -5,7 +5,10 @@
  * runs for invalid caller input, for a window the primary provider says it
  * cannot serve, or after a successful Yahoo response. When both providers fail,
  * the error names both failures rather than presenting a partial result or a
- * fabricated empty series.
+ * fabricated empty series. The fallback itself must retrieve every requested
+ * session for the download to exist at all: the adapter fetches long ranges in
+ * bounded windows, and a window that fails (or a budget that refuses an
+ * attempt) aborts the whole download honestly.
  */
 
 import {
@@ -14,18 +17,23 @@ import {
   type HistoryQuery,
   type YahooHistoryPayload,
 } from './yahoo';
-import { fetchTwelveDataHistory } from './twelvedata';
+import {
+  FallbackBudgetExhaustedError,
+  fetchTwelveDataHistory,
+} from './twelvedata';
 
 export interface HostedHistoryOptions {
   /** Server-side key; never sent to the browser. */
   twelveDataApiKey?: string | null;
   fetchImpl?: typeof fetch;
   /**
-   * Called immediately before a Twelve Data request would be made. Returning
-   * false spends nothing and aborts the fallback with an error that names
-   * both the Yahoo failure and the exhausted budget. Charging happens only
-   * when the provider is really called, so invalid input, ineligible Yahoo
-   * failures and successful Yahoo responses never consume budget.
+   * Called by the Twelve Data adapter immediately before every one of its
+   * provider attempts — one window per bounded range segment, including a
+   * retried window — so a longer-range fallback spends one credit per real
+   * call. Returning false spends nothing and aborts the fallback with an error
+   * that names both the Yahoo failure and the exhausted budget. Charging only
+   * happens when the provider is really contacted: invalid input, ineligible
+   * Yahoo failures and successful Yahoo responses never consume budget.
    */
   spendFallbackCredit?: () => boolean;
 }
@@ -49,17 +57,19 @@ export async function fetchHostedHistory(
       throw yahooError;
     }
     const messageOfYahoo = messageOf(yahooError);
-    if (options.spendFallbackCredit && !options.spendFallbackCredit()) {
-      throw new YahooProviderError(
-        502,
-        `Both market-data sources are unavailable right now. Yahoo Finance: ${messageOfYahoo}`
-          + ' The fallback budget for Twelve Data is spent; try again after the budget window resets.',
-      );
-    }
 
     try {
-      return await fetchTwelveDataHistory(input, apiKey, fetchImpl);
+      return await fetchTwelveDataHistory(input, apiKey, fetchImpl, {
+        spendFallbackCredit: options.spendFallbackCredit,
+      });
     } catch (twelveDataError) {
+      if (twelveDataError instanceof FallbackBudgetExhaustedError) {
+        throw new YahooProviderError(
+          502,
+          `Both market-data sources are unavailable right now. Yahoo Finance: ${messageOfYahoo}`
+            + ' The fallback budget for Twelve Data is spent; try again after the budget window resets.',
+        );
+      }
       throw combinedProviderError(yahooError, twelveDataError, input.symbol);
     }
   }
