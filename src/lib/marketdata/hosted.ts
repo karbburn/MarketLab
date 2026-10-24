@@ -20,6 +20,14 @@ export interface HostedHistoryOptions {
   /** Server-side key; never sent to the browser. */
   twelveDataApiKey?: string | null;
   fetchImpl?: typeof fetch;
+  /**
+   * Called immediately before a Twelve Data request would be made. Returning
+   * false spends nothing and aborts the fallback with an error that names
+   * both the Yahoo failure and the exhausted budget. Charging happens only
+   * when the provider is really called, so invalid input, ineligible Yahoo
+   * failures and successful Yahoo responses never consume budget.
+   */
+  spendFallbackCredit?: () => boolean;
 }
 
 /** True when a second provider could plausibly satisfy the request. */
@@ -39,6 +47,14 @@ export async function fetchHostedHistory(
   } catch (yahooError) {
     if (apiKey.length === 0 || !isTwelveDataFallbackEligible(yahooError)) {
       throw yahooError;
+    }
+    const messageOfYahoo = messageOf(yahooError);
+    if (options.spendFallbackCredit && !options.spendFallbackCredit()) {
+      throw new YahooProviderError(
+        502,
+        `Both market-data sources are unavailable right now. Yahoo Finance: ${messageOfYahoo}`
+          + ' The fallback budget for Twelve Data is spent; try again after the budget window resets.',
+      );
     }
 
     try {
@@ -101,7 +117,5 @@ function statusOf(error: unknown): number | null {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error && error.message.length > 0
-    ? error.message
-    : 'the provider request failed';
+  return error instanceof Error && error.message.length > 0 ? error.message : 'the provider request failed';
 }

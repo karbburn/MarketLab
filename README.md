@@ -218,7 +218,14 @@ The hosted proxy can also use Twelve Data as an optional fallback. Set
 Yahoo first, then Twelve Data when Yahoo is throttled, unavailable or has no data for the
 symbol. The key is read only on the server; it never appears in the browser bundle, a request
 URL or an error message. Without the key the fallback is dormant and failures remain explicit.
-Each saved series records the provider that actually answered.
+Each saved series records the provider that actually answered. The public endpoints are
+best-effort rate limited in the handlers themselves: 60 history and 30 search requests per
+minute per address, plus a shared global budget for Twelve Data fallback credits (20 per
+5 minutes, 200 per 24 hours) that is charged only when a fallback call is really made. Over
+the limit a request is refused with HTTP 429 and `Retry-After`. These counters live in the
+edge function's warm instance, so they bound accidental load, floods and most scripted abuse;
+a distributed attack is bounded only by platform-level rules (Vercel), which remains the
+recommended hard control.
 
 The policy is narrower than "anything Yahoo failed to answer". Both free Yahoo hosts are tried
 first, including when Yahoo returns a throttling error inside an otherwise successful response.
