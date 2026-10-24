@@ -450,6 +450,249 @@ export function planResearchRunImport(existing: readonly BacktestRun[], incoming
   return { accepted, duplicateIds, overLimitIds };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Batch export and import                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A batch file is a container of complete individual manifests.
+ *
+ * It is deliberately a different document: a different `kind` and its own
+ * `batchVersion`, with no top-level `manifestVersion`. The individual manifest
+ * is therefore untouched (each element is exactly what the single-run export
+ * writes, still version 1), and neither parser can mistake one shape for the
+ * other. Like a single manifest it carries no bars and says so at both levels.
+ */
+export const RESEARCH_RUN_BATCH_KIND = 'research-run-batch';
+export const RESEARCH_RUN_BATCH_VERSION = 1;
+
+export interface ResearchRunBatchManifest {
+  app: 'marketlab';
+  kind: typeof RESEARCH_RUN_BATCH_KIND;
+  batchVersion: number;
+  exportedAt: string;
+  containsInputData: false;
+  /** Complete version-1 individual manifests, in the order they were selected. */
+  runs: ResearchRunManifest[];
+}
+
+export function createResearchRunBatchManifest(
+  runs: readonly BacktestRun[],
+  exportedAt = new Date().toISOString(),
+): ResearchRunBatchManifest {
+  return {
+    app: 'marketlab',
+    kind: RESEARCH_RUN_BATCH_KIND,
+    batchVersion: RESEARCH_RUN_BATCH_VERSION,
+    exportedAt,
+    containsInputData: false,
+    // The same builder the single-run export uses, so an embedded manifest is
+    // byte-for-byte what "Export manifest" would have produced for that run.
+    runs: runs.map((run) => createResearchRunManifest(run, exportedAt)),
+  };
+}
+
+export function serialiseResearchRunBatchManifest(runs: readonly BacktestRun[]): string {
+  return JSON.stringify(createResearchRunBatchManifest(runs), null, 2);
+}
+
+/**
+ * One element of a batch file. An element that fails validation is kept as a
+ * reported entry rather than discarding the whole archive; its id and name are
+ * read defensively from the raw document only so the user can tell which run
+ * was refused.
+ */
+export type ResearchRunBatchEntry =
+  | { ok: true; manifest: ResearchRunManifest }
+  | { ok: false; error: string; id: string | null; name: string | null };
+
+export type ResearchRunBatchParseResult =
+  | { ok: true; batch: ResearchRunBatchManifest; entries: ResearchRunBatchEntry[] }
+  | { ok: false; error: string };
+
+function rawRunIdentity(entry: unknown): { id: string | null; name: string | null } {
+  if (!entry || typeof entry !== 'object') return { id: null, name: null };
+  const run = (entry as { run?: unknown }).run;
+  if (!run || typeof run !== 'object') return { id: null, name: null };
+  const id = (run as { id?: unknown }).id;
+  const name = (run as { name?: unknown }).name;
+  return {
+    id: typeof id === 'string' && id.length > 0 ? id : null,
+    name: typeof name === 'string' && name.length > 0 ? name : null,
+  };
+}
+
+/**
+ * Parses a batch file.
+ *
+ * Container faults (wrong app or kind, a malformed or newer batch version, a
+ * claim to carry input data, a missing run list) reject the file. Faults inside
+ * one element reject only that element: the caller gets a per-item report and
+ * can import the sound records without pretending the rest were fine. Every
+ * element goes through `parseResearchRunManifest`, so manifest/run version
+ * rules are exactly the single-run rules.
+ */
+export function parseResearchRunBatchManifest(input: unknown): ResearchRunBatchParseResult {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, error: 'The batch file is not a JSON object.' };
+  }
+  const record = input as Record<string, unknown>;
+  if (record.app !== 'marketlab') {
+    return { ok: false, error: 'This file was not exported by MarketLab.' };
+  }
+  if (record.kind !== RESEARCH_RUN_BATCH_KIND) {
+    return { ok: false, error: 'This file is not a MarketLab research-run batch.' };
+  }
+  const version = record.batchVersion;
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
+    return { ok: false, error: 'The research-run batch version is missing or invalid.' };
+  }
+  if (version > RESEARCH_RUN_BATCH_VERSION) {
+    return {
+      ok: false,
+      error: `This research-run batch uses version ${version}, which is newer than this build supports.`,
+    };
+  }
+  if (record.containsInputData !== false) {
+    return { ok: false, error: 'A research-run batch must declare that it contains no input data.' };
+  }
+  if (!Array.isArray(record.runs)) {
+    return { ok: false, error: 'The research-run batch does not contain a list of runs.' };
+  }
+
+  const entries: ResearchRunBatchEntry[] = record.runs.map((element) => {
+    const parsed = parseResearchRunManifest(element);
+    if (parsed.ok) return { ok: true, manifest: parsed.value };
+    return { ok: false, error: parsed.error, ...rawRunIdentity(element) };
+  });
+  const valid = entries.filter((entry): entry is { ok: true; manifest: ResearchRunManifest } => entry.ok);
+
+  return {
+    ok: true,
+    batch: {
+      app: 'marketlab',
+      kind: RESEARCH_RUN_BATCH_KIND,
+      batchVersion: RESEARCH_RUN_BATCH_VERSION,
+      exportedAt: typeof record.exportedAt === 'string' ? record.exportedAt : new Date().toISOString(),
+      containsInputData: false,
+      runs: valid.map((entry) => entry.manifest),
+    },
+    entries,
+  };
+}
+
+export type ResearchRunImportOutcome =
+  | { status: 'imported'; index: number; id: string; name: string; message: string }
+  | {
+      status: 'duplicate';
+      index: number;
+      id: string;
+      name: string;
+      /** `existing`: already in the library. `this-file`: repeated inside the batch. */
+      reason: 'existing' | 'this-file';
+      message: string;
+    }
+  | { status: 'over-limit'; index: number; id: string; name: string; message: string }
+  | { status: 'invalid'; index: number; id: string | null; name: string | null; message: string };
+
+export interface ResearchRunImportCounts {
+  total: number;
+  imported: number;
+  duplicate: number;
+  overLimit: number;
+  invalid: number;
+}
+
+export interface ResearchRunImportReport {
+  /** Runs that may be written, in file order. Empty when nothing is importable. */
+  accepted: BacktestRun[];
+  /** One entry per file element, in file order. */
+  outcomes: ResearchRunImportOutcome[];
+  counts: ResearchRunImportCounts;
+}
+
+/**
+ * Plans a batch import against the library as it is now.
+ *
+ * The rules are the single-run rules applied item by item: an id is never
+ * overwritten (neither one already saved nor a repeat inside the same file),
+ * and the 50-run cap is enforced without pruning. Accepted runs keep their
+ * recorded snapshot untouched; nothing is rerun, resolved or rewritten.
+ */
+export function planResearchRunBatchImport(
+  existing: readonly BacktestRun[],
+  entries: readonly ResearchRunBatchEntry[],
+): ResearchRunImportReport {
+  const known = new Set(existing.map((run) => run.id));
+  const seenInFile = new Set<string>();
+  const accepted: BacktestRun[] = [];
+  const outcomes: ResearchRunImportOutcome[] = [];
+
+  entries.forEach((entry, index) => {
+    if (!entry.ok) {
+      const subject = entry.name ? `"${entry.name}"` : `Run ${index + 1}`;
+      outcomes.push({
+        status: 'invalid',
+        index,
+        id: entry.id,
+        name: entry.name,
+        message: `${subject} was not imported: ${entry.error}`,
+      });
+      return;
+    }
+
+    const run = entry.manifest.run;
+    const repeatedInFile = seenInFile.has(run.id);
+    seenInFile.add(run.id);
+
+    if (repeatedInFile || known.has(run.id)) {
+      outcomes.push({
+        status: 'duplicate',
+        index,
+        id: run.id,
+        name: run.name,
+        reason: repeatedInFile ? 'this-file' : 'existing',
+        message: repeatedInFile
+          ? `"${run.name}" appears more than once in this file; a run id is imported once.`
+          : `"${run.name}" is already saved. Imported runs are never overwritten.`,
+      });
+      return;
+    }
+
+    if (existing.length + accepted.length >= MAX_SAVED_RESEARCH_RUNS) {
+      outcomes.push({
+        status: 'over-limit',
+        index,
+        id: run.id,
+        name: run.name,
+        message: `The research library is full (${MAX_SAVED_RESEARCH_RUNS} runs), so "${run.name}" was not imported.`,
+      });
+      return;
+    }
+
+    accepted.push(run);
+    outcomes.push({
+      status: 'imported',
+      index,
+      id: run.id,
+      name: run.name,
+      message: `Imported "${run.name}".`,
+    });
+  });
+
+  return {
+    accepted,
+    outcomes,
+    counts: {
+      total: outcomes.length,
+      imported: outcomes.filter((outcome) => outcome.status === 'imported').length,
+      duplicate: outcomes.filter((outcome) => outcome.status === 'duplicate').length,
+      overLimit: outcomes.filter((outcome) => outcome.status === 'over-limit').length,
+      invalid: outcomes.filter((outcome) => outcome.status === 'invalid').length,
+    },
+  };
+}
+
 /** Newest first, with a stable tie-break so the list does not reshuffle. */
 export function sortResearchRuns(runs: readonly BacktestRun[]): BacktestRun[] {
   return [...runs].sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));

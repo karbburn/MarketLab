@@ -2,11 +2,16 @@ import { useMemo, useRef, useState } from 'react';
 import { DownloadSimple, FloppyDisk, PencilSimple, Play, Trash, UploadSimple } from '@phosphor-icons/react';
 import type { BacktestConfig, BacktestResult, BacktestRun, Dataset, Instrument } from '../../domain/types';
 import {
+  RESEARCH_RUN_BATCH_KIND,
   createBacktestRun,
+  parseResearchRunBatchManifest,
   parseResearchRunManifest,
+  serialiseResearchRunBatchManifest,
   serialiseResearchRunManifest,
   sortResearchRuns,
   verifyBacktestRun,
+  type ResearchRunImportOutcome,
+  type ResearchRunImportReport,
   type ResearchRunVerification,
 } from '../../lib/backtest/research-runs';
 import { indexInstrumentsById, resolveRunDataset } from '../../lib/backtest/run-datasets';
@@ -85,6 +90,32 @@ function runMatchesFilter(run: BacktestRun, query: string): boolean {
     .includes(query);
 }
 
+function batchOutcomeCopy(outcome: ResearchRunImportOutcome): { tone: TagTone; label: string } {
+  switch (outcome.status) {
+    case 'imported':
+      return { tone: 'up', label: 'Imported' };
+    case 'duplicate':
+      return outcome.reason === 'this-file'
+        ? { tone: 'accent', label: 'Repeated in file' }
+        : { tone: 'accent', label: 'Already saved' };
+    case 'over-limit':
+      return { tone: 'warn', label: 'Library full' };
+    case 'invalid':
+      return { tone: 'down', label: 'Invalid' };
+  }
+}
+
+function batchSummary(report: ResearchRunImportReport): string {
+  const { imported, duplicate, overLimit, invalid, total } = report.counts;
+  if (total === 0) return 'That batch file contains no research runs, so nothing was imported.';
+  const parts: string[] = [];
+  if (imported > 0) parts.push(`${imported} imported`);
+  if (duplicate > 0) parts.push(`${duplicate} duplicate`);
+  if (overLimit > 0) parts.push(`${overLimit} not imported (library full)`);
+  if (invalid > 0) parts.push(`${invalid} invalid`);
+  return `Batch import: ${parts.join(', ')} of ${total} run${total === 1 ? '' : 's'}.`;
+}
+
 function statusCopy(verification: ResearchRunVerification): { tone: TagTone; label: string; body: string } {
   switch (verification.status) {
     case 'match':
@@ -141,6 +172,9 @@ export function ResearchRunsPanel({
   const [filter, setFilter] = useState('');
   const [renameDraft, setRenameDraft] = useState<{ runId: string; name: string } | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  /** Run ids ticked for one batch export; derived against the live list below. */
+  const [selectedForExport, setSelectedForExport] = useState<ReadonlySet<string>>(() => new Set());
+  const [importReport, setImportReport] = useState<{ fileName: string; report: ResearchRunImportReport } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runs = useMemo(() => sortResearchRuns(state.backtestRuns), [state.backtestRuns]);
@@ -160,6 +194,30 @@ export function ResearchRunsPanel({
   }, [filter, runs]);
   const selectedVisible = selected !== null && filteredRuns.some((run) => run.id === selected.id);
   const isRenaming = selected !== null && renameDraft?.runId === selected.id;
+  // Selection is derived from the live library, so a deleted run can never be
+  // exported from a stale tick.
+  const selectedRuns = useMemo(
+    () => runs.filter((run) => selectedForExport.has(run.id)),
+    [runs, selectedForExport],
+  );
+  const allShownSelected = filteredRuns.length > 0 && filteredRuns.every((run) => selectedForExport.has(run.id));
+
+  const toggleSelectedForExport = (runId: string, checked: boolean) => {
+    setSelectedForExport((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(runId);
+      else next.delete(runId);
+      return next;
+    });
+  };
+
+  const selectAllShown = () => {
+    setSelectedForExport((previous) => {
+      const next = new Set(previous);
+      for (const run of filteredRuns) next.add(run.id);
+      return next;
+    });
+  };
 
   const selectRun = (runId: string) => {
     setSelectedId(runId);
@@ -262,14 +320,63 @@ export function ResearchRunsPanel({
     actions.notify('success', `Exported research run "${run.name}".`);
   };
 
+  const exportSelectedRuns = () => {
+    if (selectedRuns.length === 0) return;
+    downloadTextFile('marketlab.research-runs.json', serialiseResearchRunBatchManifest(selectedRuns), 'application/json');
+    actions.notify(
+      'success',
+      `Exported ${selectedRuns.length} research run${selectedRuns.length === 1 ? '' : 's'} as one batch file. Manifests carry no market data.`,
+    );
+  };
+
+  const importBatchFile = async (input: unknown, fileName: string) => {
+    const parsed = parseResearchRunBatchManifest(input);
+    if (!parsed.ok) {
+      actions.notify('error', parsed.error);
+      return;
+    }
+    if (parsed.entries.length === 0) {
+      setImportReport({
+        fileName,
+        report: {
+          accepted: [],
+          outcomes: [],
+          counts: { total: 0, imported: 0, duplicate: 0, overLimit: 0, invalid: 0 },
+        },
+      });
+      actions.notify('info', 'That batch file contains no research runs, so nothing was imported.');
+      return;
+    }
+    const report = await actions.importBacktestRuns(parsed.entries);
+    // A null report means the transaction failed and the store already said so:
+    // showing a summary of runs that were not written would be a lie.
+    if (!report) return;
+    setImportReport({ fileName, report });
+    if (report.accepted.length > 0) {
+      setSelectedId(report.accepted[0]!.id);
+      setFilter('');
+      setRenameDraft(null);
+      setRenameError(null);
+      setVerification(null);
+    }
+    actions.notify(report.counts.imported > 0 ? 'success' : 'info', batchSummary(report));
+  };
+
   const importRun = async (file: File) => {
     setBusy('import');
+    setImportReport(null);
     try {
       let parsed: unknown;
       try {
         parsed = JSON.parse(await readFileAsText(file));
       } catch {
         actions.notify('error', 'That research run file is not valid JSON.');
+        return;
+      }
+      // A batch is detected by its own kind, so the single-manifest path below
+      // keeps exactly the parsing, duplicate refusal and wording it had before.
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as { kind?: unknown }).kind === RESEARCH_RUN_BATCH_KIND) {
+        await importBatchFile(parsed, file.name);
         return;
       }
       const manifest = parseResearchRunManifest(parsed);
@@ -340,6 +447,54 @@ export function ResearchRunsPanel({
             bars or the equity curve. A rerun never modifies a saved run; renaming changes only its label.
           </span>
 
+          {importReport && (
+            <div className="panel research-import-report" role="status">
+              <div className="panel-body stack">
+                <div className="row tight">
+                  {importReport.report.counts.imported > 0 && (
+                    <Tag tone="up">{importReport.report.counts.imported} imported</Tag>
+                  )}
+                  {importReport.report.counts.duplicate > 0 && (
+                    <Tag tone="accent">{importReport.report.counts.duplicate} duplicate</Tag>
+                  )}
+                  {importReport.report.counts.overLimit > 0 && (
+                    <Tag tone="warn">{importReport.report.counts.overLimit} over capacity</Tag>
+                  )}
+                  {importReport.report.counts.invalid > 0 && (
+                    <Tag tone="down">{importReport.report.counts.invalid} invalid</Tag>
+                  )}
+                  <span className="panel-sub">
+                    Batch summary for “{importReport.fileName}” · {importReport.report.counts.total} run
+                    {importReport.report.counts.total === 1 ? '' : 's'} in the file
+                  </span>
+                </div>
+                {importReport.report.outcomes.length > 0 && (
+                  <ul className="list-reset stack research-import-outcomes">
+                    {importReport.report.outcomes.map((outcome) => (
+                      <li
+                        key={`${outcome.index}-${outcome.id ?? 'invalid'}`}
+                        className="research-import-outcome"
+                      >
+                        <Tag tone={batchOutcomeCopy(outcome).tone}>{batchOutcomeCopy(outcome).label}</Tag>
+                        <span>{outcome.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <span className="field-hint">
+                  Imported runs keep their recorded snapshots. Existing runs are never overwritten, and accepted runs
+                  were written together or not at all. Manifests carry no bars, so a run still needs its dataset in the
+                  library to be verified.
+                </span>
+                <div className="row tight">
+                  <button type="button" className="button sm" onClick={() => setImportReport(null)}>
+                    Dismiss summary
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className={`research-runs-layout${selectedVisible ? '' : ' is-library-only'}`}>
             <div className="stack research-runs-browser">
               <div className="stack research-run-filter">
@@ -351,6 +506,42 @@ export function ResearchRunsPanel({
                 />
                 <span className="field-hint">
                   {filter.trim() ? `${filteredRuns.length} of ${runs.length} runs` : `${runs.length} saved runs · newest first`}
+                </span>
+              </div>
+
+              <div className="stack research-run-batch">
+                <div className="row tight">
+                  <button
+                    type="button"
+                    className="button sm"
+                    disabled={busy !== null || filteredRuns.length === 0 || allShownSelected}
+                    onClick={selectAllShown}
+                  >
+                    Select all shown
+                  </button>
+                  <button
+                    type="button"
+                    className="button sm"
+                    disabled={busy !== null || selectedRuns.length === 0}
+                    onClick={() => setSelectedForExport(new Set())}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="button sm"
+                    disabled={busy !== null || selectedRuns.length === 0}
+                    title="Download the ticked runs as one batch file of individual manifests"
+                    onClick={exportSelectedRuns}
+                  >
+                    <DownloadSimple size={13} aria-hidden />
+                    {selectedRuns.length > 0 ? `Export selected (${selectedRuns.length})` : 'Export selected'}
+                  </button>
+                </div>
+                <span className="field-hint" role="status">
+                  {selectedRuns.length === 0
+                    ? 'No runs selected. Tick a run to include it in one batch export file.'
+                    : `${selectedRuns.length} of ${runs.length} runs ticked for one batch export file.`}
                 </span>
               </div>
 
@@ -367,7 +558,15 @@ export function ResearchRunsPanel({
               ) : (
                 <ul className="list-reset research-run-list" aria-label="Saved research runs">
                   {filteredRuns.map((run) => (
-                    <li key={run.id}>
+                    <li key={run.id} className="research-run-row">
+                      <span className="research-run-select">
+                        <input
+                          type="checkbox"
+                          checked={selectedForExport.has(run.id)}
+                          aria-label={`Select ${run.name} for export`}
+                          onChange={(event) => toggleSelectedForExport(run.id, event.target.checked)}
+                        />
+                      </span>
                       <button
                         type="button"
                         className="research-run-item"

@@ -20,7 +20,14 @@ import { normaliseCompareSelections } from '../lib/workspace/compare-selections'
 import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
-import { planResearchRunSave, withResearchRunName, RESEARCH_RUN_SCHEMA_VERSION } from '../lib/backtest/research-runs';
+import {
+  planResearchRunBatchImport,
+  planResearchRunSave,
+  withResearchRunName,
+  RESEARCH_RUN_SCHEMA_VERSION,
+  type ResearchRunBatchEntry,
+  type ResearchRunImportReport,
+} from '../lib/backtest/research-runs';
 import { parseBacktestRun } from '../lib/workspace/schema';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
@@ -80,6 +87,13 @@ export interface StoreActions {
   deleteChartTemplate(templateId: string): Promise<void>;
   /** Saves an immutable run; resolves false and reports why when it cannot. */
   saveBacktestRun(run: BacktestRun): Promise<boolean>;
+  /**
+   * Imports parsed batch entries. Plans against the library at the moment of
+   * the write and persists every accepted run in one transaction, so a storage
+   * failure writes nothing. Resolves null when the write failed (already
+   * reported) instead of a report of runs that were not stored.
+   */
+  importBacktestRuns(entries: readonly ResearchRunBatchEntry[]): Promise<ResearchRunImportReport | null>;
   /** Changes only the run's display name; recorded inputs and outputs stay intact. */
   renameBacktestRun(runId: string, name: string): Promise<boolean>;
   deleteBacktestRun(runId: string): Promise<void>;
@@ -800,6 +814,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         notify('error', `Could not save the research run: ${errorMessage(error)}`);
         return false;
       }
+    },
+
+    async importBacktestRuns(entries) {
+      if (!adapter) return null;
+      // Planned against the library as it is at write time, not against a
+      // render that may be stale, so a reload or another tab cannot make the
+      // write overwrite an id or exceed the cap.
+      const report = planResearchRunBatchImport(stateRef.current.backtestRuns, entries);
+      if (report.accepted.length === 0) return report;
+      try {
+        // One native transaction: either every accepted run is durable or none
+        // is. A mid-batch failure cannot leave a half-applied import.
+        await adapter.transaction(['researchRuns'], async (tx) => {
+          await tx.putMany('researchRuns', report.accepted);
+        });
+      } catch (error) {
+        notify('error', `Could not import the research runs: ${errorMessage(error)} No run was written.`);
+        return null;
+      }
+      setState((previous) => ({
+        ...previous,
+        backtestRuns: [...previous.backtestRuns, ...report.accepted],
+      }));
+      return report;
     },
 
     async renameBacktestRun(runId, name) {
