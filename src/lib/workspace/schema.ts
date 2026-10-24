@@ -184,6 +184,9 @@ export const datasetSchema = z.object({
       adjustment: z.string(),
       retrievedAt: z.string(),
       timezone: z.string().nullable(),
+      // Downloads stored before coverage disclosure have no requested range;
+      // treat it as unreported instead of rejecting the dataset.
+      requestedRange: z.object({ start: dateString, end: dateString }).optional(),
       sourceNotes: z.array(z.string()),
       // Older downloads predate corporate-action capture; default to none
       // instead of rejecting the dataset.

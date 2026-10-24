@@ -15,6 +15,7 @@ import {
   fetchProviderHistory,
   marketDataServiceDescription,
 } from '../../lib/marketdata/client';
+import { coverageFromDataset, coverageLabel } from '../../lib/marketdata/coverage';
 import { useProviderSymbolSearch } from '../../lib/marketdata/use-provider-search';
 import type { DuplicatePolicy } from '../../lib/validation/dataset';
 import { Field, Modal, Segmented, Tag, TextInput } from '../ui';
@@ -155,6 +156,7 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
   };
 
   const metadata = review?.dataset.provider ?? null;
+  const coverage = useMemo(() => (review ? coverageFromDataset(review.dataset) : null), [review]);
 
   return (
     <Modal
@@ -270,14 +272,33 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
         )}
 
         {phase === 'review' && review && metadata && (
-          <div className="panel" style={{ marginTop: 12 }}>
+          // `overflow: visible` keeps the panel at its content height. As a grid
+          // item with `overflow: hidden` it was compressible, so on a long
+          // review the limitations, coverage warning and provider notes were
+          // clipped with no way to scroll to them.
+          <div className="panel" style={{ marginTop: 12, overflow: 'visible' }}>
             <div className="panel-body">
               <div className="row tight" style={{ flexWrap: 'wrap' }}>
                 <Tag tone="accent">{providerLabel(metadata.provider)} download</Tag>
                 <Tag>{metadata.exchangeName ?? metadata.exchange ?? 'Exchange not reported'}</Tag>
                 <Tag>{review.instrument.currency}</Tag>
                 <Tag>{assetTypeFromProvider(metadata.instrumentType)}</Tag>
+                {coverage && (
+                  <Tag tone={coverage.status === 'partial' ? 'warn' : undefined}>{coverageLabel(coverage)}</Tag>
+                )}
               </div>
+              {coverage?.status === 'partial' && (
+                <div className="coverage-warning" role="status">
+                  <strong>
+                    <Warning size={12} aria-hidden /> {coverage.headline}
+                  </strong>
+                  <ul>
+                    {coverage.notes.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="metric" style={{ marginTop: 8 }}>
                 <span className="metric-label">Series</span>
                 <span className="metric-value">{review.dataset.name}</span>
@@ -286,8 +307,16 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
                 <span className="metric-label">Sessions</span>
                 <span className="metric-value">{review.dataset.rowCount.toLocaleString('en-US')}</span>
               </div>
+              {metadata.requestedRange && (
+                <div className="metric">
+                  <span className="metric-label">Requested</span>
+                  <span className="metric-note mono">
+                    {metadata.requestedRange.start} through {metadata.requestedRange.end}
+                  </span>
+                </div>
+              )}
               <div className="metric">
-                <span className="metric-label">Range</span>
+                <span className="metric-label">Returned</span>
                 <span className="metric-note mono">
                   {review.dataset.firstDate} through {review.dataset.lastDate}
                 </span>
@@ -304,6 +333,18 @@ export function DownloadDialog({ open, onClose }: { open: boolean; onClose: () =
                 Limitations: daily bars only; frequencies above daily are aggregated locally; volume may be absent for
                 some instruments; this is not real-time data and is not licensed for redistribution.
               </div>
+              {metadata.sourceNotes.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <span className="field-label">Provider notes</span>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+                    {metadata.sourceNotes.map((note) => (
+                      <li key={note} className="field-hint">
+                        {note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {review.dataset.validation.rejectedRows > 0 || review.dataset.validation.warnings.length > 0 ? (
                 <ul style={{ marginTop: 6, paddingLeft: 18 }}>
                   {describeValidationIssues(review.dataset.validation).map((issue) => (

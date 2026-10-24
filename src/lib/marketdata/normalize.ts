@@ -25,6 +25,7 @@ import type {
   ProviderId,
 } from '../../domain/types';
 import { createId } from '../id';
+import { isDateString } from '../date';
 import { validateBarEntries, type DuplicatePolicy } from '../validation/dataset';
 
 /** The primary provider; kept as a named constant for older call sites. */
@@ -151,6 +152,20 @@ export interface BuildBundleInput {
 }
 
 /**
+ * Keeps the requested window only when both sides are real ISO dates. A
+ * malformed range is not repaired or guessed: leaving it out is safer than
+ * recording a claim about what the user asked for that may be wrong.
+ */
+function readRequestedRange(
+  range: { start: string; end: string } | null | undefined,
+): { start: string; end: string } | null {
+  if (!range) return null;
+  const { start, end } = range;
+  if (!isDateString(start) || !isDateString(end) || start > end) return null;
+  return { start, end };
+}
+
+/**
  * Assembles the canonical instrument/dataset/bars triple from a validated
  * provider download. Instrument identity is provider-defined; datasets are
  * keyed by their content hash in the caller's merge logic if desired.
@@ -166,6 +181,7 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
   }
 
   const label = providerLabel(metadata.provider);
+  const requestedRange = readRequestedRange(metadata.rangeRequested);
   const provider: DatasetProvider = {
     provider: metadata.provider,
     providerSymbol: metadata.providerSymbol,
@@ -176,6 +192,7 @@ export function buildDatasetBundle(input: BuildBundleInput): DatasetBundle {
     adjustment: metadata.adjustment,
     retrievedAt: metadata.retrievedAt,
     timezone: metadata.timezone,
+    ...(requestedRange ? { requestedRange } : {}),
     sourceNotes: metadata.sourceNotes,
     corporateActions: [...(metadata.corporateActions ?? [])],
   };

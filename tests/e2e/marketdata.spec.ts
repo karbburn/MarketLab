@@ -30,12 +30,38 @@ const PROVIDER_PAYLOAD = {
     timezone: 'America/New_York',
     interval: '1d',
     adjustment: 'Splits applied, dividends not reinvested',
-    rangeRequested: { start: '2026-09-01', end: '2026-10-16' },
+    rangeRequested: { start: '2026-09-14', end: '2026-09-17' },
     rangeActual: { start: '2026-09-14', end: '2026-09-17' },
     retrievedAt: '2026-10-16T21:00:00Z',
     sourceNotes: ['Yahoo Finance is an unofficial source and may be delayed.'],
   },
   bars: HISTORY_BARS,
+};
+
+/** A Twelve Data fallback response that covers far less than was requested. */
+const TRUNCATED_PAYLOAD = {
+  provider: {
+    provider: 'twelve-data',
+    providerSymbol: 'BRK.B',
+    displaySymbol: 'BRK.B',
+    displayName: null,
+    exchange: 'XNYS',
+    exchangeName: 'NYSE',
+    instrumentType: 'Common Stock',
+    currency: 'USD',
+    timezone: 'America/New_York',
+    interval: '1d',
+    adjustment: 'splits-applied, dividends not reinvested (as-traded OHLC); adjusted close not reported',
+    rangeRequested: { start: '1995-01-01', end: '2026-10-23' },
+    rangeActual: { start: '2026-09-14', end: '2026-09-17' },
+    retrievedAt: '2026-10-24T09:00:00Z',
+    sourceNotes: [
+      'Used only as a fallback when the primary provider fails and a server-side API key is configured.',
+      'At most 5,000 bars are returned per request.',
+    ],
+    corporateActions: [],
+  },
+  bars: HISTORY_BARS.map((bar) => ({ ...bar, adjClose: null })),
 };
 
 const CORS_HEADERS = {
@@ -285,6 +311,8 @@ test.describe('market data download', () => {
     await expect(dialog.getByText('Yahoo Finance download', { exact: true })).toBeVisible();
     await expect(dialog.getByText('NasdaqGS')).toBeVisible();
     await expect(dialog.getByText('Splits applied, dividends not reinvested')).toBeVisible();
+    // The requested window is checked against what came back.
+    await expect(dialog.getByText('Coverage checked')).toBeVisible();
     await dialog.getByRole('button', { name: 'Save dataset' }).click();
     await expect(dialog).toBeHidden();
 
@@ -292,6 +320,42 @@ test.describe('market data download', () => {
     const row = page.locator('table.data tbody tr').filter({ hasText: 'AAPL' });
     await expect(row).toContainText('Yahoo Finance');
     await expect(row).toContainText('2026-09-17');
+  });
+
+  test('discloses a provider that returned less than the requested range', async ({ page }) => {
+    await stubService(page, TRUNCATED_PAYLOAD);
+    await page.goto('/#/data');
+    await page.getByRole('button', { name: 'Download market data' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Download market data' });
+
+    await dialog.getByLabel('Symbol').fill('BRK.B');
+    await dialog.getByRole('button', { name: 'Download' }).click();
+
+    // The review states what was asked for, what came back, and why that
+    // matters — before the user decides to keep the series.
+    await expect(dialog.getByText('Coverage: partial')).toBeVisible();
+    await expect(dialog.getByText('1995-01-01 through 2026-10-23')).toBeVisible();
+    await expect(dialog.getByText('2026-09-14 through 2026-09-17')).toBeVisible();
+    await expect(dialog.getByText('The returned range does not cover the whole request.')).toBeVisible();
+    await expect(
+      dialog.getByText(/No sessions before 2026-09-14 were returned for a request starting 1995-01-01/),
+    ).toBeVisible();
+    // The provider's own caveats are shown, not paraphrased away.
+    await expect(dialog.getByText('Provider notes')).toBeVisible();
+    await expect(dialog.getByText(/At most 5,000 bars are returned per request/)).toBeVisible();
+
+    // Saving keeps the shortfall, so provenance still reports it later.
+    await dialog.getByRole('button', { name: 'Save dataset' }).click();
+    await expect(dialog).toBeHidden();
+    await page.goto('/#/chart');
+
+    const chip = page.locator('.provenance-chip').first();
+    await expect(chip).toHaveText('Data: 1 issue');
+    await chip.click();
+    const provenance = page.getByRole('dialog', { name: 'Data provenance' });
+    await expect(provenance.getByText('Requested range not covered')).toBeVisible();
+    await expect(provenance).toContainText('1995-01-01 to 2026-10-23');
+    await expect(provenance).toContainText('2026-09-14 to 2026-09-17');
   });
 
   test('reports a provider failure without storing anything', async ({ page }) => {

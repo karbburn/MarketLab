@@ -19,9 +19,9 @@ datasets.
 
 Only **daily** bars are served. MarketLab's canonical model is date-only exchange
 sessions; weekly/monthly views are aggregated inside the app, and intraday is
-deliberately unsupported. OHLC is as-traded (splits applied by Yahoo, dividends
-not reinvested); the separate `adjClose` column is captured but not yet used by
- computations. The adjustment policy is recorded in every download's metadata.
+deliberately unsupported. OHLC is split-adjusted (dividends not reinvested); the separate
+`adjClose` column is present in the provider response but is not stored or used by the app.
+The adjustment policy is recorded in every download's metadata.
 
 History responses also carry `provider.corporateActions`, an array of
 provider-reported events in the requested range:

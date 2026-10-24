@@ -586,6 +586,30 @@ button {
   color: var(--down);
 }
 
+/* Range-coverage disclosure in the download review. Warn-toned, not an error:
+   the download is still valid, it just covers less than was requested. */
+.coverage-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.coverage-warning strong {
+  display: block;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.coverage-warning ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
 .input,
 .select,
 .textarea {
