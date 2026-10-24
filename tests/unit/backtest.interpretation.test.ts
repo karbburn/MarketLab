@@ -75,6 +75,30 @@ describe('interpretBacktest', () => {
     expect(result.sampleNote).toContain('Fewer than 60 sessions is a short window');
   });
 
+  it('describes a window with no curve as withheld, never as zero', () => {
+    const result = interpret(
+      {
+        totalReturnPct: null,
+        annualisedVolatilityPct: null,
+        maxDrawdownPct: null,
+        exposurePct: null,
+        benchmarkTotalReturnPct: null,
+        sharpe: null,
+      },
+      0,
+    );
+
+    expect(result.headline).toContain('No equity curve was produced');
+    expect(result.headline).toContain('withheld');
+    expect(reading(result, 'total-return')?.value).toBe('Withheld');
+    expect(reading(result, 'total-return')?.reading).toContain('No zero is reported');
+    expect(reading(result, 'max-drawdown')?.value).toBe('Withheld');
+    expect(reading(result, 'volatility')?.value).toBe('Withheld');
+    expect(reading(result, 'exposure')?.value).toBe('Withheld');
+    expect(result.readings.map((entry) => entry.value)).not.toContain('0.00%');
+    expect(result.caveats.join(' ')).toContain('exposure is the share of evaluated sessions');
+  });
+
   it('distinguishes an undefined profit factor from infinity', () => {
     const result = interpret({ tradeCount: 5, profitFactor: null });
 

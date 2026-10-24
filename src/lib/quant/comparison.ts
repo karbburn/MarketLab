@@ -1,5 +1,6 @@
-import type { Bar, Frequency } from '../../domain/types';
+import type { Bar, Frequency, Timeframe } from '../../domain/types';
 import { pearsonCorrelation } from '../stats';
+import { aggregateBars, tagBarsAtTimeframe, timeframeFrequency } from '../timeframe';
 import { pairedReturns, periodsPerYear, simpleReturns, usableReturns, type ReturnValue } from './metrics';
 
 export interface AlignedSeries {
@@ -33,6 +34,88 @@ export function alignOnCommonDates(series: ReadonlyArray<readonly Bar[]>): Align
   const dates = alignedBars.map((bar) => bar.date);
   const closes = maps.map((map) => alignedBars.map((bar) => map.get(alignmentKey(bar)) as number));
   return { dates, closes };
+}
+
+const FREQUENCY_RANK: Readonly<Record<Frequency, number>> = { daily: 0, weekly: 1, monthly: 2 };
+const TIMEFRAME_FOR: Readonly<Record<Frequency, Timeframe>> = { daily: '1D', weekly: '1W', monthly: '1M' };
+
+export interface ComparisonBasis {
+  /** Period the compared series are evaluated on. */
+  timeframe: Timeframe;
+  /** Frequency of one period at `timeframe`; the correct annualiser for returns. */
+  frequency: Frequency;
+}
+
+/**
+ * The coarsest period every stored frequency can honestly supply.
+ *
+ * Daily bars can be aggregated upward with {@link aggregateBars}. Two stored
+ * weekly series can be matched by ISO-week bucket even when their last sessions
+ * differ. Weekly and monthly cannot: the app deliberately does not aggregate a
+ * stored weekly bar into a month, because that would either drop sessions or
+ * invent a month-end. Such a pair has no common period and this returns `null`
+ * rather than comparing weekly returns with monthly returns.
+ */
+export function comparisonBasis(frequencies: readonly Frequency[]): ComparisonBasis | null {
+  if (frequencies.length === 0) return null;
+  const unique = new Set(frequencies);
+  if (unique.has('weekly') && unique.has('monthly')) return null;
+  let coarsest: Frequency = 'daily';
+  for (const frequency of unique) {
+    if ((FREQUENCY_RANK[frequency] ?? 0) > (FREQUENCY_RANK[coarsest] ?? 0)) coarsest = frequency;
+  }
+  return { timeframe: TIMEFRAME_FOR[coarsest], frequency: coarsest };
+}
+
+export interface FrequencyBars {
+  bars: readonly Bar[];
+  frequency: Frequency;
+}
+
+export type ComparisonAlignmentStatus = 'ok' | 'no-series' | 'incompatible-frequencies';
+
+export interface ComparisonAlignment {
+  status: ComparisonAlignmentStatus;
+  /** The common period used, or null when the inputs cannot share one. */
+  basis: ComparisonBasis | null;
+  /** Shared periods in ascending order; empty unless `status === 'ok'`. */
+  aligned: AlignedSeries;
+  /** The frequencies supplied, for disclosure. */
+  frequencies: Frequency[];
+}
+
+/**
+ * Aligns series stored at possibly different frequencies on their common
+ * period. Daily series are aggregated up; same-frequency series are tagged with
+ * the period they cover. Callers must annualise returns at `basis.frequency`,
+ * not at any one input's frequency.
+ */
+export function alignComparableSeries(inputs: readonly FrequencyBars[]): ComparisonAlignment {
+  const frequencies = inputs.map((input) => input.frequency);
+  if (inputs.length === 0) {
+    return { status: 'no-series', basis: null, aligned: { dates: [], closes: [] }, frequencies };
+  }
+  const basis = comparisonBasis(frequencies);
+  if (!basis) {
+    return { status: 'incompatible-frequencies', basis: null, aligned: { dates: [], closes: [] }, frequencies };
+  }
+  const converted = inputs.map((input) =>
+    input.frequency === basis.frequency
+      ? tagBarsAtTimeframe(input.bars, basis.timeframe)
+      : aggregateBars(input.bars, basis.timeframe),
+  );
+  return { status: 'ok', basis, aligned: alignOnCommonDates(converted), frequencies };
+}
+
+/**
+ * Human label for a comparison basis, e.g. "weekly (aggregated from daily)"
+ * when the inputs were not all stored at that frequency.
+ */
+export function describeComparisonBasis(basis: ComparisonBasis, frequencies: readonly Frequency[]): string {
+  const label = timeframeFrequency(basis.timeframe);
+  const aggregated = frequencies.some((frequency) => frequency !== label);
+  const name = basis.frequency === 'daily' ? 'daily' : basis.frequency;
+  return aggregated ? `${name} (aggregated to a common period)` : name;
 }
 
 export interface NormalisedSeries {

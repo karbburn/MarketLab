@@ -223,6 +223,19 @@ describe('verifyBacktestRun', () => {
     expect(verification.result?.trades).toEqual(run.trades);
   });
 
+  it('verifies a null-metric run without comparing against an invented zero', async () => {
+    // Two stored sessions cannot produce an equity curve, so the saved run
+    // records nulls. Verification must treat null === null as a match and must
+    // not report a difference against a fabricated 0.
+    const bars = buildsBars(2);
+    const run = await savedRun({ bars });
+    expect(run.metrics.totalReturnPct).toBeNull();
+    expect(run.metrics.annualisedVolatilityPct).toBeNull();
+    const verification = await verifyBacktestRun({ run, dataset: dataset(), bars });
+    expect(verification.status).toBe('match');
+    expect(verification.differences).toEqual([]);
+  });
+
   it('reports a missing dataset without running', async () => {
     const run = await savedRun();
     const verification = await verifyBacktestRun({ run, dataset: undefined, bars: undefined });

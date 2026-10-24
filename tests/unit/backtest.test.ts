@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { BacktestConfig, Bar, StrategyRule } from '../../src/domain/types';
 import { compare } from '../../src/lib/backtest/compare';
 import { runBacktest } from '../../src/lib/backtest/engine';
+import { RULE_FIELDS, describeStrategyRule, secondaryWindowValue } from '../../src/lib/backtest/rule-catalog';
 import { StrategyContext, requiredWarmup } from '../../src/lib/backtest/rules';
 import { addDays } from '../../src/lib/date';
 
@@ -204,7 +205,27 @@ describe('runBacktest execution', () => {
     expect(result.trades).toEqual([]);
     expect(result.equityCurve).toEqual([]);
     expect(result.metrics.tradeCount).toBe(0);
-    expect(result.metrics.totalReturnPct).toBe(0);
+    // A curve-dependent metric has no value here; 0 would claim a flat, measured
+    // result the engine never produced.
+    expect(result.metrics.totalReturnPct).toBeNull();
+    expect(result.metrics.annualisedVolatilityPct).toBeNull();
+    expect(result.metrics.maxDrawdownPct).toBeNull();
+    expect(result.metrics.exposurePct).toBeNull();
+    expect(result.metrics.benchmarkTotalReturnPct).toBeNull();
+  });
+
+  it('withholds volatility when a two-point curve yields only one return', () => {
+    // A one-session SMA needs one warm-up bar, so a three-bar window leaves two
+    // equity points and a single return. Total return is measurable; a sample
+    // deviation is not.
+    const bars = series([10, 11, 12], [10, 11, 12]);
+    const flat = rule('price-vs-sma', 'gt', -100, 1);
+    const result = runBacktest(bars, config([flat], [flat]));
+    expect(result.equityCurve).toHaveLength(2);
+    expect(result.metrics.totalReturnPct).not.toBeNull();
+    expect(result.metrics.annualisedVolatilityPct).toBeNull();
+    expect(result.metrics.sharpe).toBeNull();
+    expect(result.metrics.benchmarkTotalReturnPct).not.toBeNull();
   });
 
   it('includes exit slippage in costs so net PnL reconciles with gross PnL', () => {
@@ -256,6 +277,32 @@ describe('runBacktest execution', () => {
     const netPnl = result.trades.reduce((total, trade) => total + trade.netPnl, 0);
     const finalEquity = result.equityCurve[result.equityCurve.length - 1]?.equity;
     expect(finalEquity).toBeCloseTo(10_000 + netPnl, 8);
+  });
+});
+
+describe('rule catalogue secondary labels and defaults', () => {
+  it('labels the SMA cross second period as a slow window', () => {
+    const field = RULE_FIELDS.find((entry) => entry.value === 'sma-cross');
+    expect(field?.secondaryLabel).toBe('Slow SMA window');
+  });
+
+  it('labels the MACD second period as a signal window, not a slow window', () => {
+    const field = RULE_FIELDS.find((entry) => entry.value === 'macd-cross');
+    expect(field?.secondaryLabel).toBe('Signal window');
+    const rule: StrategyRule = { id: 'macd', field: 'macd-cross', operator: 'crosses-above', value: 0, window: 12 };
+    expect(secondaryWindowValue(rule)).toBe(9);
+    expect(describeStrategyRule(rule)).toContain('(12, 26, 9)');
+  });
+
+  it('uses twice the window as the default slow SMA period', () => {
+    const rule: StrategyRule = { id: 'sma', field: 'sma-cross', operator: 'crosses-above', value: 0, window: 20 };
+    expect(secondaryWindowValue(rule)).toBe(40);
+    expect(describeStrategyRule(rule)).toContain('40-session SMA');
+  });
+
+  it('returns no secondary period for a single-window rule', () => {
+    const rule: StrategyRule = { id: 'rsi', field: 'rsi', operator: 'gt', value: 60, window: 14 };
+    expect(secondaryWindowValue(rule)).toBeNull();
   });
 });
 

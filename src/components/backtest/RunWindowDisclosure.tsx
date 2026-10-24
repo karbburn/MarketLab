@@ -29,6 +29,16 @@ export function RunWindowDisclosure({
   const warnings = report.notes.filter((note) => note.tone === 'warn');
   const infos = report.notes.filter((note) => note.tone === 'info');
   const adjustment = provenance?.fields.find((field) => field.label === 'Adjustment')?.value ?? null;
+  // The heading names the actual reason. A warm-up that consumes the whole
+  // window is not a missing-data problem, so it must not be described as one.
+  const hasStoredRangeShortfall = warnings.some(
+    (note) => note.code === 'requested-start-shortfall' || note.code === 'requested-end-shortfall',
+  );
+  const heading = hasStoredRangeShortfall
+    ? 'Not all of the requested window is stored.'
+    : report.storedSessions === 0
+      ? 'No stored session falls inside the requested window.'
+      : 'The requested window cannot be evaluated.';
 
   return (
     <div aria-label="What this run simulated">
@@ -56,7 +66,7 @@ export function RunWindowDisclosure({
       ))}
       {warnings.length > 0 && (
         <div className="coverage-warning" role="status">
-          <strong>Not all of the requested window is stored.</strong>
+          <strong>{heading}</strong>
           <ul>
             {warnings.map((warning) => (
               <li key={warning.text}>{warning.text}</li>

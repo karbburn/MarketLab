@@ -114,8 +114,13 @@ function periodBucket(bar: Bar, timeframe: Timeframe): string | undefined {
   return bar.bucket ?? periodKeyForDate(bar.date, timeframe);
 }
 
-/** Copies bars at `timeframe`, tagging each with the period bucket it covers. */
-function atTimeframe(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
+/**
+ * Copies bars already stored at `timeframe`, tagging each with the period
+ * bucket it covers. Exported for comparison code that must align a native
+ * weekly/monthly series with an aggregated one by period rather than by the
+ * particular session each series happens to end on.
+ */
+export function tagBarsAtTimeframe(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
   return bars.map((bar) => {
     const bucket = periodBucket(bar, timeframe);
     return bucket === undefined ? { ...bar } : { ...bar, bucket };
@@ -129,11 +134,11 @@ function atTimeframe(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
  */
 export function barsForTimeframe(bars: readonly Bar[], dataset: Dataset, requested: Timeframe): Bar[] {
   const timeframe = resolveTimeframe(dataset, requested);
-  if (timeframeFrequency(timeframe) === dataset.frequency) return atTimeframe(bars, timeframe);
+  if (timeframeFrequency(timeframe) === dataset.frequency) return tagBarsAtTimeframe(bars, timeframe);
   // Only aggregation (daily -> weekly/monthly) is supported. Lower-frequency
   // data is never interpolated into higher-frequency bars.
   if (dataset.frequency === 'daily') return aggregateBars(bars, timeframe);
-  return atTimeframe(bars, timeframe);
+  return tagBarsAtTimeframe(bars, timeframe);
 }
 
 export function timeframeLabel(timeframe: Timeframe, source: Frequency): string {

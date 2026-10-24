@@ -10,7 +10,7 @@ import { indexInstrumentsById } from '../lib/backtest/run-datasets';
 import { describeRunWindow } from '../lib/backtest/run-window';
 import { buildProvenanceSummary } from '../lib/provenance/summary';
 import { coverageFromDataset } from '../lib/marketdata/coverage';
-import { RULE_FIELDS, RULE_OPERATORS as OPERATORS } from '../lib/backtest/rule-catalog';
+import { RULE_FIELDS, RULE_OPERATORS as OPERATORS, secondaryWindowValue } from '../lib/backtest/rule-catalog';
 import { createBacktestConfig } from '../state/defaults';
 import { createId } from '../lib/id';
 import { downloadTextFile } from '../lib/export/download';
@@ -431,16 +431,41 @@ export function BacktestPage() {
               </div>
             )}
             <div className="grid-4">
-              <Metric label="Total return" value={formatPercent(result.metrics.totalReturnPct)} tone={result.metrics.totalReturnPct >= 0 ? 'up' : 'down'} note={`Buy and hold ${formatPercent(result.metrics.benchmarkTotalReturnPct)}`} />
+              <Metric
+                label="Total return"
+                value={result.metrics.totalReturnPct === null ? '--' : formatPercent(result.metrics.totalReturnPct)}
+                tone={result.metrics.totalReturnPct === null ? undefined : result.metrics.totalReturnPct >= 0 ? 'up' : 'down'}
+                note={
+                  result.metrics.benchmarkTotalReturnPct === null
+                    ? 'Buy and hold unavailable'
+                    : `Buy and hold ${formatPercent(result.metrics.benchmarkTotalReturnPct)}`
+                }
+              />
               <Metric label="CAGR" value={result.metrics.cagrPct === null ? '--' : formatPercent(result.metrics.cagrPct)} />
-              <Metric label="Max drawdown" value={formatPercent(result.metrics.maxDrawdownPct)} tone="down" />
-              <Metric label="Volatility" value={formatPercent(result.metrics.annualisedVolatilityPct)} note="Annualised from the equity curve at the dataset frequency" />
+              <Metric
+                label="Max drawdown"
+                value={result.metrics.maxDrawdownPct === null ? '--' : formatPercent(result.metrics.maxDrawdownPct)}
+                tone={result.metrics.maxDrawdownPct === null ? undefined : 'down'}
+              />
+              <Metric
+                label="Volatility"
+                value={
+                  result.metrics.annualisedVolatilityPct === null
+                    ? '--'
+                    : formatPercent(result.metrics.annualisedVolatilityPct)
+                }
+                note="Annualised from the equity curve at the dataset frequency"
+              />
               <Metric label="Sharpe" value={result.metrics.sharpe === null ? '--' : result.metrics.sharpe.toFixed(2)} />
               <Metric label="Trades" value={String(result.metrics.tradeCount)} />
               <Metric label="Win rate" value={result.metrics.winRatePct === null ? '--' : formatPercent(result.metrics.winRatePct)} />
               <Metric label="Profit factor" value={result.metrics.profitFactor === null ? (result.metrics.tradeCount > 0 ? 'no losing trades' : '--') : result.metrics.profitFactor.toFixed(2)} />
               <Metric label="Average trade" value={result.metrics.averageTradePct === null ? '--' : formatPercent(result.metrics.averageTradePct)} />
-              <Metric label="Exposure" value={formatPercent(result.metrics.exposurePct)} note="Share of sessions holding a position" />
+              <Metric
+                label="Exposure"
+                value={result.metrics.exposurePct === null ? '--' : formatPercent(result.metrics.exposurePct)}
+                note="Share of sessions holding a position"
+              />
             </div>
           </Panel>
 
@@ -523,14 +548,21 @@ function RuleRow({
       <Field label="Window">
         <NumberInput value={rule.window} min={1} max={500} step={1} onChange={(value) => onChange((current) => ({ ...current, window: Number.isFinite(value) ? Math.max(1, Math.round(value)) : 14 }))} />
       </Field>
-      {meta?.needsSecondary ? (
-        <Field label="Slow window">
+      {meta?.needsSecondary && secondaryWindowValue(rule) !== null ? (
+        <Field label={meta.secondaryLabel ?? 'Second window'}>
           <NumberInput
-            value={rule.secondaryWindow ?? rule.window * 2}
+            value={secondaryWindowValue(rule) as number}
             min={1}
             max={500}
             step={1}
-            onChange={(value) => onChange((current) => ({ ...current, secondaryWindow: Number.isFinite(value) ? Math.max(1, Math.round(value)) : 50 }))}
+            onChange={(value) =>
+              onChange((current) => ({
+                ...current,
+                secondaryWindow: Number.isFinite(value)
+                  ? Math.max(1, Math.round(value))
+                  : secondaryWindowValue(current) ?? 9,
+              }))
+            }
           />
         </Field>
       ) : (

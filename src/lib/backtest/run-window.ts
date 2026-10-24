@@ -20,11 +20,29 @@ import { compareDates } from '../date';
 import { selectBacktestWindow } from './engine';
 import { requiredWarmup } from './rules';
 
-/** Severity for a rendered line; `warn` is reserved for a requested-range shortfall. */
+/**
+ * Severity for a rendered line. `warn` marks a reason the engine cannot
+ * evaluate the requested window; `info` only explains a shift that still
+ * produced an equity curve.
+ */
 export type RunWindowNoteTone = 'info' | 'warn';
+
+/**
+ * A stable reason code. The component chooses its heading from the code rather
+ * than from the prose, so a warm-up case can never be described as a
+ * missing-data case.
+ */
+export type RunWindowNoteCode =
+  | 'no-stored-sessions'
+  | 'requested-start-shortfall'
+  | 'requested-end-shortfall'
+  | 'too-few-sessions'
+  | 'warmup-consumed-window'
+  | 'warmup-shift';
 
 export interface RunWindowNote {
   tone: RunWindowNoteTone;
+  code: RunWindowNoteCode;
   text: string;
 }
 
@@ -57,8 +75,12 @@ export interface RunWindowReport {
 export function describeRunWindow(config: BacktestConfig, bars: readonly Bar[]): RunWindowReport {
   const windowBars = selectBacktestWindow(bars, config.startDate, config.endDate);
   const storedSessions = windowBars.length;
-  const warmup = storedSessions === 0 ? 0 : Math.max(requiredWarmup([...config.entry, ...config.exit]), 1);
-  const evaluatedSessions = Math.max(0, storedSessions - warmup);
+  // The engine refuses a window under three bars before it even asks about
+  // warm-up (`runBacktest` returns an empty result). Mirror that guard here or
+  // the disclosure promises an evaluated session that cannot exist.
+  const canSimulate = storedSessions >= 3;
+  const warmup = canSimulate ? Math.max(requiredWarmup([...config.entry, ...config.exit]), 1) : 0;
+  const evaluatedSessions = canSimulate ? Math.max(0, storedSessions - warmup) : 0;
   const effectiveStart = windowBars.length > 0 ? (windowBars[0] as Bar).date : null;
   const effectiveEnd = storedSessions > 0 ? (windowBars[storedSessions - 1] as Bar).date : null;
   const evaluatedStart = evaluatedSessions > 0 ? (windowBars[warmup] as Bar).date : null;
@@ -68,12 +90,14 @@ export function describeRunWindow(config: BacktestConfig, bars: readonly Bar[]):
   if (storedSessions === 0) {
     notes.push({
       tone: 'warn',
+      code: 'no-stored-sessions',
       text: 'No stored session falls inside the requested window, so nothing can be simulated.',
     });
   } else {
     if (config.startDate && effectiveStart && compareDates(config.startDate, effectiveStart) < 0) {
       notes.push({
         tone: 'warn',
+        code: 'requested-start-shortfall',
         text:
           `The requested start ${config.startDate} is earlier than the first stored session; ` +
           `this run begins at ${effectiveStart}. Sessions before it are not stored in this dataset.`,
@@ -82,19 +106,30 @@ export function describeRunWindow(config: BacktestConfig, bars: readonly Bar[]):
     if (config.endDate && effectiveEnd && compareDates(config.endDate, effectiveEnd) > 0) {
       notes.push({
         tone: 'warn',
+        code: 'requested-end-shortfall',
         text:
           `The requested end ${config.endDate} is later than the last stored session; ` +
           `this run ends at ${effectiveEnd}.`,
       });
     }
-    if (evaluatedSessions === 0) {
+    if (!canSimulate) {
       notes.push({
         tone: 'warn',
+        code: 'too-few-sessions',
+        text:
+          `At least three stored sessions are needed to produce an equity curve; ` +
+          `this window has ${storedSessions}, so no session is evaluated.`,
+      });
+    } else if (evaluatedSessions === 0) {
+      notes.push({
+        tone: 'warn',
+        code: 'warmup-consumed-window',
         text: `The indicator warm-up needs all ${storedSessions} stored sessions in this window, so no session is evaluated.`,
       });
     } else if (warmup > 0) {
       notes.push({
         tone: 'info',
+        code: 'warmup-shift',
         text:
           `The equity curve and metrics start ${warmup} sessions later, at ` +
           `${evaluatedStart ?? effectiveStart}, after the indicator warm-up.`,
