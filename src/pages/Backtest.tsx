@@ -5,6 +5,7 @@ import type { BacktestConfig, BacktestResult, BacktestRun, StrategyRule } from '
 import { useStore } from '../state/store';
 import { datasetViews } from '../state/selectors';
 import { BACKTEST_ASSUMPTIONS, runBacktest } from '../lib/backtest/engine';
+import { buildAttribution } from '../lib/backtest/attribution';
 import { planResearchRunLoad } from '../lib/backtest/research-runs';
 import { indexInstrumentsById } from '../lib/backtest/run-datasets';
 import { describeRunWindow } from '../lib/backtest/run-window';
@@ -75,6 +76,8 @@ export function BacktestPage() {
     if (!runRequest || bars.length < 3) return null;
     return runBacktest(bars, runRequest.config, frequency);
   }, [runRequest, bars, frequency]);
+
+  const attribution = useMemo(() => (result ? buildAttribution(result) : null), [result]);
 
   const requestRun = useCallback((config: BacktestConfig | null) => {
     if (!config) return;
@@ -498,6 +501,91 @@ export function BacktestPage() {
           <Panel title="Trades" subtitle="Fills are at the next session's open, then adjusted for slippage and commission" flush>
             <TradeTable trades={result.trades} />
           </Panel>
+
+          {attribution && (
+            <Panel title="Performance attribution" subtitle="Descriptive analysis of historical backtest results. These statistics do not predict future performance or establish causation.">
+              <div className="stack">
+                <div>
+                  <span className="field-label">Return concentration</span>
+                  {attribution.concentration.unavailableReason ? (
+                    <p className="field-hint">{attribution.concentration.unavailableReason}</p>
+                  ) : (
+                    <ul className="list-reset stack field-hint">
+                      <li>Top 1 trade: {attribution.concentration.top1SharePct?.toFixed(1) ?? '--'}% of net profit</li>
+                      <li>Top 3 trades: {attribution.concentration.top3SharePct?.toFixed(1) ?? '--'}%</li>
+                      <li>Top 5 trades: {attribution.concentration.top5SharePct?.toFixed(1) ?? '--'}%</li>
+                      <li>Top 10 trades: {attribution.concentration.top10SharePct?.toFixed(1) ?? '--'}%</li>
+                      <li>Total net profit: {attribution.concentration.totalNetPnl.toFixed(2)}</li>
+                    </ul>
+                  )}
+                </div>
+                <div>
+                  <span className="field-label">Holding periods (bars)</span>
+                  <p className="field-hint">
+                    Min {attribution.holdingPeriod.minBars ?? '--'} / Max {attribution.holdingPeriod.maxBars ?? '--'} / Mean{' '}
+                    {attribution.holdingPeriod.meanBars?.toFixed(1) ?? '--'} / Median{' '}
+                    {attribution.holdingPeriod.medianBars?.toFixed(1) ?? '--'}
+                  </p>
+                  <table className="data">
+                    <thead><tr><th>Bucket</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Net PnL</th><th>Win rate</th></tr></thead>
+                    <tbody>
+                      {attribution.holdingPeriod.byBucket.map((b) => (
+                        <tr key={b.label}>
+                          <td>{b.label}</td>
+                          <td>{b.tradeCount}</td>
+                          <td>{b.winCount}</td>
+                          <td>{b.lossCount}</td>
+                          <td>{b.netPnl.toFixed(2)}</td>
+                          <td>{b.winRatePct === null ? '--' : `${b.winRatePct.toFixed(1)}%`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <span className="field-label">Cost drag</span>
+                  <ul className="list-reset stack field-hint">
+                    <li>Total costs: {attribution.costDrag.totalCosts.toFixed(2)}</li>
+                    <li>Gross profit: {attribution.costDrag.grossProfit.toFixed(2)}</li>
+                    <li>Gross loss: {attribution.costDrag.grossLoss.toFixed(2)}</li>
+                    <li>Net profit: {attribution.costDrag.netPnl.toFixed(2)}</li>
+                    <li>Costs per trade: {attribution.costDrag.costsPerTrade?.toFixed(2) ?? '--'}</li>
+                    <li>Cost drag: {attribution.costDrag.costDragPct === null ? '--' : `${attribution.costDrag.costDragPct.toFixed(1)}% of gross profit`}</li>
+                  </ul>
+                </div>
+                <div>
+                  <span className="field-label">Drawdown episodes</span>
+                  {attribution.drawdownEpisodes.episodeCount === 0 ? (
+                    <p className="field-hint">No drawdown episodes recorded.</p>
+                  ) : (
+                    <>
+                      <p className="field-hint">
+                        Episodes: {attribution.drawdownEpisodes.episodeCount} / Max depth:{' '}
+                        {attribution.drawdownEpisodes.maxDepthPct?.toFixed(1) ?? '--'}% / Longest
+                        duration: {attribution.drawdownEpisodes.longestDurationBars ?? '--'} bars / Longest recovery:{' '}
+                        {attribution.drawdownEpisodes.longestRecoveryBars ?? '--'} bars
+                      </p>
+                      <table className="data">
+                        <thead><tr><th>#</th><th>Peak idx</th><th>Trough idx</th><th>Depth %</th><th>Duration (bars)</th><th>Recovery (bars)</th></tr></thead>
+                        <tbody>
+                          {attribution.drawdownEpisodes.episodes.map((e, i) => (
+                            <tr key={i}>
+                              <td>{i + 1}</td>
+                              <td>{e.startIndex}</td>
+                              <td>{e.troughIndex}</td>
+                              <td>{e.depthPct.toFixed(1)}</td>
+                              <td>{e.durationBars}</td>
+                              <td>{e.recoveryBars === null ? 'unrecovered' : e.recoveryBars}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Panel>
+          )}
         </>
       )}
 
