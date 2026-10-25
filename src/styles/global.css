@@ -248,7 +248,7 @@ button {
 
 .nav-item.active {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--text-primary);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
