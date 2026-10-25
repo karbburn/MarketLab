@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planDatasetDeletion } from '../../src/lib/workspace/dataset-cleanup';
+import { planDatasetDeletion, pruneWorkspacesToDatasets } from '../../src/lib/workspace/dataset-cleanup';
 import type {
   BacktestConfig,
   ChartConfig,
@@ -174,5 +174,52 @@ describe('planDatasetDeletion', () => {
     expect(result.removedWorkspaceIds).toEqual([]);
     expect(result.removedWatchlistIds).toEqual([]);
     expect(result.removedBacktestIds).toEqual([]);
+  });
+});
+
+describe('pruneWorkspacesToDatasets', () => {
+  const valid = new Set(['d2']);
+
+  it('drops panels and comparison overlays that resolve to no dataset', () => {
+    const mixed = workspace('ws-mixed', [
+      chart('c-dangling', 'd1'),
+      chart('c-valid', 'd2', ['d1', 'd3', 'd2', 'd2']),
+    ]);
+
+    const result = pruneWorkspacesToDatasets([mixed], valid);
+
+    expect(result.workspaces).toHaveLength(1);
+    expect(result.workspaces[0]?.charts).toHaveLength(1);
+    expect(result.workspaces[0]?.charts[0]?.id).toBe('c-valid');
+    expect(result.workspaces[0]?.charts[0]?.compareDatasetIds).toEqual([]);
+    expect(result.removed).toEqual([
+      { workspaceId: 'ws-mixed', removedChartIds: ['c-dangling'], workspaceRemoved: false },
+    ]);
+  });
+
+  it('drops a workspace whose every panel is dangling', () => {
+    const onlyDeleted = workspace('ws-only', [chart('c1', 'd1'), chart('c2', 'd9')]);
+
+    const result = pruneWorkspacesToDatasets([onlyDeleted], valid);
+
+    expect(result.workspaces).toEqual([]);
+    expect(result.removed).toEqual([
+      { workspaceId: 'ws-only', removedChartIds: ['c1', 'c2'], workspaceRemoved: true },
+    ]);
+  });
+
+  it('keeps an untouched workspace by identity', () => {
+    const untouched = workspace('ws1', [chart('c1', 'd2', ['d2'])]);
+
+    const result = pruneWorkspacesToDatasets([untouched], valid);
+
+    // A self-comparison is pruned, so this record does change; a genuinely
+    // clean record below must stay the same object.
+    expect(result.workspaces[0]?.charts[0]?.compareDatasetIds).toEqual([]);
+
+    const clean = workspace('ws2', [chart('c2', 'd2', [])]);
+    const second = pruneWorkspacesToDatasets([clean], valid);
+    expect(second.workspaces[0]).toBe(clean);
+    expect(second.removed).toEqual([]);
   });
 });

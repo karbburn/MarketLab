@@ -12,6 +12,8 @@ import type {
   Workspace,
 } from '../domain/types';
 import { createPersistence, type PersistenceAdapter, type PersistenceTransaction, type StoreName } from '../lib/persistence/db';
+import { persistResearchRun, persistResearchRunImport, persistResearchRunUpdate } from '../lib/persistence/research-run-writes';
+import { persistWorkspaceUpdate } from '../lib/persistence/workspace-writes';
 import { describeCleanup, removeSyntheticData } from '../lib/migration/remove-synthetic';
 import { APP_SCHEMA_VERSION, DEFAULT_PREFERENCES, createWatchlist, createWorkspace } from './defaults';
 import { createId } from '../lib/id';
@@ -21,8 +23,6 @@ import { resolveSortWindow } from '../lib/screener/fields';
 import { planDatasetDeletion } from '../lib/workspace/dataset-cleanup';
 import { describeDatasetBundleProblem } from '../lib/validation/dataset-bundle';
 import {
-  planResearchRunBatchImport,
-  planResearchRunSave,
   withResearchRunName,
   RESEARCH_RUN_SCHEMA_VERSION,
   type ResearchRunBatchEntry,
@@ -448,6 +448,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     applyThemeAttribute(state.preferences.theme);
   }, [state.preferences.theme]);
 
+  /** Removes a workspace that no longer exists in storage from this tab. */
+  const dropWorkspaceLocally = (workspaceId: string) => {
+    workspacesRef.current = workspacesRef.current.filter((workspace) => workspace.id !== workspaceId);
+    setState((previous) => {
+      const workspaces = previous.workspaces.filter((workspace) => workspace.id !== workspaceId);
+      return {
+        ...previous,
+        workspaces,
+        activeWorkspaceId:
+          previous.activeWorkspaceId === workspaceId ? workspaces[0]?.id ?? null : previous.activeWorkspaceId,
+      };
+    });
+  };
+
   const actions: StoreActions = {
     async importDataset(bundle, options) {
       if (!adapter) return;
@@ -608,14 +622,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workspacesRef.current = upsertById(workspacesRef.current, updated);
       setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
       try {
-        const saved = await enqueue(`workspace:${updated.id}`, async () => {
+        const outcome = await enqueue(`workspace:${updated.id}`, async () => {
           // Persist the current record, so a save queued behind an edit does not
           // write the stale snapshot it was called with.
           const current = workspacesRef.current.find((entry) => entry.id === updated.id);
-          if (!current) return true;
-          return persistWorkspaceIfNewer(adapter, current);
+          if (!current) return 'skipped' as const;
+          return persistWorkspaceUpdate(adapter, current);
         });
-        if (!saved) {
+        if (outcome === 'deleted') {
+          dropWorkspaceLocally(updated.id);
+          notify('warning', 'That workspace was deleted in another tab. It has been removed here.');
+          await refreshFromStorage();
+        } else if (outcome === 'conflict') {
           notify('warning', 'That workspace changed in another tab. Showing the saved version.');
           await refreshFromStorage();
         }
@@ -636,15 +654,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       workspacesRef.current = upsertById(workspacesRef.current, updated);
       setState((previous) => ({ ...previous, workspaces: upsertById(previous.workspaces, updated) }));
       try {
-        const saved = await enqueue(`workspace:${workspaceId}`, async () => {
+        const outcome = await enqueue(`workspace:${workspaceId}`, async () => {
           // Persist whatever the workspace holds when the write runs, so queued
           // edits compose instead of replacing each other with stale snapshots.
           // A delete queued behind this write wins: do not re-insert the record.
           const current = workspacesRef.current.find((workspace) => workspace.id === workspaceId);
-          if (!current) return true;
-          return persistWorkspaceIfNewer(adapter, current);
+          if (!current) return 'skipped' as const;
+          return persistWorkspaceUpdate(adapter, current);
         });
-        if (!saved) {
+        if (outcome === 'deleted') {
+          dropWorkspaceLocally(workspaceId);
+          notify('warning', 'That workspace was deleted in another tab. It has been removed here.');
+          await refreshFromStorage();
+        } else if (outcome === 'conflict') {
           // The other tab has a newer revision. Keep the optimistic view only
           // until the re-read lands, then show what is actually stored.
           notify('warning', 'That workspace changed in another tab. Showing the saved version.');
@@ -800,13 +822,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         notify('error', `The research run is invalid: ${parsed.error}`);
         return false;
       }
-      const decision = planResearchRunSave(stateRef.current.backtestRuns, parsed.value);
-      if (!decision.ok) {
-        notify('error', decision.message);
-        return false;
-      }
       try {
-        await adapter.put('researchRuns', parsed.value);
+        // The duplicate and cap checks run in the same transaction as the write
+        // against the stored library, not against this tab's render snapshot.
+        const decision = await persistResearchRun(adapter, parsed.value);
+        if (!decision.ok) {
+          notify('error', decision.message);
+          return false;
+        }
         setState((previous) => ({ ...previous, backtestRuns: upsertById(previous.backtestRuns, parsed.value) }));
         notify('success', `Saved research run "${parsed.value.name}".`);
         return true;
@@ -818,26 +841,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async importBacktestRuns(entries) {
       if (!adapter) return null;
-      // Planned against the library as it is at write time, not against a
-      // render that may be stale, so a reload or another tab cannot make the
-      // write overwrite an id or exceed the cap.
-      const report = planResearchRunBatchImport(stateRef.current.backtestRuns, entries);
-      if (report.accepted.length === 0) return report;
       try {
-        // One native transaction: either every accepted run is durable or none
-        // is. A mid-batch failure cannot leave a half-applied import.
-        await adapter.transaction(['researchRuns'], async (tx) => {
-          await tx.putMany('researchRuns', report.accepted);
-        });
+        // Planning and writing share one transaction, using the records stored
+        // at this moment, so another tab cannot make the import overwrite an id
+        // or exceed the cap between the check and the write.
+        const report = await persistResearchRunImport(adapter, entries);
+        if (report.accepted.length === 0) return report;
+        setState((previous) => ({
+          ...previous,
+          backtestRuns: upsertManyById(previous.backtestRuns, report.accepted),
+        }));
+        return report;
       } catch (error) {
         notify('error', `Could not import the research runs: ${errorMessage(error)} No run was written.`);
         return null;
       }
-      setState((previous) => ({
-        ...previous,
-        backtestRuns: [...previous.backtestRuns, ...report.accepted],
-      }));
-      return report;
     },
 
     async renameBacktestRun(runId, name) {
@@ -860,7 +878,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return false;
       }
       try {
-        await adapter.put('researchRuns', parsed.value);
+        // A rename may not create a run: the record has a separate create path,
+        // so a missing stored record means another tab deleted it while this
+        // tab was editing. Refuse, remove it here and re-read.
+        const outcome = await persistResearchRunUpdate(adapter, parsed.value);
+        if (outcome === 'deleted') {
+          setState((previous) => ({
+            ...previous,
+            backtestRuns: previous.backtestRuns.filter((entry) => entry.id !== runId),
+          }));
+          notify('warning', 'That research run was deleted in another tab, so the rename was not saved.');
+          await refreshFromStorage();
+          return false;
+        }
         setState((previous) => ({ ...previous, backtestRuns: upsertById(previous.backtestRuns, parsed.value) }));
         notify('success', `Renamed research run to "${parsed.value.name}".`);
         return true;
@@ -1008,11 +1038,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       notify(
         'success',
-        mode === 'replace'
-          ? 'Backup restored (replaced local data).'
-          : merged.duplicateDatasets > 0
-            ? `Backup merged. ${merged.duplicateDatasets} already-stored series were not duplicated.`
-            : 'Backup merged into local data.',
+        `${
+          mode === 'replace'
+            ? 'Backup restored (replaced local data).'
+            : merged.duplicateDatasets > 0
+              ? `Backup merged. ${merged.duplicateDatasets} already-stored series were not duplicated.`
+              : 'Backup merged into local data.'
+        }${describePrunedRestore(merged)}`,
       );
     },
 
@@ -1105,6 +1137,13 @@ function upsertById<T extends { id: string }>(list: readonly T[], value: T): T[]
   return next;
 }
 
+/** Applies a batch of records once each, so a repeated id cannot duplicate state. */
+function upsertManyById<T extends { id: string }>(list: readonly T[], values: readonly T[]): T[] {
+  let next = [...list];
+  for (const value of values) next = upsertById(next, value);
+  return next;
+}
+
 /** Drops the bars of the removed datasets and keeps every other series. */
 function keepBars(barsByDataset: Record<string, Bar[]>, removedDatasetIds: readonly string[]): Record<string, Bar[]> {
   const removed = new Set(removedDatasetIds);
@@ -1123,21 +1162,33 @@ function installedAt(settings: readonly SettingsRecord[]): string {
   return value ?? new Date().toISOString();
 }
 
-/**
- * Writes a workspace only when its timestamp is at least as new as the stored
- * revision. Returns false when another tab already committed a newer edit.
- */
-async function persistWorkspaceIfNewer(adapter: PersistenceAdapter, workspace: Workspace): Promise<boolean> {
-  return adapter.transaction(['workspaces'], async (tx) => {
-    const stored = await tx.get<Workspace>('workspaces', workspace.id);
-    if (stored && stored.updatedAt > workspace.updatedAt) return false;
-    await tx.put('workspaces', workspace);
-    return true;
-  });
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'the local store rejected the write';
+}
+
+/** States what a restore could not write, instead of silently shrinking it. */
+function describePrunedRestore(result: {
+  prunedWorkspaceIds: readonly string[];
+  prunedPanelIds: readonly string[];
+}): string {
+  const parts: string[] = [];
+  const workspaces = result.prunedWorkspaceIds.length;
+  if (workspaces > 0) {
+    parts.push(
+      workspaces === 1
+        ? '1 workspace could not be restored because its dataset was missing.'
+        : `${workspaces} workspaces could not be restored because their datasets were missing.`,
+    );
+  }
+  const panels = result.prunedPanelIds.length;
+  if (panels > 0) {
+    parts.push(
+      panels === 1
+        ? '1 panel was removed because its dataset was missing.'
+        : `${panels} panels were removed because their datasets were missing.`,
+    );
+  }
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
 }
 
 /**

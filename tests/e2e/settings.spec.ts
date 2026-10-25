@@ -1,3 +1,4 @@
+import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { seedLibrary } from './fixtures/library';
 
@@ -59,6 +60,56 @@ test.describe('workspaces and settings', () => {
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
     await expect(page.locator('table.data tbody tr')).toHaveCount(2);
     await expect(page.locator('table.data tbody tr').filter({ hasText: 'Workspace 2' })).toHaveCount(1);
+  });
+
+  test('reports a workspace whose dataset cannot be restored instead of writing it', async ({ page }) => {
+    await seedLibrary(page);
+    await page.goto('/#/workspaces');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export backup' }).click();
+    const download = await downloadPromise;
+    const file = test.info().outputPath('damaged-backup.json');
+    await download.saveAs(file);
+
+    // Damage the exported file: keep one dataset and the workspace that uses
+    // it, but change the recorded hash so the bars no longer verify.
+    const bundle = JSON.parse(await readFile(file, 'utf8')) as {
+      instruments: Array<{ id: string }>;
+      datasets: Array<{ id: string; instrumentId: string; contentHash: string }>;
+      bars: Array<{ id: string }>;
+      workspaces: Array<{ charts: Array<{ datasetId: string }> }>;
+      watchlists: unknown[];
+      screeners: unknown[];
+      backtests: unknown[];
+    };
+    const workspace = bundle.workspaces[0]!;
+    const datasetId = workspace.charts[0]!.datasetId;
+    const dataset = bundle.datasets.find((entry) => entry.id === datasetId)!;
+    dataset.contentHash = 'fnv1a-00000000';
+    bundle.datasets = [dataset];
+    bundle.bars = bundle.bars.filter((entry) => entry.id === datasetId);
+    bundle.workspaces = [workspace];
+    bundle.instruments = bundle.instruments.filter((entry) => entry.id === dataset.instrumentId);
+    bundle.watchlists = [];
+    bundle.screeners = [];
+    bundle.backtests = [];
+    await writeFile(file, JSON.stringify(bundle), 'utf8');
+
+    await page.getByRole('button', { name: 'Delete all local data', exact: true }).click();
+    await page.getByRole('button', { name: 'Yes, delete all local data' }).click();
+    await expect(page.locator('table.data tbody tr')).toHaveCount(0);
+
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await expect(page.getByText('Confirm restore')).toBeVisible();
+    await page.getByRole('button', { name: 'Apply restore' }).click();
+
+    // The dataset failed validation, so neither it nor the workspace that
+    // referenced it may be written; the result says so rather than shrinking.
+    await expect(page.locator('.toast-body').last()).toContainText(
+      '1 workspace could not be restored because its dataset was missing.',
+    );
+    await expect(page.locator('table.data tbody tr')).toHaveCount(0);
   });
 
   test('rejects a file that is not a MarketLab backup', async ({ page }) => {

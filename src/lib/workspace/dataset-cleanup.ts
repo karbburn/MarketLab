@@ -115,3 +115,69 @@ export function planDatasetDeletion(input: DatasetDeletionInput): DatasetDeletio
     removedBacktestIds,
   };
 }
+
+export interface PrunedWorkspaceReference {
+  workspaceId: string;
+  removedChartIds: string[];
+  /** True when every panel was pruned, so the workspace itself is gone. */
+  workspaceRemoved: boolean;
+}
+
+export interface WorkspaceDatasetPruneResult {
+  workspaces: Workspace[];
+  removed: PrunedWorkspaceReference[];
+}
+
+/**
+ * Drops panels and comparison overlays whose dataset does not exist.
+ *
+ * Restore is the one path that can receive references and datasets from
+ * different sources: a backup's dataset may be rejected (bad bars, missing
+ * instrument, content-hash mismatch) while its workspace still names it. The
+ * same rules as dataset deletion apply: a panel with no dataset cannot render,
+ * and a workspace with no panels is removed. The result also reports what was
+ * dropped so a pre-restore summary can say so instead of silently shrinking the
+ * restored library.
+ */
+export function pruneWorkspacesToDatasets(
+  workspaces: readonly Workspace[],
+  validDatasetIds: ReadonlySet<string>,
+): WorkspaceDatasetPruneResult {
+  const removed: PrunedWorkspaceReference[] = [];
+  const kept: Workspace[] = [];
+
+  for (const workspace of workspaces) {
+    const removedChartIds: string[] = [];
+    const charts: Workspace['charts'] = [];
+    let changed = false;
+
+    for (const chart of workspace.charts) {
+      if (!validDatasetIds.has(chart.datasetId)) {
+        removedChartIds.push(chart.id);
+        changed = true;
+        continue;
+      }
+      const current = chart.compareDatasetIds ?? [];
+      const compareDatasetIds = current.filter(
+        (id, index) => validDatasetIds.has(id) && id !== chart.datasetId && current.indexOf(id) === index,
+      );
+      if (compareDatasetIds.length !== current.length) {
+        changed = true;
+        charts.push({ ...chart, compareDatasetIds });
+      } else {
+        charts.push(chart);
+      }
+    }
+
+    if (charts.length === 0) {
+      removed.push({ workspaceId: workspace.id, removedChartIds, workspaceRemoved: true });
+      continue;
+    }
+    if (removedChartIds.length > 0) {
+      removed.push({ workspaceId: workspace.id, removedChartIds, workspaceRemoved: false });
+    }
+    kept.push(changed ? { ...workspace, charts } : workspace);
+  }
+
+  return { workspaces: kept, removed };
+}

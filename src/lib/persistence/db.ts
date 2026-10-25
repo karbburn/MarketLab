@@ -179,6 +179,15 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open(DB_NAME, DB_VERSION);
+    // A blocked open may still complete after the caller has fallen back to
+    // memory. A late success must close its connection: this tab will not use
+    // it, and leaving it open would block the next schema upgrade elsewhere.
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     open.onupgradeneeded = () => {
       const db = open.result;
       for (const store of STORE_NAMES) {
@@ -187,6 +196,11 @@ function openDatabase(): Promise<IDBDatabase> {
     };
     open.onsuccess = () => {
       const db = open.result;
+      if (settled) {
+        db.close();
+        return;
+      }
+      settled = true;
       // Another tab is upgrading the schema. Keeping this connection open would
       // block it; close and reload so this tab reads the new version instead of
       // continuing on a stale snapshot.
@@ -196,13 +210,13 @@ function openDatabase(): Promise<IDBDatabase> {
       };
       resolve(db);
     };
-    open.onerror = () => reject(open.error ?? new Error('Could not open IndexedDB'));
+    open.onerror = () => fail(open.error ?? new Error('Could not open IndexedDB'));
     // A pending schema upgrade held by another tab can otherwise leave this
     // promise unsettled forever, freezing the loading gate with no message.
     // Rejecting falls back to the in-memory adapter, whose banner says that
     // changes will not persist instead of hanging silently.
     open.onblocked = () =>
-      reject(new Error('The local database upgrade is blocked by another tab. Close it and reload.'));
+      fail(new Error('The local database upgrade is blocked by another tab. Close it and reload.'));
   });
 }
 

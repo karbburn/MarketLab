@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { createMemoryAdapter } from '../../src/lib/persistence/db';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createMemoryAdapter, createPersistence } from '../../src/lib/persistence/db';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 interface Record {
   id: string;
@@ -68,5 +72,30 @@ describe('memory persistence transactions', () => {
 
     expect((await adapter.list<Record>('datasets')).map((entry) => entry.id).sort()).toEqual(['old-a', 'old-b']);
     expect(await adapter.list<Record>('bars')).toEqual([{ id: 'old-a', value: 10 }]);
+  });
+});
+
+describe('IndexedDB open fallback', () => {
+  it('closes a connection that arrives after a blocked open already fell back', async () => {
+    const close = vi.fn();
+    const request = {
+      result: { close, onversionchange: null },
+      error: null,
+      onsuccess: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      onblocked: null as (() => void) | null,
+      onupgradeneeded: null as (() => void) | null,
+    };
+    vi.stubGlobal('indexedDB', { open: () => request });
+
+    const creating = createPersistence();
+    request.onblocked?.();
+    const adapter = await creating;
+    expect(adapter.kind).toBe('memory');
+
+    // The upgrade unblocks later. The request must not leave a connection
+    // behind that this tab never uses and that can block the next upgrade.
+    request.onsuccess?.();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
