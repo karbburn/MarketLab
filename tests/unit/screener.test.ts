@@ -107,6 +107,68 @@ describe('computeField', () => {
     expect(computeField('close', 1, [])).toEqual({ current: null, previous: null });
     expect(computeField('close', 1, barsFromCloses([10]))).toEqual({ current: null, previous: null });
   });
+
+  it('reads the previous value from the same series it computed for the current value', () => {
+    const series = barsFromCloses(Array.from({ length: 24 }, (_, index) => 100 + (index % 5) * 3 - index));
+    for (const field of ['return', 'price-vs-sma', 'price-vs-ema', 'rsi', 'volatility', 'max-drawdown', 'relative-volume'] as const) {
+      const full = computeField(field, 5, series);
+      const earlier = computeField(field, 5, series.slice(0, -1));
+      expect(full.previous, field).toBe(earlier.current);
+    }
+  });
+
+  it('computes relative volume against the volume SMA and nulls it without volume', () => {
+    // Volumes 1000..1004; the window-2 baseline at the last bar is (1002+1003)/2.
+    const reading = computeField('relative-volume', 2, barsFromCloses([10, 11, 12, 13, 14]));
+    expect(reading.current as number).toBeCloseTo(1004 / ((1003 + 1004) / 2), 10);
+    const noVolume = barsFromCloses([10, 11, 12]).map((bar) => ({ ...bar, volume: null }));
+    expect(computeField('relative-volume', 2, noVolume).current).toBeNull();
+  });
+});
+
+describe('evaluateScreener cutoff', () => {
+  it('evaluates only sessions up to the cutoff without mutating the stored bars', () => {
+    const bars = barsFromCloses([10, 20, 30, 40]);
+    const input: ScreenerInput = {
+      dataset: dataset('ds', 'inst'),
+      instrument: instrument('inst', 'CUT'),
+      bars,
+    };
+    const result = evaluateScreener(
+      definition({
+        cutoff: '2024-01-02',
+        filters: [filter({ id: 'c', field: 'close', operator: 'gt', value: 15 })],
+      }),
+      [input],
+    );
+    expect(result.rows[0]?.asOf).toBe('2024-01-02');
+    expect(result.rows[0]?.values.close).toBe(20);
+    expect(result.rows[0]?.passed).toBe(true);
+    // The input remains the complete stored series.
+    expect(input.bars.map((bar) => bar.close)).toEqual([10, 20, 30, 40]);
+  });
+
+  it('uses one reading when a filter and the sort field share a field and window', () => {
+    const inputs: ScreenerInput[] = [
+      { dataset: dataset('ds-a', 'inst-a'), instrument: instrument('inst-a', 'AAA'), bars: barsFromCloses(Array.from({ length: 20 }, (_, i) => 10 + i)) },
+      { dataset: dataset('ds-b', 'inst-b'), instrument: instrument('inst-b', 'BBB'), bars: barsFromCloses(Array.from({ length: 20 }, (_, i) => 40 - i)) },
+    ];
+    const shared = definition({
+      filters: [filter({ id: 'r', field: 'return', operator: 'gt', value: -1000, window: 5 })],
+      sortBy: 'return',
+      sortWindow: 5,
+      sortDirection: 'desc',
+    });
+    const result = evaluateScreener(shared, inputs);
+    // AAA rises over five sessions, BBB falls.
+    expect(result.rows.map((row) => row.symbol)).toEqual(['AAA', 'BBB']);
+    for (const input of inputs) {
+      const row = result.rows.find((entry) => entry.symbol === input.instrument.symbol);
+      const expected = computeField('return', 5, input.bars).current;
+      expect(row?.values.return).toBe(expected);
+      expect(row?.sortValue).toBe(expected);
+    }
+  });
 });
 
 describe('evaluateScreener combinators', () => {

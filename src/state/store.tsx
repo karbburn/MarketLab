@@ -161,21 +161,66 @@ interface LoadedSnapshot {
   backtestRuns: BacktestRun[];
 }
 
+export interface LoadStateOptions {
+  /**
+   * Bars already in memory. A cross-tab refresh passes them so a dataset whose
+   * stored metadata is unchanged does not have its whole series transferred and
+   * deserialised again. Used only when the stored dataset record proves the
+   * content is the same version (it is rewritten in the same transaction as the
+   * bars it describes).
+   */
+  barsCache?: {
+    datasets: readonly Dataset[];
+    barsByDataset: Readonly<Record<string, readonly Bar[]>>;
+  };
+}
+
+/** True when two dataset records describe exactly the same stored series. */
+function sameDatasetVersion(a: Dataset, b: Dataset): boolean {
+  return (
+    a.contentHash === b.contentHash &&
+    a.rowCount === b.rowCount &&
+    a.firstDate === b.firstDate &&
+    a.lastDate === b.lastDate &&
+    a.importedAt === b.importedAt
+  );
+}
+
 /**
  * Reads one consistent snapshot and applies the same clean-up/migration rules
  * on first load and after a cross-tab change. The read is a single read-only
  * transaction so another tab cannot commit between stores and produce a mix.
  * Exported so the migration's atomicity can be tested with a stub adapter.
  */
-export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
-  const { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings } =
+export async function loadState(
+  adapter: PersistenceAdapter,
+  options: LoadStateOptions = {},
+): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
+  try {
+    return await readSnapshot(adapter, options);
+  } catch (error) {
+    // A reused-bars read issues a second round of requests inside one native
+    // transaction; if a browser closes that transaction early, fall back to the
+    // plain full read rather than reporting a failed refresh.
+    if (!options.barsCache) throw error;
+    return readSnapshot(adapter, {});
+  }
+}
+
+async function readSnapshot(
+  adapter: PersistenceAdapter,
+  options: LoadStateOptions,
+): Promise<{ snapshot: LoadedSnapshot; notice: string | null }> {
+  const cachedDatasets = options.barsCache
+    ? new Map(options.barsCache.datasets.map((dataset) => [dataset.id, dataset]))
+    : null;
+  const { instruments, datasets, barRecords, reusableBars, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings } =
     await adapter.transaction(
       LOAD_STORES,
       async (tx) => {
-        const [instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings] = await Promise.all([
+        const [instruments, datasets, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings] = await Promise.all([
           tx.list<Instrument>('instruments'),
           tx.list<Dataset>('datasets'),
-          tx.list<BarsRecord>('bars'),
           tx.list<Workspace>('workspaces'),
           tx.list<Watchlist>('watchlists'),
           tx.list<ScreenerDefinition>('screeners'),
@@ -185,13 +230,23 @@ export async function loadState(adapter: PersistenceAdapter): Promise<{ snapshot
           tx.list<PreferencesRecord>('preferences'),
           tx.list<SettingsRecord>('settings'),
         ]);
-        return { instruments, datasets, barRecords, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings };
+        const reusableBars = new Map<string, Bar[]>();
+        const toRead: Dataset[] = [];
+        for (const dataset of datasets) {
+          const previous = cachedDatasets?.get(dataset.id);
+          const cached = options.barsCache?.barsByDataset[dataset.id];
+          if (previous && cached && sameDatasetVersion(previous, dataset)) reusableBars.set(dataset.id, cached as Bar[]);
+          else toRead.push(dataset);
+        }
+        const barRecords = await Promise.all(toRead.map((dataset) => tx.get<BarsRecord>('bars', dataset.id)));
+        return { instruments, datasets, barRecords, reusableBars, workspaces, watchlists, screeners, backtests, chartTemplates, backtestRuns, preferencesRecords, settings };
       },
       { mode: 'readonly', notify: false },
     );
 
   const barsByDataset: Record<string, Bar[]> = {};
-  for (const record of barRecords) barsByDataset[record.id] = record.bars;
+  for (const [datasetId, bars] of reusableBars) barsByDataset[datasetId] = bars;
+  for (const record of barRecords) if (record) barsByDataset[record.id] = record.bars;
 
   let preferences = preferencesRecords[0] ? stripPreferenceId(preferencesRecords[0]) : DEFAULT_PREFERENCES;
 
@@ -412,7 +467,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!adapter) return;
     await Promise.allSettled([...writeQueues.current.values()]);
     try {
-      const { snapshot } = await loadState(adapter);
+      const latest = stateRef.current;
+      const { snapshot } = await loadState(adapter, {
+        barsCache: { datasets: latest.datasets, barsByDataset: latest.barsByDataset },
+      });
       setState((previous) => ({
         ...previous,
         ...snapshot,

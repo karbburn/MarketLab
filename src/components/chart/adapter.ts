@@ -24,6 +24,7 @@ import {
 import type { Bar, ChartType, PriceScaleMode } from '../../domain/types';
 import type { CorporateActionMarkerSpec } from '../../lib/corporate-actions';
 import type { ComparisonLineSpec, ComparisonLineStyle } from '../../lib/chart/compare-overlays';
+import { createBarDateIndex } from '../../lib/chart/bar-date-index';
 
 export interface IndicatorOutputSpec {
   key: string;
@@ -96,6 +97,7 @@ export class ChartController {
   private corporateActionMarkers: ISeriesMarkersPluginApi<Time> | null = null;
   private readonly indicatorSeries = new Map<string, ISeriesApi<SeriesType>[]>();
   private bars: readonly Bar[] = [];
+  private barDateIndex: ReadonlyMap<string, number> = new Map();
   private readonly crosshairHandlers = new Set<(reading: CrosshairReading) => void>();
   private readonly viewportHandlers = new Set<() => void>();
   private readonly resizeObserver: ResizeObserver | null;
@@ -149,7 +151,7 @@ export class ChartController {
       const converted = this.priceSeries.coordinateToPrice(param.point.y);
       price = converted === null ? null : Number(converted);
     }
-    const index = date ? this.bars.findIndex((bar) => bar.date === date) : -1;
+    const index = date ? (this.barDateIndex.get(date) ?? -1) : -1;
     const reading: CrosshairReading = { date, price, index: index >= 0 ? index : null };
     for (const handler of this.crosshairHandlers) handler(reading);
   }
@@ -202,7 +204,10 @@ export class ChartController {
   /** Rebuilds every series from the supplied render input. */
   render(input: ChartRenderInput): void {
     this.clearIndicators();
-    this.bars = input.bars;
+    if (input.bars !== this.bars) {
+      this.bars = input.bars;
+      this.barDateIndex = createBarDateIndex(input.bars);
+    }
     const upColor = cssVar('--up', '#35c48d');
     const downColor = cssVar('--down', '#e2586a');
     const accent = cssVar('--accent', '#3fb8a3');

@@ -70,14 +70,6 @@ function drawdownAt(bars: readonly Bar[], endIndex: number, window: number): num
   return maxDrawdownPct(slice);
 }
 
-function relativeVolumeAt(bars: readonly Bar[], endIndex: number, window: number): number | null {
-  const series = volumeSma(bars, window);
-  const volume = bars[endIndex]?.volume;
-  const baseline = series[endIndex];
-  if (volume == null || baseline == null || baseline <= 0) return null;
-  return volume / baseline;
-}
-
 /**
  * Computes a screener field at the last bar and at the previous bar. Fields are
  * always derived from the bars in the window; nothing is extrapolated beyond the
@@ -91,27 +83,54 @@ export function computeField(
 ): FieldReading {
   const last = bars.length - 1;
   if (last < 1) return { current: null, previous: null };
+
+  if (field === 'close') {
+    const readClose = (endIndex: number) => bars[endIndex]?.close ?? null;
+    return { current: readClose(last), previous: readClose(last - 1) };
+  }
+
   const closeValues = closes(bars);
-  const at = (endIndex: number): number | null => {
-    if (endIndex < 0) return null;
-    switch (field) {
-      case 'close':
-        return closeValues[endIndex] ?? null;
-      case 'return':
-        return pctChange(closeValues, endIndex, window);
-      case 'price-vs-sma':
-        return distancePct(closeValues, sma(closeValues, window), endIndex);
-      case 'price-vs-ema':
-        return distancePct(closeValues, ema(closeValues, window), endIndex);
-      case 'rsi':
-        return rsi(closeValues, window)[endIndex] ?? null;
-      case 'volatility':
-        return volatilityAt(bars, endIndex, window, frequency);
-      case 'max-drawdown':
-        return drawdownAt(bars, endIndex, window);
-      case 'relative-volume':
-        return relativeVolumeAt(bars, endIndex, window);
+  // Each level series is computed once and read at two indices. Recomputing it
+  // inside the per-index reader doubled the whole-series work for every field.
+  const read = buildReader(field, window, closeValues, bars, frequency);
+  return { current: read(last), previous: read(last - 1) };
+}
+
+function buildReader(
+  field: Exclude<ScreenerField, 'close'>,
+  window: number,
+  closeValues: readonly number[],
+  bars: readonly Bar[],
+  frequency: Frequency,
+): (endIndex: number) => number | null {
+  switch (field) {
+    case 'return':
+      return (endIndex) => (endIndex < 0 ? null : pctChange(closeValues, endIndex, window));
+    case 'price-vs-sma': {
+      const level = sma(closeValues, window);
+      return (endIndex) => (endIndex < 0 ? null : distancePct(closeValues, level, endIndex));
     }
-  };
-  return { current: at(last), previous: at(last - 1) };
+    case 'price-vs-ema': {
+      const level = ema(closeValues, window);
+      return (endIndex) => (endIndex < 0 ? null : distancePct(closeValues, level, endIndex));
+    }
+    case 'rsi': {
+      const series = rsi(closeValues, window);
+      return (endIndex) => (endIndex < 0 ? null : series[endIndex] ?? null);
+    }
+    case 'relative-volume': {
+      const series = volumeSma(bars, window);
+      return (endIndex) => {
+        if (endIndex < 0) return null;
+        const volume = bars[endIndex]?.volume;
+        const baseline = series[endIndex];
+        if (volume == null || baseline == null || baseline <= 0) return null;
+        return volume / baseline;
+      };
+    }
+    case 'volatility':
+      return (endIndex) => (endIndex < 0 ? null : volatilityAt(bars, endIndex, window, frequency));
+    case 'max-drawdown':
+      return (endIndex) => (endIndex < 0 ? null : drawdownAt(bars, endIndex, window));
+  }
 }

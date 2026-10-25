@@ -29,8 +29,8 @@ export interface ScreenerRunResult {
   evaluatedCount: number;
 }
 
-function truncate(bars: readonly Bar[], cutoff: string | null): Bar[] {
-  if (!cutoff) return [...bars];
+function truncate(bars: readonly Bar[], cutoff: string | null): readonly Bar[] {
+  if (!cutoff) return bars;
   return bars.filter((bar) => compareDates(bar.date, cutoff) <= 0);
 }
 
@@ -50,9 +50,21 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
     const asOf = bars.length ? (bars[bars.length - 1] as Bar).date : null;
     const values: Partial<Record<ScreenerField, number | null>> = {};
     const filterResults: boolean[] = [];
+    // Filter and sort fields are persisted separately and may name the same
+    // field with the same window; read each distinct field/window once.
+    const readings = new Map<string, ReturnType<typeof computeField>>();
+    const read = (field: ScreenerField, window: number) => {
+      const key = `${field}:${window}`;
+      let reading = readings.get(key);
+      if (!reading) {
+        reading = computeField(field, window, bars, input.dataset.frequency);
+        readings.set(key, reading);
+      }
+      return reading;
+    };
 
     for (const filter of definition.filters) {
-      const reading = computeField(filter.field, filter.window, bars, input.dataset.frequency);
+      const reading = read(filter.field, filter.window);
       values[filter.field] = reading.current;
       filterResults.push(compare(filter.operator, reading.current, reading.previous, filter.value));
     }
@@ -62,9 +74,7 @@ export function evaluateScreener(definition: ScreenerDefinition, inputs: readonl
     // persisted sort window controls ordering; filter windows never leak into it.
     const sortField = definition.sortBy === 'symbol' ? null : (definition.sortBy as ScreenerField);
     const sortWindow = sortField ? resolveSortWindow(sortField, definition.sortWindow) : 0;
-    const sortValue = sortField
-      ? computeField(sortField, sortWindow, bars, input.dataset.frequency).current
-      : null;
+    const sortValue = sortField ? read(sortField, sortWindow).current : null;
     // Keep the historical row shape: a sort-only field is also exposed in
     // `values`, but ordering always uses `sortValue` so a same-field filter's
     // window cannot leak into it.
