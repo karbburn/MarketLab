@@ -30,43 +30,61 @@ export function timeframeFrequency(timeframe: Timeframe): Frequency {
 export function aggregateBars(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
   if (timeframe === '1D') return bars.map((bar) => ({ ...bar }));
 
-  const buckets = new Map<string, Bar[]>();
   // Sort defensively: bucket open/close and the emitted order must not depend on
-  // the caller's input order.
-  const ordered = [...bars].sort((a, b) => compareDates(a.date, b.date));
+  // the caller's input order. Stored bars are already ascending, so the common
+  // path only pays for one linear scan instead of sorting a copy.
+  const ordered = isDateOrdered(bars) ? bars : [...bars].sort((a, b) => compareDates(a.date, b.date));
+
+  // Bucket keys are monotonic for ascending dates, so the aggregation can stream
+  // instead of retaining an array of member bars per bucket.
+  const result: Bar[] = [];
+  let bucketKey: string | undefined;
+  let bucket: Bar | null = null;
+  let volume = 0;
+  let volumeComplete = true;
+
+  const flush = () => {
+    if (bucket) result.push({ ...bucket, volume: volumeComplete ? volume : null });
+    bucket = null;
+    volume = 0;
+    volumeComplete = true;
+  };
+
   for (const bar of ordered) {
     const key = timeframe === '1W' ? weekKey(bar.date) : monthKey(bar.date);
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(bar);
-    else buckets.set(key, [bar]);
-  }
-
-  const result: Bar[] = [];
-  for (const [key, bucket] of buckets.entries()) {
-    if (bucket.length === 0) continue;
-    const first = bucket[0] as Bar;
-    const last = bucket[bucket.length - 1] as Bar;
-    let high = first.high;
-    let low = first.low;
-    let volume = 0;
-    let volumeComplete = first.volume !== null;
-    for (const bar of bucket) {
-      if (bar.high > high) high = bar.high;
-      if (bar.low < low) low = bar.low;
-      if (bar.volume === null) volumeComplete = false;
-      else volume += bar.volume;
+    if (key !== bucketKey) {
+      flush();
+      bucketKey = key;
+      bucket = {
+        date: bar.date,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
+        bucket: key,
+      };
+      volume = bar.volume ?? 0;
+      volumeComplete = bar.volume !== null;
+      continue;
     }
-    result.push({
-      date: last.date,
-      open: first.open,
-      high,
-      low,
-      close: last.close,
-      volume: volumeComplete ? volume : null,
-      bucket: key,
-    });
+    const current = bucket as Bar;
+    current.date = bar.date;
+    current.close = bar.close;
+    if (bar.high > current.high) current.high = bar.high;
+    if (bar.low < current.low) current.low = bar.low;
+    if (bar.volume === null) volumeComplete = false;
+    else volume += bar.volume;
   }
+  flush();
   return result;
+}
+
+function isDateOrdered(bars: readonly Bar[]): boolean {
+  for (let index = 1; index < bars.length; index += 1) {
+    if (compareDates((bars[index - 1] as Bar).date, (bars[index] as Bar).date) > 0) return false;
+  }
+  return true;
 }
 
 /** Returns the next-higher timeframe available for a source frequency. */
@@ -115,12 +133,26 @@ function periodBucket(bar: Bar, timeframe: Timeframe): string | undefined {
 }
 
 /**
- * Copies bars already stored at `timeframe`, tagging each with the period
- * bucket it covers. Exported for comparison code that must align a native
- * weekly/monthly series with an aggregated one by period rather than by the
- * particular session each series happens to end on.
+ * Tags bars already stored at `timeframe` with the period bucket they cover.
+ * Returns the input array unchanged when every bar already carries the correct
+ * bucket (the common case for stored series). Exported for comparison code that
+ * must align a native weekly/monthly series with an aggregated one by period
+ * rather than by the particular session each series happens to end on.
  */
-export function tagBarsAtTimeframe(bars: readonly Bar[], timeframe: Timeframe): Bar[] {
+export function tagBarsAtTimeframe(bars: readonly Bar[], timeframe: Timeframe): readonly Bar[] {
+  // Bars already at a native frequency usually carry no bucket at all, so the
+  // rewrite would allocate a full copy of the series to change nothing. Stored
+  // bars are treated as immutable by every reader, so the original array is
+  // returned when it is already correct.
+  let needsRewrite = false;
+  for (const bar of bars) {
+    if (bar.bucket !== periodBucket(bar, timeframe)) {
+      needsRewrite = true;
+      break;
+    }
+  }
+  if (!needsRewrite) return bars;
+
   return bars.map((bar) => {
     const bucket = periodBucket(bar, timeframe);
     return bucket === undefined ? { ...bar } : { ...bar, bucket };
@@ -132,7 +164,11 @@ export function tagBarsAtTimeframe(bars: readonly Bar[], timeframe: Timeframe): 
  * against the dataset's own frequency. Bars are tagged with the period bucket
  * of the returned timeframe so comparisons can align on periods.
  */
-export function barsForTimeframe(bars: readonly Bar[], dataset: Dataset, requested: Timeframe): Bar[] {
+export function barsForTimeframe(
+  bars: readonly Bar[],
+  dataset: Dataset,
+  requested: Timeframe,
+): readonly Bar[] {
   const timeframe = resolveTimeframe(dataset, requested);
   if (timeframeFrequency(timeframe) === dataset.frequency) return tagBarsAtTimeframe(bars, timeframe);
   // Only aggregation (daily -> weekly/monthly) is supported. Lower-frequency

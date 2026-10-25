@@ -11,7 +11,9 @@ export function instrumentIndex(instruments: readonly Instrument[]): Map<string,
   return new Map(instruments.map((instrument) => [instrument.id, instrument]));
 }
 
-export function datasetViews(state: AppState): DatasetView[] {
+export function datasetViews(
+  state: Pick<AppState, 'instruments' | 'datasets' | 'barsByDataset'>,
+): DatasetView[] {
   const instruments = instrumentIndex(state.instruments);
   return state.datasets.map((dataset) => ({
     dataset,

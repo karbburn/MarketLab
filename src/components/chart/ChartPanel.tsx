@@ -114,6 +114,7 @@ export function ChartPanel({
   mirroredCrosshairDate?: string | null;
 }) {
   const { state, actions } = useStore();
+  const { instruments, datasets, barsByDataset } = state;
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -213,7 +214,10 @@ export function ChartPanel({
     [rendered, mirroredCrosshairDate, resolvedTimeframe],
   );
 
-  const allViews = useMemo(() => datasetViews(state), [state]);
+  const allViews = useMemo(
+    () => datasetViews({ instruments, datasets, barsByDataset }),
+    [instruments, datasets, barsByDataset],
+  );
 
   // Comparison ids are stored as dataset references. Any id that no longer
   // resolves (or points at the panel's own dataset) is ignored here; the store
