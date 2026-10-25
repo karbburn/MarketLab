@@ -332,6 +332,80 @@ describe('mergeBackup', () => {
     expect(result.workspaces[0]?.charts[0]?.datasetId).toBe('d1');
     expect(result.barsByDataset.d1).toHaveLength(2);
   });
+
+  it('does not merge a workspace whose dataset is absent from both sides', () => {
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i1', 'AAA')],
+      datasets: [dataset('d1', 'i1', 'hash-1')],
+      bars: [{ id: 'd1', bars }],
+      workspaces: [workspace('ws1', 'd2', 'i1')],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(emptyBase, bundle);
+    expect(result.datasets.map((entry) => entry.id)).toEqual(['d1']);
+    expect(result.workspaces).toEqual([]);
+    expect(result.prunedWorkspaceIds).toEqual(['ws1']);
+  });
+
+  it('keeps a workspace whose dataset already exists locally in merge mode', () => {
+    const base = {
+      ...emptyBase,
+      instruments: [instrument('i2', 'BBB')],
+      datasets: [dataset('d2', 'i2', 'hash-2')],
+      barsByDataset: { d2: bars },
+    };
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [],
+      datasets: [],
+      bars: [],
+      workspaces: [workspace('ws2', 'd2', 'i2')],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(base, bundle);
+    expect(result.workspaces).toHaveLength(1);
+    expect(result.prunedWorkspaceIds).toEqual([]);
+  });
+
+  it('reports panels removed from a workspace that still has a valid panel', () => {
+    const mixed = workspace('ws1', 'd1', 'i1');
+    mixed.charts = [
+      ...mixed.charts,
+      { ...mixed.charts[0]!, id: 'ws1-chart-2', datasetId: 'd-missing' },
+    ];
+    const bundle: BackupBundle = {
+      app: 'marketlab',
+      schemaVersion: 1,
+      exportedAt: '2024-02-01T00:00:00.000Z',
+      instruments: [instrument('i1', 'AAA')],
+      datasets: [dataset('d1', 'i1', 'hash-1')],
+      bars: [{ id: 'd1', bars }],
+      workspaces: [mixed],
+      watchlists: [],
+      preferences: null,
+      screeners: [],
+      backtests: [],
+    };
+
+    const result = mergeBackup(emptyBase, bundle);
+    expect(result.workspaces).toHaveLength(1);
+    expect(result.workspaces[0]?.charts.map((chart) => chart.id)).toEqual(['ws1-chart']);
+    expect(result.prunedWorkspaceIds).toEqual([]);
+    expect(result.prunedPanelIds).toEqual(['ws1-chart-2']);
+  });
 });
 
 describe('parseBackup validation', () => {
@@ -386,6 +460,25 @@ describe('parseBackup validation', () => {
     expect(result.value.datasets).toEqual([]);
     expect(result.value.bars).toEqual([]);
     expect(result.skipped).toContain('datasets:d1 (content hash mismatch)');
+  });
+
+  it('drops a workspace panel that points at a dataset it could not restore', () => {
+    const parsed = parseBackup(
+      backupInput({
+        datasets: [dataset('d1', 'i1', 'fnv1a-00000000')],
+        workspaces: [workspace('ws1', 'd1', 'i1')],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Parsing keeps the workspace: in merge mode its dataset may exist locally.
+    // The restore boundary resolves the reference against the merged library.
+    expect(parsed.value.workspaces).toHaveLength(1);
+    expect(parsed.skipped).toContain('datasets:d1 (content hash mismatch)');
+
+    const merged = mergeBackup(emptyBase, parsed.value);
+    expect(merged.workspaces).toEqual([]);
+    expect(merged.prunedWorkspaceIds).toEqual(['ws1']);
   });
 
   it('refuses bars edited after export even when the recorded hash is unchanged', () => {

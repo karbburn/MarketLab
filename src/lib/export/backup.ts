@@ -23,6 +23,7 @@ import {
 } from '../workspace/schema';
 import { resolveSortWindow } from '../screener/fields';
 import { barSeriesContentHash, validateBarEntries } from '../validation/dataset';
+import { pruneWorkspacesToDatasets } from '../workspace/dataset-cleanup';
 
 export const BACKUP_SCHEMA_VERSION = 1;
 
@@ -269,6 +270,10 @@ export interface MergeResult {
   duplicateDatasets: number;
   /** Panels re-pointed at the already-stored equivalent of a skipped dataset. */
   remappedPanels: number;
+  /** Workspaces dropped because a surviving panel would reference no dataset. */
+  prunedWorkspaceIds: string[];
+  /** Panels dropped from surviving workspaces because their dataset is absent. */
+  prunedPanelIds: string[];
 }
 
 export function mergeById<T extends { id: string }>(base: readonly T[], incoming: readonly T[]): T[] {
@@ -360,7 +365,7 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
   }
 
   let remappedPanels = 0;
-  const acceptedWorkspaces = bundle.workspaces.map((workspace) => ({
+  const remappedWorkspaces = bundle.workspaces.map((workspace) => ({
     ...workspace,
     charts: workspace.charts.map((chart) => {
       const replacement = datasetRemap.get(chart.datasetId);
@@ -386,6 +391,15 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
       };
     }),
   }));
+  // After duplicate-series remapping, prune references that resolve to no
+  // dataset at all. This is the persistence boundary: a caller that did not
+  // parse the file first still cannot write an unrenderable workspace.
+  const pruned = pruneWorkspacesToDatasets(remappedWorkspaces, new Set(resolved.keys()));
+  const acceptedWorkspaces = pruned.workspaces;
+  const prunedWorkspaceIds = pruned.removed.filter((entry) => entry.workspaceRemoved).map((entry) => entry.workspaceId);
+  const prunedPanelIds = pruned.removed
+    .filter((entry) => !entry.workspaceRemoved)
+    .flatMap((entry) => entry.removedChartIds);
   overwritten += acceptedWorkspaces.filter((workspace) => baseIds.workspaces.has(workspace.id)).length;
 
   const acceptedWatchlists = bundle.watchlists.map((watchlist) => ({
@@ -449,6 +463,8 @@ export function mergeBackup(base: LocalEntities, bundle: BackupBundle): MergeRes
     overwritten,
     duplicateDatasets,
     remappedPanels,
+    prunedWorkspaceIds,
+    prunedPanelIds,
   };
 }
 
