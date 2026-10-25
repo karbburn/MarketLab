@@ -159,7 +159,7 @@ session and content hash — with per-series inspection, export and deletion.
   button's native action; recently opened datasets are remembered, and focus returns to the
   control that opened the palette. It reads the store's in-memory state only, so
   results always match the current library.
-- **How it works** - an in-app guide at `/#/learn` that states the conventions behind every
+- **How it works** - an in-app guide at `/learn` that states the conventions behind every
   number: what a stored bar is, total return and CAGR, risk measures, comparison alignment and
   correlation, screen cutoffs, backtest execution and the cases where MarketLab withholds a
   result. It includes a metric reference with formulas you can copy, a CAGR calculator, a
@@ -385,7 +385,7 @@ set of design tokens, with dark and light themes.
   Exports and backups exist so a durable copy is always a click away.
 - **Hash routing.** Routes are served from the fragment, so the production build is a directory
   of static files that needs no server rewrite rules. Every screen has a stable address (for
-  example `/#/chart`, `/#/learn` and `/#/data`). The Vercel deployment adds the download proxy
+  example `/chart`, `/learn` and `/data`). The Vercel deployment adds the download proxy
   under `/api/market-data`; a purely static host still runs every other feature.
 
 ## Testing

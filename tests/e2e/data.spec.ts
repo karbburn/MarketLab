@@ -33,7 +33,7 @@ test.describe('data library', () => {
   });
 
   test('imports a CSV file and shows the imported series', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
 
     const dialog = await openImportDialog(page);
@@ -62,7 +62,7 @@ test.describe('data library', () => {
   });
 
   test('rejects rows that break the OHLC invariants and explains why', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     const dialog = await openImportDialog(page);
     await dialog.locator('input[type="file"]').setInputFiles({
       name: 'mixed.csv',
@@ -79,7 +79,7 @@ test.describe('data library', () => {
   });
 
   test('refuses a file where no row is usable', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     const dialog = await openImportDialog(page);
     await dialog.locator('input[type="file"]').setInputFiles({
       name: 'broken.csv',
@@ -93,7 +93,7 @@ test.describe('data library', () => {
   });
 
   test('exports a stored dataset as CSV', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
 
     const downloadPromise = page.waitForEvent('download');
     await page.locator('table.data tbody tr').first().getByRole('button', { name: 'Export' }).click();
@@ -105,7 +105,7 @@ test.describe('data library', () => {
   });
 
   test('deletes a dataset and reports the new count', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     await expect(page.locator('.shell-nav')).toContainText('6 datasets loaded');
 
     const row = page.locator('table.data tbody tr').first();
@@ -128,7 +128,7 @@ test.describe('provider coverage in inspection', () => {
 
   test('shows the requested range beside the returned one and flags the shortfall', async ({ page }) => {
     await seedLibrary(page, buildPartialCoverageLibrary());
-    await page.goto('/#/data?dataset=ds_aapl');
+    await page.goto('/data?dataset=ds_aapl');
 
     const inspection = page.locator('.panel').filter({ hasText: 'Inspection - AAPL' }).first();
     await expect(inspection).toBeVisible();
@@ -147,7 +147,7 @@ test.describe('provider coverage in inspection', () => {
   test('does not claim coverage for a dataset stored before the range was recorded', async ({ page }) => {
     // The default fixture is an imported CSV with no provider metadata at all,
     // so the inspection must not invent a requested range for it.
-    await page.goto('/#/data?dataset=ds_aapl');
+    await page.goto('/data?dataset=ds_aapl');
     const inspection = page.locator('.panel').filter({ hasText: 'Inspection - AAPL' }).first();
     await expect(inspection).toContainText('Accepted rows');
     await expect(inspection).not.toContainText('Requested range');

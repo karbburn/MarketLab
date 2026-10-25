@@ -20,7 +20,7 @@ describe('documentation and configuration claims', () => {
   });
 
   it('lists the field guide among the agent routes', () => {
-    expect(read('public/llms.txt')).toContain('/#/learn');
+    expect(read('public/llms.txt')).toContain('/learn');
   });
 
   it('keeps bundled-sample wording out of the agent catalog queries', () => {
@@ -38,7 +38,7 @@ describe('documentation and configuration claims', () => {
   it('documents the shipped command palette and field guide', () => {
     const readme = read('README.md');
     expect(readme).toContain('Command palette');
-    expect(readme).toContain('/#/learn');
+    expect(readme).toContain('/learn');
     expect(readme).not.toContain('A global command palette (Ctrl/Cmd-K) for datasets');
   });
 

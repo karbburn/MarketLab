@@ -5,7 +5,7 @@ import { seedLibrary } from './fixtures/library';
 test.describe('workspaces and settings', () => {
   test('creates and deletes a workspace', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
 
     const rows = page.locator('table.data tbody tr');
     await expect(rows).toHaveCount(1);
@@ -21,7 +21,7 @@ test.describe('workspaces and settings', () => {
   });
 
   test('keeps preferences after a reload', async ({ page }) => {
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
 
     await page.getByLabel('Default timeframe').selectOption('1W');
     await expect(page.getByLabel('Default timeframe')).toHaveValue('1W');
@@ -32,7 +32,7 @@ test.describe('workspaces and settings', () => {
 
   test('exports a backup, deletes local data and restores it without duplicating series', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
     await page.getByRole('button', { name: 'New single-panel workspace' }).click();
     await expect(page.locator('table.data tbody tr')).toHaveCount(2);
 
@@ -64,7 +64,7 @@ test.describe('workspaces and settings', () => {
 
   test('reports a workspace whose dataset cannot be restored instead of writing it', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
 
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export backup' }).click();
@@ -113,7 +113,7 @@ test.describe('workspaces and settings', () => {
   });
 
   test('rejects a file that is not a MarketLab backup', async ({ page }) => {
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
 
     await page.locator('input[type="file"]').setInputFiles({
       name: 'not-a-backup.json',

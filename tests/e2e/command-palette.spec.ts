@@ -109,7 +109,7 @@ test.describe('global command palette', () => {
 
   test('opens a stored dataset in the chart workspace without duplicating a panel', async ({ page }) => {
     await seedLibrary(page);
-    await gotoReady(page, '/#/data');
+    await gotoReady(page, '/data');
 
     await page.keyboard.press('Control+k');
     await search(page).fill('msft');
@@ -177,7 +177,7 @@ test.describe('global command palette', () => {
 
   test('never offers a dataset that was deleted', async ({ page }) => {
     await seedLibrary(page);
-    await gotoReady(page, '/#/data');
+    await gotoReady(page, '/data');
 
     const row = page.locator('table.data tbody tr').first();
     await expect(row).toContainText('AAPL');
@@ -207,7 +207,7 @@ test.describe('global command palette', () => {
 
   test('keeps the palette shortcut working inside a form field', async ({ page }) => {
     await seedLibrary(page);
-    await gotoReady(page, '/#/chart');
+    await gotoReady(page, '/chart');
 
     await page.getByRole('button', { name: 'Rename', exact: true }).click();
     const nameField = page.getByRole('textbox', { name: 'Workspace name' });
@@ -227,7 +227,7 @@ test.describe('global command palette', () => {
 
   test('leaves drawing shortcuts and their tool state untouched', async ({ page }) => {
     await seedLibrary(page);
-    await gotoReady(page, '/#/chart');
+    await gotoReady(page, '/chart');
 
     const trend = page.getByRole('button', { name: 'Trend line' });
     const pointer = page.getByRole('button', { name: 'Pointer and selection' });

@@ -12,7 +12,7 @@ import { readStore, seedLegacyLibrary } from './fixtures/library';
 
 test.describe('first run and removal of the bundled demo series', () => {
   test('a fresh profile contains no demo series and no invented prices', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
 
     await expect(page.locator('.shell-nav')).toContainText('0 datasets loaded');
     await expect(page.getByText('ATX')).toHaveCount(0);
@@ -63,7 +63,7 @@ test.describe('first run and removal of the bundled demo series', () => {
     expect(backtests).toEqual([]);
 
     // The chart workspace has no panel left to render, and says so.
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(0);
   });
@@ -71,7 +71,7 @@ test.describe('first run and removal of the bundled demo series', () => {
   test('does not recreate the demo series after a reload', async ({ page }) => {
     await seedLegacyLibrary(page);
     await page.reload();
-    await page.goto('/#/data');
+    await page.goto('/data');
 
     await expect(page.locator('.shell-nav')).toContainText('1 dataset loaded');
     await expect(page.getByText('ATX')).toHaveCount(0);
@@ -82,12 +82,12 @@ test.describe('first run and removal of the bundled demo series', () => {
 
   test('guides the user on every screen that needs data', async ({ page }) => {
     const screens: Array<{ route: string; heading: string }> = [
-      { route: '/#/', heading: 'Welcome to MarketLab' },
-      { route: '/#/chart', heading: 'Nothing to chart yet' },
-      { route: '/#/quant', heading: 'No market data to analyse' },
-      { route: '/#/screener', heading: 'No market data to screen' },
-      { route: '/#/backtest', heading: 'No market data to simulate' },
-      { route: '/#/data', heading: 'No datasets stored' },
+      { route: '/', heading: 'Welcome to MarketLab' },
+      { route: '/chart', heading: 'Nothing to chart yet' },
+      { route: '/quant', heading: 'No market data to analyse' },
+      { route: '/screener', heading: 'No market data to screen' },
+      { route: '/backtest', heading: 'No market data to simulate' },
+      { route: '/data', heading: 'No datasets stored' },
     ];
 
     for (const screen of screens) {
@@ -100,7 +100,7 @@ test.describe('first run and removal of the bundled demo series', () => {
   });
 
   test('explains how to start the local service when it is not running', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
 
     const panel = page.locator('.panel').filter({ hasText: 'No datasets stored' }).first();
     await expect(panel).toContainText('127.0.0.1:8787');

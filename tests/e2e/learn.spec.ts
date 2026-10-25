@@ -18,7 +18,7 @@ test.describe('learning page', () => {
   });
 
   test('uses the contents rail to move to a section', async ({ page }) => {
-    await page.goto('/#/learn');
+    await page.goto('/learn');
 
     await page.locator('.learn-rail').getByRole('link', { name: 'Backtests', exact: true }).click();
 
@@ -31,7 +31,7 @@ test.describe('learning page', () => {
   });
 
   test('deep-links to a late section and marks it current while the scroll settles', async ({ page }) => {
-    await page.goto('/#/learn?section=route');
+    await page.goto('/learn?section=route');
 
     const heading = page.getByRole('heading', { level: 2, name: 'A route through the app' });
     await expect(heading).toBeFocused();
@@ -48,7 +48,7 @@ test.describe('learning page', () => {
   });
 
   test('clears a deep-linked highlight when returning to the guide root', async ({ page }) => {
-    await page.goto('/#/learn?section=rule-check');
+    await page.goto('/learn?section=rule-check');
     await expect(
       page.locator('.learn-rail').getByRole('link', { name: 'Check the rule', exact: true }),
     ).toHaveAttribute('aria-current', 'location');
@@ -65,7 +65,7 @@ test.describe('learning page', () => {
 
   test('puts the contents rail first in DOM order and above the content on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto('/#/learn');
+    await page.goto('/learn');
 
     await expect(page.getByRole('navigation', { name: 'On this page' })).toBeVisible();
 
@@ -85,7 +85,7 @@ test.describe('learning page', () => {
   });
 
   test('calculates CAGR from user inputs and withholds a short span', async ({ page }) => {
-    await page.goto('/#/learn?section=returns');
+    await page.goto('/learn?section=returns');
 
     const calc = page.locator('.learn-calc');
     await calc.getByLabel('Start value').fill('100');
@@ -102,7 +102,7 @@ test.describe('learning page', () => {
   });
 
   test('explores a metric formula and its withheld cases', async ({ page }) => {
-    await page.goto('/#/learn?section=reference');
+    await page.goto('/learn?section=reference');
     const explorer = page.locator('.learn-explorer');
 
     await explorer.getByRole('button', { name: 'Risk', exact: true }).click();
@@ -125,7 +125,7 @@ test.describe('learning page', () => {
         },
       });
     });
-    await page.goto('/#/learn?section=reference');
+    await page.goto('/learn?section=reference');
     const explorer = page.locator('.learn-explorer');
 
     await explorer.getByRole('button', { name: 'Copy formula for Total return' }).click();
@@ -139,7 +139,7 @@ test.describe('learning page', () => {
   });
 
   test('moves the screener cutoff through the warm-up boundary', async ({ page }) => {
-    await page.goto('/#/learn?section=screening');
+    await page.goto('/learn?section=screening');
     const drill = page.locator('#screening .learn-drill');
     const slider = drill.getByLabel('Cutoff session');
 
@@ -161,7 +161,7 @@ test.describe('learning page', () => {
   });
 
   test('tests whether two saved runs are comparable', async ({ page }) => {
-    await page.goto('/#/learn?section=comparison');
+    await page.goto('/learn?section=comparison');
     const drill = page.locator('.learn-compare-drill');
 
     await expect(drill).toContainText('0 of 6 differences');
@@ -205,7 +205,7 @@ test.describe('learning page', () => {
 
   test('keeps the saved-run comparison drill inside a narrow viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
-    await page.goto('/#/learn?section=comparison');
+    await page.goto('/learn?section=comparison');
     const drill = page.locator('.learn-compare-drill');
 
     await drill.getByRole('button', { name: 'Different engine version' }).click();
@@ -223,7 +223,7 @@ test.describe('learning page', () => {
   });
 
   test('checks a rule and moves to the next case', async ({ page }) => {
-    await page.goto('/#/learn?section=rule-check');
+    await page.goto('/learn?section=rule-check');
     const check = page.locator('.learn-check');
 
     await expect(check).toContainText('Case 1 of 4');
@@ -240,7 +240,7 @@ test.describe('learning page', () => {
   });
 
   test('locks the rule-check options after the first answer', async ({ page }) => {
-    await page.goto('/#/learn?section=rule-check');
+    await page.goto('/learn?section=rule-check');
     const check = page.locator('.learn-check');
 
     await check.getByRole('button', { name: '20.00%', exact: true }).click();
@@ -260,7 +260,7 @@ test.describe('learning page', () => {
   });
 
   test('restarts the rule check with focus on the first prompt', async ({ page }) => {
-    await page.goto('/#/learn?section=rule-check');
+    await page.goto('/learn?section=rule-check');
     const check = page.locator('.learn-check');
     const answers = [
       'About 44%',
@@ -286,7 +286,7 @@ test.describe('learning page', () => {
   });
 
   test('walks through the backtest execution order', async ({ page }) => {
-    await page.goto('/#/learn?section=execution');
+    await page.goto('/learn?section=execution');
     const execution = page.locator('.learn-execution');
 
     await execution.getByRole('button', { name: 'Stop and target', exact: true }).click();
@@ -301,7 +301,7 @@ test.describe('learning page', () => {
 
   test('links from the Quant lab to the risk method', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/quant');
+    await page.goto('/quant');
 
     await page.getByRole('link', { name: 'Read the full method, including when a metric is withheld' }).click();
 
