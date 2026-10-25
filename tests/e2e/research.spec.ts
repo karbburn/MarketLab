@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('quant lab', () => {
   test('reports risk metrics computed from the stored sessions', async ({ page }) => {
-    await page.goto('/#/quant');
+    await page.goto('/quant');
 
     const primary = page.locator('.panel').filter({ hasText: 'Risk and return' }).first();
     await expect(primary).toBeVisible();
@@ -29,7 +29,7 @@ test.describe('quant lab', () => {
   });
 
   test('builds a correlation matrix from the selected series', async ({ page }) => {
-    await page.goto('/#/quant');
+    await page.goto('/quant');
     await page.getByRole('button', { name: 'Select all' }).click();
 
     const matrix = page.locator('.panel').filter({ hasText: 'Correlation matrix' }).first();
@@ -42,7 +42,7 @@ test.describe('quant lab', () => {
 
 test.describe('historical screener', () => {
   test('creates a screen with a default filter and returns matching instruments', async ({ page }) => {
-    await page.goto('/#/screener');
+    await page.goto('/screener');
 
     // The saved-screen picker is named for assistive technology, not labelled
     // only by its first option.
@@ -66,7 +66,7 @@ test.describe('historical screener', () => {
   });
 
   test('opens a screened instrument in the chart workspace', async ({ page }) => {
-    await page.goto('/#/screener');
+    await page.goto('/screener');
     await page.getByRole('button', { name: 'Start a new screen' }).click();
 
     const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
@@ -83,7 +83,7 @@ test.describe('historical screener', () => {
   });
 
   test('edits and deletes a saved screen', async ({ page }) => {
-    await page.goto('/#/screener');
+    await page.goto('/screener');
     await page.getByRole('button', { name: 'Start a new screen' }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.locator('option', { hasText: 'Untitled screen' })).toBeAttached();
@@ -105,7 +105,7 @@ test.describe('historical screener', () => {
 
 test.describe('rule-based backtest', () => {
   test('simulates the default strategy and states its execution assumptions', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
 
     await expect(page.getByRole('combobox', { name: 'Saved strategies' })).toBeVisible();
 
@@ -136,7 +136,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('names the simulated window with dates and flags a shortfall', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
@@ -171,7 +171,7 @@ test.describe('rule-based backtest', () => {
     // invisible: the requested window and the simulated window would both look
     // like the stored series.
     await seedLibrary(page, buildPartialCoverageLibrary());
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const results = page.locator('.panel').filter({ hasText: 'Results' }).first();
@@ -189,7 +189,7 @@ test.describe('rule-based backtest', () => {
     // The run shares the library used by the partial-coverage test, so the
     // inspection surfaces both the provider identity and the honest coverage.
     await seedLibrary(page, buildPartialCoverageLibrary());
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -204,7 +204,7 @@ test.describe('rule-based backtest', () => {
   test('marks source provenance as not recorded in runs on imported CSVs', async ({ page }) => {
     // The default seeded library is imported CSV data: a run must not claim a
     // provider it never had, so it says the source was not recorded instead.
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -215,7 +215,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('explains recomputed results and distinguishes a loaded saved run', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const reading = page.locator('.panel').filter({ hasText: 'Reading these results' }).first();
@@ -244,7 +244,7 @@ test.describe('rule-based backtest', () => {
 
   test('keeps the remove control on the rule row at desktop width', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
     await page.getByRole('button', { name: 'Add entry rule' }).click();
 
@@ -265,7 +265,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('exports the trade list as CSV', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const downloadPromise = page.waitForEvent('download');
@@ -276,7 +276,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('saves a research run, verifies it and keeps it after a reload', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -304,7 +304,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('exports a research manifest and refuses to overwrite it on re-import', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -332,7 +332,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('loads a saved research run into the strategy editor', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     // Make the run distinguishable from the default strategy.
@@ -362,7 +362,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('pairs a run with a re-imported content-identical series', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -434,7 +434,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('compares two saved research runs without changing either record', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const runsPanel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();
@@ -510,7 +510,7 @@ test.describe('rule-based backtest', () => {
   });
 
   test('filters the run library and renames a snapshot without changing its results', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await page.getByRole('button', { name: 'Start a new strategy' }).click();
 
     const panel = page.locator('.panel').filter({ hasText: 'Research runs' }).first();

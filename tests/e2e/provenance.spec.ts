@@ -9,7 +9,7 @@ import {
 test.describe('chart data provenance', () => {
   test('shows clean provider provenance and deep-links to the inspection panel', async ({ page }) => {
     await seedLibrary(page, buildCorporateActionLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toBeVisible();
@@ -55,7 +55,7 @@ test.describe('chart data provenance', () => {
 
   test('warns with real validation counts and the weekday-gap limitation', async ({ page }) => {
     await seedLibrary(page, buildIssueLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toHaveText('Data: 6 issues');
@@ -77,7 +77,7 @@ test.describe('chart data provenance', () => {
 
   test('labels a CSV import honestly and does not invent adjustment metadata', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toHaveText('Data: clean');
@@ -92,7 +92,7 @@ test.describe('chart data provenance', () => {
 
   test('opens the requested dataset directly from the data URL', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/data?dataset=ds_msft');
+    await page.goto('/data?dataset=ds_msft');
 
     const inspection = page.locator('.panel').filter({ hasText: 'Inspection - MSFT' }).first();
     await expect(inspection).toBeVisible();
@@ -106,7 +106,7 @@ test.describe('chart data provenance', () => {
 
   test('warns instead of pretending a missing deep-linked dataset exists', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/data?dataset=ds_missing');
+    await page.goto('/data?dataset=ds_missing');
 
     await expect(page.getByText('Dataset "ds_missing" is not stored in this browser.')).toBeVisible();
     await expect(page.locator('.panel').filter({ hasText: 'Inspection -' })).toHaveCount(0);
@@ -114,7 +114,7 @@ test.describe('chart data provenance', () => {
 
   test('surfaces a download shortfall on the chart and opens and closes by keyboard and pointer', async ({ page }) => {
     await seedLibrary(page, buildPartialCoverageLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toBeVisible();
@@ -158,7 +158,7 @@ test.describe('chart data provenance', () => {
 
   test('renders the disclosure in light theme without changing the words', async ({ page }) => {
     await seedLibrary(page, buildIssueLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -181,7 +181,7 @@ test.describe('chart data provenance', () => {
   test('keeps the chip and dialog inside a narrow viewport', async ({ page }) => {
     await seedLibrary(page, buildPartialCoverageLibrary());
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toBeVisible();

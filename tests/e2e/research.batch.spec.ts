@@ -40,7 +40,7 @@ function runRow(page: Page, name: string): Locator {
 
 test.describe('research-run batch export and import', () => {
   test('exports several runs as one file and restores them without changing the snapshots', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await saveRunNamed(page, 'Alpha run', '250000');
     await saveRunNamed(page, 'Beta run', '300000');
 
@@ -130,7 +130,7 @@ test.describe('research-run batch export and import', () => {
   });
 
   test('imports the sound runs from a mixed batch and reports the rest', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await saveRunNamed(page, 'Keep me', '150000');
 
     const panel = runsPanel(page);
@@ -192,7 +192,7 @@ test.describe('research-run batch export and import', () => {
   });
 
   test('rejects a batch from a newer build without writing anything', async ({ page }) => {
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await saveRunNamed(page, 'Untouched', '120000');
 
     const panel = runsPanel(page);
@@ -221,7 +221,7 @@ test.describe('research-run batch export and import', () => {
 
   test('keeps the batch controls usable at 390 px in both themes', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/#/backtest');
+    await page.goto('/backtest');
     await saveRunNamed(page, 'Narrow run', '100000');
 
     const panel = runsPanel(page);

@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('keyboard reference', () => {
   test('opens with ? and from the topbar, and stays out of form controls', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     await page.keyboard.press('Shift+/');
@@ -43,7 +43,7 @@ test.describe('keyboard reference', () => {
 
 test.describe('chart keyboard efficiency', () => {
   test('switches timeframe and fits content on the focused panel', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const stage = page.getByRole('group', { name: 'Price chart, AAPL' }).first();
@@ -76,7 +76,7 @@ test.describe('chart keyboard efficiency', () => {
 
 test.describe('workspace layout shortcuts', () => {
   test('applies and persists Alt+Shift+1..4', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const layout = page.getByRole('group', { name: 'Panel layout' }).first();

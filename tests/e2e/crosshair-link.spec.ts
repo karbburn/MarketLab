@@ -43,7 +43,7 @@ async function hoverPanel(page: Page, panel: Locator, ratio = 0.55): Promise<voi
 /** Seeds two side-by-side panels: AAPL first, MSFT second. */
 async function twoPanelWorkspace(page: Page): Promise<{ first: Locator; second: Locator }> {
   await seedLibrary(page);
-  await page.goto('/#/chart');
+  await page.goto('/chart');
   await waitForChart(page);
 
   await page.getByRole('button', { name: 'Duplicate panel' }).click();
@@ -119,7 +119,7 @@ test.describe('linked crosshair', () => {
     await waitForChart(page);
     await expect(crosshairToggle(page)).toBeChecked();
 
-    await page.goto('/#/workspaces');
+    await page.goto('/workspaces');
     await expect(page.locator('table.data tbody tr').first()).toContainText('crosshair');
   });
 });

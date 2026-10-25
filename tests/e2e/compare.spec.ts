@@ -38,7 +38,7 @@ async function addComparison(dialog: Locator, datasetId: string): Promise<void> 
 test.describe('compare-symbol overlays', () => {
   test('opens the selector and adds several symbols without changing the primary', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
@@ -84,7 +84,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('removes one comparison and clears all overlays', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);
@@ -109,7 +109,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('clears overlays when the primary instrument changes', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);
@@ -135,7 +135,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('persists comparison selections across a reload', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);
@@ -154,7 +154,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('reports insufficient shared history instead of drawing a one-point line', async ({ page }) => {
     await seedLibrary(page, buildSparseOverlapLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);
@@ -169,7 +169,7 @@ test.describe('compare-symbol overlays', () => {
   });
 
   test('shows the first-run guidance for an empty library', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     await expect(page.getByText('Nothing to chart yet')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Compare symbol' })).toHaveCount(0);
@@ -177,7 +177,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('points a single-series library at the download and import actions', async ({ page }) => {
     await seedLibrary(page, buildSingleSeriesLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);
@@ -188,7 +188,7 @@ test.describe('compare-symbol overlays', () => {
 
   test('keeps the compare dialog open when Escape closes a stacked download dialog', async ({ page }) => {
     await seedLibrary(page, buildSingleSeriesLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const compare = await openCompareDialog(page);
@@ -211,7 +211,7 @@ test.describe('compare-symbol overlays', () => {
   test('keeps the compare workflow usable at a narrow viewport', async ({ page }) => {
     await seedLibrary(page, buildFixtureLibrary());
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = await openCompareDialog(page);

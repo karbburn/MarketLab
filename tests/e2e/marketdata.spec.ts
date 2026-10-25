@@ -188,7 +188,7 @@ test.describe('market data download', () => {
     // The request is aborted on purpose so the assertion holds whether or not
     // the local service happens to be running on this machine.
     await page.route('**/api/history*', (route) => route.abort());
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
     await expect(dialog).toBeVisible();
@@ -236,7 +236,7 @@ test.describe('market data download', () => {
       });
     });
 
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
     await expect(dialog.getByText(/hosted market-data service/i)).toBeVisible();
@@ -251,7 +251,7 @@ test.describe('market data download', () => {
   });
 
   test('rejects an invalid symbol without contacting anything', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
     await expect(dialog).toBeVisible();
@@ -266,7 +266,7 @@ test.describe('market data download', () => {
   });
 
   test('offers sensible starting symbols for a first download', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -280,7 +280,7 @@ test.describe('market data download', () => {
 
   test('presents symbol suggestions as a plain list of buttons', async ({ page }) => {
     const queries = await stubSearch(page);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -300,7 +300,7 @@ test.describe('market data download', () => {
 
   test('stores a downloaded series with its provider and provenance', async ({ page }) => {
     await stubService(page, PROVIDER_PAYLOAD);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -324,7 +324,7 @@ test.describe('market data download', () => {
 
   test('discloses a provider that returned less than the requested range', async ({ page }) => {
     await stubService(page, TRUNCATED_PAYLOAD);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -347,7 +347,7 @@ test.describe('market data download', () => {
     // Saving keeps the shortfall, so provenance still reports it later.
     await dialog.getByRole('button', { name: 'Save dataset' }).click();
     await expect(dialog).toBeHidden();
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const chip = page.locator('.provenance-chip').first();
     await expect(chip).toHaveText('Data: 1 issue');
@@ -360,7 +360,7 @@ test.describe('market data download', () => {
 
   test('reports a provider failure without storing anything', async ({ page }) => {
     await stubService(page, { detail: 'No data is available for this symbol and range.' }, 404);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -374,7 +374,7 @@ test.describe('market data download', () => {
 
   test('returns to the download form when reopened after a successful save', async ({ page }) => {
     await stubService(page, PROVIDER_PAYLOAD);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -411,7 +411,7 @@ test.describe('market data download', () => {
       }
     });
 
-    await page.goto('/#/data');
+    await page.goto('/data');
     await page.getByRole('button', { name: 'Download market data' }).click();
     const dialog = page.getByRole('dialog', { name: 'Download market data' });
 
@@ -442,7 +442,7 @@ test.describe('bulk market data download', () => {
   }
 
   test('plans a pasted batch, reporting duplicates and invalid tokens', async ({ page }) => {
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     await expect(dialog).toBeVisible();
@@ -458,7 +458,7 @@ test.describe('bulk market data download', () => {
 
   test('suggests tickers for a company name and replaces only that line', async ({ page }) => {
     const queries = await stubSearch(page);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     const field = dialog.locator('#bulk-symbols');
@@ -484,7 +484,7 @@ test.describe('bulk market data download', () => {
 
   test('drives the suggestions from the keyboard without closing the dialog', async ({ page }) => {
     await stubSearch(page);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     const field = dialog.locator('#bulk-symbols');
@@ -519,7 +519,7 @@ test.describe('bulk market data download', () => {
 
   test('stores every symbol of a batch and reports each result', async ({ page }) => {
     await stubPerSymbol(page);
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');
@@ -540,7 +540,7 @@ test.describe('bulk market data download', () => {
     // Aborted on purpose so the assertion holds whether or not the local
     // service happens to be running on this machine.
     await page.route('**/api/history*', (route) => route.abort());
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');
@@ -582,7 +582,7 @@ test.describe('bulk market data download', () => {
       });
     });
 
-    await page.goto('/#/data');
+    await page.goto('/data');
     await openBulkDialog(page).click();
     const dialog = page.getByRole('dialog', { name: 'Download many symbols' });
     await dialog.locator('#bulk-symbols').fill('AAPL, MSFT');

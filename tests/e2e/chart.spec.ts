@@ -127,7 +127,7 @@ test.describe('chart workspace', () => {
   });
 
   test('renders an interactive chart with a legend and honest timeframe labels', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     await expect(page.locator('.topbar-title')).toHaveText('Chart workspace');
     await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
@@ -152,7 +152,7 @@ test.describe('chart workspace', () => {
   });
 
   test('names the chart stage for the instrument it controls', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const stage = page.getByRole('group', { name: 'Price chart, AAPL' }).first();
@@ -162,7 +162,7 @@ test.describe('chart workspace', () => {
   });
 
   test('expands the layout to four panels and hides panels without deleting them', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(1);
 
     await page.getByRole('button', { name: 'Four panels' }).click();
@@ -179,7 +179,7 @@ test.describe('chart workspace', () => {
   });
 
   test('adds, toggles and removes an indicator', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     await page.getByRole('button', { name: 'Add indicator' }).first().click();
@@ -203,7 +203,7 @@ test.describe('chart workspace', () => {
   });
 
   test('edits indicator parameters after adding it and keeps the change after a reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const indicatorFoot = page.locator('.panel-foot').first();
@@ -240,7 +240,7 @@ test.describe('chart workspace', () => {
   });
 
   test('keeps two instances of the same indicator distinguishable and restores them independently', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const indicatorFoot = page.locator('.panel-foot').first();
@@ -282,7 +282,7 @@ test.describe('chart workspace', () => {
   });
 
   test('reorders indicators and keeps the new order after a reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const dialog = page.getByRole('dialog', { name: 'Indicators' });
@@ -325,7 +325,7 @@ test.describe('chart workspace', () => {
 
   test('manages indicators from a narrow light-themed viewport and cancels an edit with Escape', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 800 });
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
 
@@ -363,7 +363,7 @@ test.describe('chart workspace', () => {
   });
 
   test('draws a level, undoes, redoes and deletes it', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
 
@@ -400,7 +400,7 @@ test.describe('chart workspace', () => {
   });
 
   test('does not run drawing shortcuts for keys typed in the indicator dialog', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
 
@@ -426,7 +426,7 @@ test.describe('chart workspace', () => {
   });
 
   test('grows the layout so a duplicated panel is reachable', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await expect(page.locator('canvas.chart-overlay')).toHaveCount(1);
 
     await page.getByRole('button', { name: 'Duplicate panel' }).click();
@@ -443,7 +443,7 @@ test.describe('chart workspace', () => {
   });
 
   test('loads a watchlist instrument into the focused panel', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
     await page
@@ -455,7 +455,7 @@ test.describe('chart workspace', () => {
   });
 
   test('shows 30-session volume and range context in the watchlist', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
 
     const table = page.locator('table.watchlist-table');
     await expect(table.getByRole('columnheader', { name: 'Avg vol 30' })).toHaveAttribute(
@@ -490,7 +490,7 @@ test.describe('chart workspace', () => {
   });
 
   test('switches to the OHLC Bars chart type and keeps it after a reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const chartType = page.getByLabel('Chart type').first();
@@ -506,7 +506,7 @@ test.describe('chart workspace', () => {
   });
 
   test('creates each drawing tool with the anchors it needs', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
     const pointer = page.getByRole('button', { name: 'Pointer and selection' });
@@ -552,7 +552,7 @@ test.describe('chart workspace', () => {
   });
 
   test('writes a text label instead of a fixed string', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const editor = page.getByRole('textbox', { name: 'Drawing label' });
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
@@ -603,7 +603,7 @@ test.describe('chart workspace', () => {
   });
 
   test('drags one anchor of a selected drawing and keeps the edit after reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
     await waitForChart(page);
@@ -655,7 +655,7 @@ test.describe('chart workspace', () => {
   });
 
   test('does not reshape a locked drawing', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     await waitForChart(page);
 
@@ -681,7 +681,7 @@ test.describe('chart workspace', () => {
   });
 
   test('magnet mode snaps a new anchor to the nearest candle OHLC', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const magnet = page.getByRole('button', { name: 'Magnet snap' });
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
@@ -725,7 +725,7 @@ test.describe('chart workspace', () => {
   });
 
   test('shows endpoint tags on both axes, updates them while dragging, and hides them when locked', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const priceTags = page.locator('.drawing-axis-label.price');
     const timeTag = page.locator('.drawing-axis-label.time');
@@ -774,7 +774,7 @@ test.describe('chart workspace', () => {
 
   test('nudges one endpoint with the keyboard and persists it across a reload', async ({ page }) => {
     const sessions = buildFixtureBars(1013, 100).map((bar) => bar.date);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     await waitForChart(page);
 
@@ -829,7 +829,7 @@ test.describe('chart workspace', () => {
 
   test('keeps endpoint tags inside a narrow light chart', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 800 });
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     await waitForChart(page);
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
@@ -855,7 +855,7 @@ test.describe('chart workspace', () => {
   });
 
   test('manages drawing visibility, locking and deletion from the object list', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
     await waitForChart(page);
@@ -908,7 +908,7 @@ test.describe('chart workspace', () => {
   });
 
   test('edits drawing style and text, undoes it, and keeps it after a reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     await waitForChart(page);
 
@@ -998,7 +998,7 @@ test.describe('chart workspace', () => {
 
   test('keeps the drawing object list inside a narrow viewport in both themes', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 800 });
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     await waitForChart(page);
 
@@ -1020,7 +1020,7 @@ test.describe('chart workspace', () => {
   });
 
   test('keeps drawing shortcuts working after undo, redo and a disabled button', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
 
@@ -1060,7 +1060,7 @@ test.describe('chart workspace', () => {
   });
 
   test('saves a chart template, applies it without touching drawings, and keeps both after a reload', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const chartType = page.getByLabel('Chart type').first();
@@ -1139,7 +1139,7 @@ test.describe('chart workspace', () => {
   });
 
   test('ignores a hidden drawing on canvas and still selects a locked one without moving it', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });
     await waitForChart(page);
@@ -1183,7 +1183,7 @@ test.describe('chart workspace', () => {
   });
 
   test('selects a text label from its painted text, not only from its anchor', async ({ page }) => {
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     const stage = page.locator('.chart-stage').first();
     const editor = page.getByRole('textbox', { name: 'Drawing label' });
     const deleteSelected = page.getByRole('button', { name: 'Delete selected drawing' });

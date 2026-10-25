@@ -211,9 +211,11 @@ export async function installBenchHelpers(page: Page): Promise<void> {
       async remount(configuredPanels: number): Promise<number> {
         const expected = Math.min(configuredPanels, bench.layoutPanels(bench.currentLayoutLabel()));
         const started = performance.now();
-        location.hash = '#/watchlists';
+        window.history.pushState(null, '', '/workspaces');
+        window.dispatchEvent(new PopStateEvent('popstate'));
         await bench.until(() => document.querySelector('.workspace-grid') === null);
-        location.hash = '#/chart';
+        window.history.pushState(null, '', '/chart');
+        window.dispatchEvent(new PopStateEvent('popstate'));
         await bench.until(() => bench.ready(expected));
         return performance.now() - started;
       },
@@ -299,7 +301,7 @@ export async function waitForCharts(page: Page, expected: number): Promise<void>
 }
 
 export async function openChart(page: Page): Promise<void> {
-  await page.goto('/#/chart');
+  await page.goto('/chart');
   await page.waitForSelector('.workspace-grid');
 }
 

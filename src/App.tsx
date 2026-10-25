@@ -1,4 +1,4 @@
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { OverviewPage } from './pages/Overview';
 import { ChartWorkspacePage } from './pages/ChartWorkspace';
@@ -15,7 +15,7 @@ import { WorkspacesPage } from './pages/WorkspacesPage';
  */
 export function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<OverviewPage />} />
@@ -29,6 +29,6 @@ export function App() {
           <Route path="*" element={<OverviewPage />} />
         </Route>
       </Routes>
-    </HashRouter>
+    </BrowserRouter>
   );
 }

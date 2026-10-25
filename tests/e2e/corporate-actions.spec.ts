@@ -21,7 +21,7 @@ async function waitForChart(page: Page): Promise<void> {
 test.describe('corporate-action markers', () => {
   test('labels provider actions and leaves them on their real session dates', async ({ page }) => {
     await seedLibrary(page, buildCorporateActionLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
 
     const foot = page.locator('.action-foot');
@@ -60,7 +60,7 @@ test.describe('corporate-action markers', () => {
 
   test('does not invent corporate actions for an imported CSV series', async ({ page }) => {
     await seedLibrary(page, buildFixtureLibrary());
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await waitForChart(page);
     await expect(page.locator('.action-foot')).toHaveCount(0);
   });

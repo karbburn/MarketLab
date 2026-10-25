@@ -72,7 +72,7 @@ test.describe('shell, navigation and theme', () => {
 
   test('keeps a workspace edit after a reload', async ({ page }) => {
     await seedLibrary(page);
-    await page.goto('/#/chart');
+    await page.goto('/chart');
     await expect(page.locator('.chart-symbol').first()).toHaveText('AAPL');
 
     // Duplicate the focused panel, then show two panels.
