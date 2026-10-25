@@ -52,6 +52,7 @@ import { providerLabel } from '../../lib/marketdata/normalize';
 import { changePercent, hoverBars } from '../../lib/chart/readout';
 import { DataProvenanceChip, DataProvenanceDialog } from './DataProvenanceChip';
 import { timeframeForShortcut } from '../../lib/shortcuts/reference';
+import { measurePhase, recordPanelCommit } from '../../lib/diagnostics';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
 import { IndicatorDialog } from './IndicatorDialog';
 import { CompareDialog } from './CompareDialog';
@@ -148,6 +149,10 @@ export function ChartPanel({
   // crosshair only fills it when the pointer is elsewhere, so refs keep the
   // chart subscription from re-binding on every workspace update.
   const localReadoutRef = useRef<CrosshairReading>({ date: null, price: null, index: null });
+  const readoutRef = useRef<CrosshairReading>(readout);
+  useEffect(() => {
+    readoutRef.current = readout;
+  }, [readout]);
   const mirroredReadingRef = useRef<CrosshairReading | null>(null);
   const mirroredDrawnRef = useRef(false);
   const lastEmittedDateRef = useRef<string | null>(null);
@@ -200,7 +205,7 @@ export function ChartPanel({
   const instrument = view?.instrument ?? null;
   const rendered = useMemo(() => {
     if (!dataset) return bars;
-    return barsForTimeframe(bars, dataset, chart.timeframe);
+    return measurePhase('timeframe', () => barsForTimeframe(bars, dataset, chart.timeframe));
   }, [bars, dataset, chart.timeframe]);
 
   const resolvedTimeframe = useMemo(
@@ -237,11 +242,13 @@ export function ChartPanel({
 
   const comparison = useMemo<ComparisonPreparation | null>(() => {
     if (!dataset || !instrument || compareTargets.length === 0) return null;
-    return prepareComparison({
-      primary: { datasetId: dataset.id, label: instrument.symbol, dataset, bars },
-      candidates: compareTargets,
-      timeframe: chart.timeframe,
-    });
+    return measurePhase('comparison', () =>
+      prepareComparison({
+        primary: { datasetId: dataset.id, label: instrument.symbol, dataset, bars },
+        candidates: compareTargets,
+        timeframe: chart.timeframe,
+      }),
+    );
   }, [bars, chart.timeframe, compareTargets, dataset, instrument]);
 
   const comparisonLines = useMemo<ComparisonLineSpec[]>(() => comparison?.lines ?? [], [comparison]);
@@ -274,29 +281,37 @@ export function ChartPanel({
   }, [actions, chart.compareDatasetIds, chart.datasetId, chart.id, workspaceId]);
 
   const indicatorSpecs = useMemo<IndicatorRenderSpec[]>(() => {
-    const specs: IndicatorRenderSpec[] = [];
-    for (const instance of chart.indicators) {
-      if (!instance.visible) continue;
-      const definition = getIndicatorDefinition(instance.type);
-      if (!definition) continue;
-      const calculation = calculateIndicator(instance.type, rendered, instance.parameters);
-      if (!calculation) continue;
-      specs.push({
-        instanceId: instance.id,
-        type: instance.type,
-        name: definition.name,
-        placement: instance.placement,
-        outputs: definition.outputs.map((output, index) => ({
-          key: output.key,
-          label: output.label,
-          kind: output.kind,
-          color: index === 0 && instance.style.color ? instance.style.color : output.defaultColor ?? '#4f8cff',
-          values: calculation.outputs[output.key] ?? [],
-        })),
-      });
-    }
-    return specs;
+    return measurePhase('indicators', () => {
+      const specs: IndicatorRenderSpec[] = [];
+      for (const instance of chart.indicators) {
+        if (!instance.visible) continue;
+        const definition = getIndicatorDefinition(instance.type);
+        if (!definition) continue;
+        const calculation = calculateIndicator(instance.type, rendered, instance.parameters);
+        if (!calculation) continue;
+        specs.push({
+          instanceId: instance.id,
+          type: instance.type,
+          name: definition.name,
+          placement: instance.placement,
+          outputs: definition.outputs.map((output, index) => ({
+            key: output.key,
+            label: output.label,
+            kind: output.kind,
+            color: index === 0 && instance.style.color ? instance.style.color : output.defaultColor ?? '#4f8cff',
+            values: calculation.outputs[output.key] ?? [],
+          })),
+        });
+      }
+      return specs;
+    });
   }, [chart.indicators, rendered]);
+
+  // Counts committed renders for the browser benchmark. Inert unless the
+  // diagnostics flag was set before boot, and never a render-phase side effect.
+  useEffect(() => {
+    recordPanelCommit(chart.id);
+  });
 
   // Create the chart once, then re-render whenever the configuration changes.
   useEffect(() => {
@@ -484,9 +499,10 @@ export function ChartPanel({
     }
 
     // In-progress drawing preview follows the pointer using the pending anchor set.
-    if (pendingAnchors.length === 1 && readout.date && readout.price !== null) {
+    const currentReadout = readoutRef.current;
+    if (pendingAnchors.length === 1 && currentReadout.date && currentReadout.price !== null) {
       const first = toPoint(pendingAnchors[0] as DrawingAnchor);
-      const second = toPoint({ date: readout.date, price: readout.price });
+      const second = toPoint({ date: currentReadout.date, price: currentReadout.price });
       if (first && second) {
         context.strokeStyle = labelColor;
         context.lineWidth = 1;
@@ -535,7 +551,7 @@ export function ChartPanel({
         }
       }
     }
-  }, [activeAnchorIndex, labelColor, localDrawings, selectedId, selectedDrawing, pendingAnchors, readout]);
+  }, [activeAnchorIndex, labelColor, localDrawings, selectedId, selectedDrawing, pendingAnchors]);
 
   useEffect(() => {
     draw();
@@ -543,6 +559,14 @@ export function ChartPanel({
     if (!controller) return;
     return controller.subscribeViewport(draw);
   }, [draw]);
+
+  // While a drawing is being created, its preview follows the pointer. Re-run
+  // the overlay only in that case so an ordinary hover does not reallocate the
+  // canvas backing store on every pointer move.
+  useEffect(() => {
+    if (pendingAnchors.length !== 1) return;
+    draw();
+  }, [readout, pendingAnchors.length, draw]);
 
   // Report the visible logical range so a link group can mirror it.
   useEffect(() => {
