@@ -18,10 +18,18 @@ export function linkedBarForCrosshair(
   timeframe: Timeframe,
 ): Bar | null {
   if (!sourceDate) return null;
-  if (timeframe === '1D') return bars.find((bar) => bar.date === sourceDate) ?? null;
+  if (timeframe === '1D') {
+    // Single pass map; O(n) once instead of a predicate scan per lookup.
+    const byDate = new Map<string, Bar>();
+    for (const bar of bars) byDate.set(bar.date, bar);
+    return byDate.get(sourceDate) ?? null;
+  }
   const key = periodKeyForDate(sourceDate, timeframe);
   if (!key) return null;
-  return (
-    bars.find((bar) => (bar.bucket ?? periodKeyForDate(bar.date, timeframe)) === key) ?? null
-  );
+  const byPeriod = new Map<string, Bar>();
+  for (const bar of bars) {
+    const period = bar.bucket ?? periodKeyForDate(bar.date, timeframe);
+    if (period && !byPeriod.has(period)) byPeriod.set(period, bar);
+  }
+  return byPeriod.get(key) ?? null;
 }

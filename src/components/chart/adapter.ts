@@ -25,6 +25,7 @@ import type { Bar, ChartType, PriceScaleMode } from '../../domain/types';
 import type { CorporateActionMarkerSpec } from '../../lib/corporate-actions';
 import type { ComparisonLineSpec, ComparisonLineStyle } from '../../lib/chart/compare-overlays';
 import { createBarDateIndex } from '../../lib/chart/bar-date-index';
+import { beginChartRender, recordChartRender } from '../../lib/diagnostics';
 
 export interface IndicatorOutputSpec {
   key: string;
@@ -98,6 +99,11 @@ export class ChartController {
   private readonly indicatorSeries = new Map<string, ISeriesApi<SeriesType>[]>();
   private bars: readonly Bar[] = [];
   private barDateIndex: ReadonlyMap<string, number> = new Map();
+  private lastChartType: ChartType | null = null;
+  private lastShowVolume: boolean | null = null;
+  private lastPriceScaleMode: PriceScaleMode | null = null;
+  private lastIndicators: readonly IndicatorRenderSpec[] | null = null;
+  private lastComparisons: readonly ComparisonLineSpec[] | null = null;
   private readonly crosshairHandlers = new Set<(reading: CrosshairReading) => void>();
   private readonly viewportHandlers = new Set<() => void>();
   private readonly resizeObserver: ResizeObserver | null;
@@ -203,6 +209,25 @@ export class ChartController {
 
   /** Rebuilds every series from the supplied render input. */
   render(input: ChartRenderInput): void {
+    const startedAt = beginChartRender();
+    const removedSeries = this.liveSeriesCount();
+
+    // A price-scale change needs no series rebuild: only the scale mode changes.
+    // Rebuilding 1.5 series per click is the cost the benchmark attributes to
+    // `single-short-controls`; skip it when nothing structural changed.
+    const structuralUnchanged =
+      input.bars === this.bars &&
+      input.chartType === this.lastChartType &&
+      input.showVolume === this.lastShowVolume &&
+      input.indicators === this.lastIndicators &&
+      input.comparisons === this.lastComparisons;
+    if (structuralUnchanged && input.priceScaleMode !== this.lastPriceScaleMode) {
+      this.applyPriceScaleMode(input.priceScaleMode);
+      this.lastPriceScaleMode = input.priceScaleMode;
+      recordChartRender(startedAt, { bars: input.bars.length, seriesAdded: 0, seriesRemoved: 0 });
+      return;
+    }
+
     this.clearIndicators();
     if (input.bars !== this.bars) {
       this.bars = input.bars;
@@ -214,8 +239,14 @@ export class ChartController {
     const faint = cssVar('--text-muted', '#6b7887');
 
     if (input.bars.length === 0) {
+      this.lastChartType = input.chartType;
+      this.lastShowVolume = input.showVolume;
+      this.lastPriceScaleMode = input.priceScaleMode;
+      this.lastIndicators = input.indicators;
+      this.lastComparisons = input.comparisons;
       this.chart.applyOptions({});
       this.emitViewport();
+      recordChartRender(startedAt, { bars: 0, seriesAdded: 0, seriesRemoved: removedSeries });
       return;
     }
 
@@ -343,7 +374,21 @@ export class ChartController {
     // indicator overlays without altering any of them.
     this.renderComparisons(input.comparisons);
 
+    this.lastChartType = input.chartType;
+    this.lastShowVolume = input.showVolume;
+    this.lastPriceScaleMode = input.priceScaleMode;
+    this.lastIndicators = input.indicators;
+    this.lastComparisons = input.comparisons;
+
     this.emitViewport();
+    recordChartRender(startedAt, { bars: input.bars.length, seriesAdded: this.liveSeriesCount(), seriesRemoved: removedSeries });
+  }
+
+  /** Series currently attached to the chart; used by the diagnostics recorder. */
+  private liveSeriesCount(): number {
+    let count = (this.priceSeries ? 1 : 0) + (this.volumeSeries ? 1 : 0) + this.compareSeries.length;
+    for (const seriesList of this.indicatorSeries.values()) count += seriesList.length;
+    return count;
   }
 
   /**
@@ -495,18 +540,28 @@ export class ChartController {
   /** Snaps an arbitrary date to the nearest available session date. */
   nearestDate(date: string): string | null {
     if (this.bars.length === 0) return null;
-    const exact = this.bars.find((bar) => bar.date === date);
-    if (exact) return exact.date;
-    let best: string | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const bar of this.bars) {
-      const distance = Math.abs(new Date(bar.date).getTime() - new Date(date).getTime());
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = bar.date;
-      }
+    // Bars are sorted by date; binary search for the exact or neighbouring session.
+    let low = 0;
+    let high = this.bars.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const midDate = this.bars[mid]!.date;
+      if (midDate === date) return midDate;
+      if (midDate < date) low = mid + 1;
+      else high = mid - 1;
     }
-    return best;
+    // low is the insertion point; compare the two neighbours.
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    if (low < this.bars.length) {
+      const distance = Math.abs(new Date(this.bars[low]!.date).getTime() - new Date(date).getTime());
+      if (distance < bestDistance) { bestDistance = distance; bestIndex = low; }
+    }
+    if (low - 1 >= 0) {
+      const distance = Math.abs(new Date(this.bars[low - 1]!.date).getTime() - new Date(date).getTime());
+      if (distance < bestDistance) { bestIndex = low - 1; }
+    }
+    return bestIndex >= 0 ? this.bars[bestIndex]!.date : null;
   }
 
   getVisibleRange(): { from: number; to: number } | null {
