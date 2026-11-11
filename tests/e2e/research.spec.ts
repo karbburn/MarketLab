@@ -119,7 +119,7 @@ test.describe('rule-based backtest', () => {
     await expect(page.getByRole('img', { name: 'Equity curve versus buy and hold' })).toBeVisible();
 
     // The trade log is the table with the per-trade columns.
-    await expect(page.getByRole('columnheader', { name: 'Net PnL' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Net PnL' }).first()).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Exit price' })).toBeVisible();
 
     // The fill model is disclosed in the UI, not only in the source.
