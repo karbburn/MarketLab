@@ -1616,6 +1616,14 @@ table.data tr.dim td {
   margin-left: auto;
 }
 
+/* Programmatic focus target for the `#inspection` deep link. The panel is only
+   focusable when it is the selected inspection panel, so this ring cannot
+   appear on a panel the user merely clicked. */
+#inspection:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---------- Keyboard reference ---------- */
 
 .shortcut-reference {
