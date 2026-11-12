@@ -1513,6 +1513,12 @@ table.data tr.dim td {
   background: var(--down);
 }
 
+/* Advisory-only notes use a neutral dot: they are limits to be aware of, not a
+   warning that the chart is showing something other than what was requested. */
+.provenance-chip[data-status='attention'][data-severity='advisory'] .provenance-dot {
+  background: var(--text-muted);
+}
+
 .provenance-summary {
   display: flex;
   align-items: baseline;
@@ -1577,6 +1583,37 @@ table.data tr.dim td {
 
 .provenance-list li {
   line-height: 1.5;
+}
+
+.provenance-compare-list {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.provenance-compare-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.provenance-compare-row:first-child {
+  border-top: 0;
+}
+
+.provenance-compare-symbol {
+  color: var(--text-primary);
+}
+
+.provenance-compare-status {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.provenance-compare-row .button {
+  margin-left: auto;
 }
 
 /* ---------- Keyboard reference ---------- */

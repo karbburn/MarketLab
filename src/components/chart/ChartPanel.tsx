@@ -50,7 +50,7 @@ import { prepareComparison, type ComparisonLineSpec, type ComparisonPreparation,
 import { planCorporateActionMarkers } from '../../lib/corporate-actions';
 import { providerLabel } from '../../lib/marketdata/normalize';
 import { changePercent, hoverBars } from '../../lib/chart/readout';
-import { DataProvenanceChip, DataProvenanceDialog } from './DataProvenanceChip';
+import { DataProvenanceChip, DataProvenanceDialog, type ProvenanceComparison } from './DataProvenanceChip';
 import { timeframeForShortcut } from '../../lib/shortcuts/reference';
 import { measurePhase, recordPanelCommit } from '../../lib/diagnostics';
 import { ChartController, type CrosshairReading, type IndicatorRenderSpec } from './adapter';
@@ -169,7 +169,7 @@ export function ChartPanel({
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
-  const [provenanceOpen, setProvenanceOpen] = useState(false);
+  const [provenanceDatasetId, setProvenanceDatasetId] = useState<string | null>(null);
   const [drawingManagerOpen, setDrawingManagerOpen] = useState(false);
   // While a drawing is being dragged or edited the local copy leads; the stored
   // workspace state remains the source of truth at rest.
@@ -250,6 +250,29 @@ export function ChartPanel({
       }),
     );
   }, [bars, chart.timeframe, compareTargets, dataset, instrument]);
+
+  // The provenance dialog reports the comparison series too. Each row is built
+  // from the same dataset record the chart draws, so a deleted reference simply
+  // does not resolve and is omitted rather than described from stale metadata.
+  const provenanceComparisons = useMemo<ProvenanceComparison[]>(
+    () =>
+      compareTargets.map((target) => ({
+        dataset: target.dataset,
+        symbol: target.label,
+        exchange: allViews.find((view) => view.dataset.id === target.datasetId)?.instrument?.exchange ?? null,
+      })),
+    [allViews, compareTargets],
+  );
+
+  // An open dialog must never describe a series the panel is no longer drawing.
+  // Adjust the open-state during render when the panel is re-pointed; this is
+  // cheaper than an effect and closes the dialog before it can paint the new
+  // dataset under the old heading.
+  const [provenanceDatasetFor, setProvenanceDatasetFor] = useState(chart.datasetId);
+  if (provenanceDatasetFor !== chart.datasetId) {
+    setProvenanceDatasetFor(chart.datasetId);
+    setProvenanceDatasetId(null);
+  }
 
   const comparisonLines = useMemo<ComparisonLineSpec[]>(() => comparison?.lines ?? [], [comparison]);
 
@@ -1262,7 +1285,7 @@ export function ChartPanel({
                     <DataProvenanceChip
                       dataset={dataset}
                       exchange={instrument?.exchange}
-                      onOpen={() => setProvenanceOpen(true)}
+                      onOpen={() => setProvenanceDatasetId(dataset.id)}
                     />
                   </>
                 )}
@@ -1493,8 +1516,9 @@ export function ChartPanel({
         <DataProvenanceDialog
           dataset={dataset}
           exchange={instrument?.exchange}
-          open={provenanceOpen}
-          onClose={() => setProvenanceOpen(false)}
+          comparisons={provenanceComparisons}
+          open={provenanceDatasetId === dataset.id}
+          onClose={() => setProvenanceDatasetId(null)}
         />
       )}
     </div>
