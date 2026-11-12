@@ -252,6 +252,125 @@ export function buildIssueLibrary(): FixtureRecords {
 }
 
 /**
+ * A library whose primary dataset carries only advisory findings: missing
+ * volume and weekday gaps. Used to prove the chip reports notes without
+ * inflating the headline into a warning.
+ */
+export function buildAdvisoryOnlyLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_aapl');
+  const barRecord = records.bars.find((entry) => entry.id === 'ds_aapl');
+  if (!dataset || !barRecord) return records;
+  const series = barRecord.bars as FixtureBar[];
+  for (const bar of series.slice(0, 3)) bar.volume = null;
+  dataset.validation = {
+    acceptedRows: series.length,
+    rejectedRows: 0,
+    duplicateRows: 0,
+    missingVolumeRows: 3,
+    gapCount: 4,
+    sortCorrections: 0,
+    rejected: [],
+    warnings: [
+      {
+        code: 'session-gaps',
+        message: '4 expected weekday session(s) are missing between the first and last date. Gaps are shown as gaps and never filled.',
+        count: 4,
+      },
+      {
+        code: 'missing-volume',
+        message: '3 row(s) have no volume value. Volume stays unavailable for those bars.',
+        count: 3,
+      },
+    ],
+  };
+  return records;
+}
+
+/**
+ * A library whose primary dataset mixes one material defect (a rejected row)
+ * with an advisory weekday gap. Used to prove the chip counts the material
+ * issue while the dialog reports both tiers.
+ */
+export function buildMixedSeverityLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_aapl');
+  if (!dataset) return records;
+  dataset.validation = {
+    acceptedRows: SESSIONS - 1,
+    rejectedRows: 1,
+    duplicateRows: 0,
+    missingVolumeRows: 0,
+    gapCount: 2,
+    sortCorrections: 0,
+    rejected: [{ rowNumber: 12, reason: 'High (99) is below max(open, close) for 2025-06-02.' }],
+    warnings: [
+      {
+        code: 'session-gaps',
+        message: '2 expected weekday session(s) are missing between the first and last date. Gaps are shown as gaps and never filled.',
+        count: 2,
+      },
+    ],
+  };
+  return records;
+}
+
+/**
+ * A two-panel workspace. The primary panel charts a clean AAPL series; the
+ * second charts an MSFT series with advisory-only findings, so a test can
+ * prove each panel's chip reads its own dataset.
+ */
+export function buildMultiChartLibrary(): FixtureRecords {
+  const records = buildFixtureLibrary();
+  const workspace = records.workspaces[0];
+  const charts = workspace?.charts as Record<string, unknown>[] | undefined;
+  const primary = charts?.[0];
+  if (!workspace || !primary) return records;
+  workspace.layout = 'two-vertical';
+  workspace.charts = [
+    { ...primary, id: 'chart_aapl' },
+    {
+      id: 'chart_msft',
+      instrumentId: 'inst_msft',
+      datasetId: 'ds_msft',
+      timeframe: '1D',
+      chartType: 'candlestick',
+      showVolume: true,
+      priceScaleMode: 'normal',
+      visibleRange: null,
+      indicators: [],
+      drawings: [],
+    },
+  ];
+
+  const dataset = records.datasets.find((entry) => entry.id === 'ds_msft');
+  if (dataset) {
+    dataset.validation = {
+      acceptedRows: SESSIONS,
+      rejectedRows: 0,
+      duplicateRows: 0,
+      missingVolumeRows: 2,
+      gapCount: 1,
+      sortCorrections: 0,
+      rejected: [],
+      warnings: [
+        {
+          code: 'session-gaps',
+          message: '1 expected weekday session is missing between the first and last date. Gaps are shown as gaps and never filled.',
+          count: 1,
+        },
+        {
+          code: 'missing-volume',
+          message: '2 row(s) have no volume value. Volume stays unavailable for those bars.',
+          count: 2,
+        },
+      ],
+    };
+  }
+  return records;
+}
+
+/**
  * A library where one stored series shares a single session with the primary.
  * Used to prove that the comparison reports insufficient shared history
  * instead of drawing a one-point line or forward-filling.

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { CloudArrowDown, DownloadSimple, Eye, ListChecks } from '@phosphor-icons/react';
 import type { Workspace } from '../domain/types';
 import { useStore } from '../state/store';
@@ -37,13 +37,20 @@ export function DataPage() {
   // The selected dataset lives in the URL so a chart provenance dialog can link
   // straight to the matching inspection panel, and the selection survives a
   // reload or a shared link. An unknown id falls through to no selection.
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const selectedId = searchParams.get('dataset') || null;
   const setSelectedId = (id: string | null) => {
     const next = new URLSearchParams(searchParams);
     if (id) next.set('dataset', id);
     else next.delete('dataset');
-    setSearchParams(next, { replace: true });
+    // Selection through the table never sets a fragment, and closing the panel
+    // clears it as well: a reload of the resulting URL must not re-open it.
+    navigate(
+      { pathname: location.pathname, search: next.toString(), hash: '' },
+      { replace: true },
+    );
   };
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -59,6 +66,18 @@ export function DataPage() {
   // twice and the omitted count can never go negative.
   const previewTail = selected && selected.bars.length > 18 ? selected.bars.slice(-6) : [];
   const omittedRows = selected ? Math.max(0, selected.bars.length - previewHead.length - previewTail.length) : 0;
+  const selectedDatasetId = selected?.dataset.id ?? null;
+
+  // Only an explicit `#inspection` fragment (the provenance dialog's link)
+  // scrolls and focuses the panel. Selecting a dataset from the table leaves
+  // the fragment unset, so the page keeps its scroll position.
+  useEffect(() => {
+    if (location.hash !== '#inspection' || !selectedDatasetId) return;
+    const target = document.getElementById('inspection');
+    if (!target) return;
+    target.scrollIntoView({ block: 'start' });
+    target.focus({ preventScroll: true });
+  }, [location.hash, selectedDatasetId]);
 
   return (
     <div className="page">
@@ -186,6 +205,9 @@ export function DataPage() {
       {selected && (
         <>
           <Panel
+            id="inspection"
+            tabIndex={-1}
+            ariaLabel={`Inspection - ${selected.instrument?.symbol ?? selected.dataset.name}`}
             title={`Inspection - ${selected.instrument?.symbol ?? selected.dataset.name}`}
             subtitle={selected.dataset.sourceDescription}
             actions={

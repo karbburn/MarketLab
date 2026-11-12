@@ -9,6 +9,9 @@ export function Panel({
   children,
   flush,
   className,
+  id,
+  tabIndex,
+  ariaLabel,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
@@ -16,9 +19,17 @@ export function Panel({
   children: ReactNode;
   flush?: boolean;
   className?: string;
+  id?: string;
+  tabIndex?: number;
+  ariaLabel?: string;
 }) {
   return (
-    <section className={className ? `panel ${className}` : 'panel'}>
+    <section
+      className={className ? `panel ${className}` : 'panel'}
+      id={id}
+      tabIndex={tabIndex}
+      aria-label={ariaLabel}
+    >
       {title !== undefined && (
         <header className="panel-head">
           <div style={{ display: 'grid', gap: 1 }}>

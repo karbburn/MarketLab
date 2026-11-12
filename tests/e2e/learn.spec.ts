@@ -22,7 +22,7 @@ test.describe('learning page', () => {
 
     await page.locator('.learn-rail').getByRole('link', { name: 'Backtests', exact: true }).click();
 
-    await expect(page).toHaveURL(/#\/learn\?section=execution$/);
+    await expect(page).toHaveURL(/\/learn\?section=execution$/);
     await expect(page.getByRole('heading', { level: 2, name: 'Backtests' })).toBeFocused();
     await expect(page.locator('.learn-rail').getByRole('link', { name: 'Backtests', exact: true })).toHaveAttribute(
       'aria-current',
@@ -57,7 +57,7 @@ test.describe('learning page', () => {
     // the previous deep link current after a same-page navigation.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.getByRole('link', { name: 'How it works', exact: true }).click();
-    await expect(page).toHaveURL(/#\/learn$/);
+    await expect(page).toHaveURL(/\/learn$/);
     await expect(
       page.locator('.learn-rail').getByRole('link', { name: 'What is stored', exact: true }),
     ).toHaveAttribute('aria-current', 'location');
